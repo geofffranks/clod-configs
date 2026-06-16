@@ -1,0 +1,6 @@
+# runtime / session data must never be committed
+home/read-once/session-*.jsonl
+home/read-once/stats.jsonl
+home/read-once/.last-cleanup
+home/**/.DS_Store
+*.bak-*

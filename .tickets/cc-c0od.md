@@ -1,12 +1,14 @@
 ---
 id: cc-c0od
-status: open
+status: in_progress
 deps: []
 links: []
 created: 2026-06-16T16:41:17Z
 type: feature
 priority: 2
 assignee: Geoff Franks
+branch: feat/bootstrap-config
+lifecycle: in-development
 ---
 # Shareable Claude Code config repo (skills, hooks, settings, statusline)
 

@@ -1,0 +1,447 @@
+#!/bin/bash
+# read-once CLI — view stats, manage cache, install hook
+#
+# Usage:
+#   read-once stats         Show token savings for current/recent sessions
+#   read-once gain          RTK-style savings summary
+#   read-once status        Quick health check (hook installed? data?)
+#   read-once verify        Full diagnostic: deps, settings, dry-run test
+#   read-once clear         Clear session cache (start fresh)
+#   read-once install       Install hook to ~/.claude/read-once/hook.sh
+#   read-once upgrade       Update installed hook to latest version
+#   read-once uninstall     Remove hook from .claude/settings.json
+
+set -euo pipefail
+
+CACHE_DIR="${HOME}/.claude/read-once"
+STATS_FILE="${CACHE_DIR}/stats.jsonl"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOOK_PATH="${SCRIPT_DIR}/hook.sh"
+
+cmd="${1:-help}"
+
+case "$cmd" in
+  stats|gain)
+    if [ ! -f "$STATS_FILE" ]; then
+      echo "No read-once data yet. Stats appear after your first Claude Code session with the hook installed."
+      exit 0
+    fi
+
+    TOTAL_HITS=$(grep -c '"event":"hit"' "$STATS_FILE" 2>/dev/null || true)
+    TOTAL_DIFFS=$(grep -c '"event":"diff"' "$STATS_FILE" 2>/dev/null || true)
+    TOTAL_MISSES=$(grep -c '"event":"miss"' "$STATS_FILE" 2>/dev/null || true)
+    TOTAL_CHANGED=$(grep -c '"event":"changed"' "$STATS_FILE" 2>/dev/null || true)
+    TOTAL_EXPIRED=$(grep -c '"event":"expired"' "$STATS_FILE" 2>/dev/null || true)
+    TOTAL_READS=$((TOTAL_HITS + TOTAL_DIFFS + TOTAL_MISSES + TOTAL_CHANGED + TOTAL_EXPIRED))
+
+    if [ "$TOTAL_READS" -eq 0 ]; then
+      echo "No reads tracked yet."
+      exit 0
+    fi
+
+    TOKENS_SAVED=$(grep -E '"event":"(hit|diff)"' "$STATS_FILE" 2>/dev/null | jq -r '.tokens_saved' 2>/dev/null | paste -sd+ - | bc 2>/dev/null || echo 0)
+    TOKENS_ALLOWED=$(grep -E '"event":"(miss|changed|expired)"' "$STATS_FILE" 2>/dev/null | jq -r '.tokens' 2>/dev/null | paste -sd+ - | bc 2>/dev/null || echo 0)
+    TOKENS_TOTAL=$((TOKENS_ALLOWED + TOKENS_SAVED))
+
+    if [ "$TOKENS_TOTAL" -gt 0 ]; then
+      SAVINGS_PCT=$((TOKENS_SAVED * 100 / TOKENS_TOTAL))
+    else
+      SAVINGS_PCT=0
+    fi
+
+    TTL="${READ_ONCE_TTL:-1200}"
+    TTL_MIN=$((TTL / 60))
+
+    echo "read-once — file read deduplication for Claude Code"
+    echo ""
+    echo "  Total file reads:    ${TOTAL_READS}"
+    echo "  Cache hits:          ${TOTAL_HITS} (blocked re-reads)"
+    if [ "$TOTAL_DIFFS" -gt 0 ]; then
+      echo "  Diff hits:           ${TOTAL_DIFFS} (changed files — sent diff only)"
+    fi
+    echo "  First reads:         ${TOTAL_MISSES}"
+    echo "  Changed files:       ${TOTAL_CHANGED} (full re-read after modification)"
+    echo "  TTL expired:         ${TOTAL_EXPIRED} (re-read after ${TTL_MIN}m — compaction safety)"
+    echo ""
+    echo "  Tokens saved:        ~${TOKENS_SAVED}"
+    echo "  Read token total:    ~${TOKENS_TOTAL}"
+    echo "  Savings:             ${SAVINGS_PCT}%"
+
+    # Cost estimates: Sonnet=$3/MTok input, Opus=$15/MTok input
+    if command -v python3 &>/dev/null && [ "$TOKENS_SAVED" -gt 0 ]; then
+      COST_LINE=$(echo "$TOKENS_SAVED" | python3 -c "
+import sys
+t=int(sys.stdin.read().strip())
+s=t*3/1000000
+o=t*15/1000000
+print('  Est. cost saved:     \$%.4f (Sonnet) / \$%.4f (Opus)' % (s, o))
+" 2>/dev/null || echo "")
+      if [ -n "$COST_LINE" ]; then
+        echo "$COST_LINE"
+      fi
+    fi
+    echo ""
+
+    if [ "$TOTAL_HITS" -gt 0 ]; then
+      echo "  Top re-read files:"
+      grep '"event":"hit"' "$STATS_FILE" 2>/dev/null | jq -r '.path' | sort | uniq -c | sort -rn | head -5 | while read count path; do
+        echo "    ${count}x  $(basename "$path")"
+      done
+      echo ""
+    fi
+
+    # Session count
+    SESSIONS=$(grep '"event"' "$STATS_FILE" 2>/dev/null | jq -r '.session' | sort -u | wc -l | tr -d ' ')
+    echo "  Sessions tracked:    ${SESSIONS}"
+    echo "  Cache TTL:           ${TTL_MIN} minutes (READ_ONCE_TTL=${TTL}s)"
+    ;;
+
+  clear)
+    rm -f "${CACHE_DIR}"/session-*.jsonl
+    echo "Session cache cleared. Stats preserved."
+    echo "To clear stats too: rm ${STATS_FILE}"
+    ;;
+
+  install)
+    SETTINGS="${HOME}/.claude/settings.json"
+    if [ ! -f "$SETTINGS" ]; then
+      echo "No .claude/settings.json found. Creating one."
+      echo '{}' > "$SETTINGS"
+    fi
+
+    # Check if hook already installed
+    if grep -q "read-once" "$SETTINGS" 2>/dev/null; then
+      echo "read-once hook is already installed."
+      exit 0
+    fi
+
+    # Use jq to add the hook
+    if ! command -v jq &>/dev/null; then
+      echo "Error: jq is required. Install with: brew install jq"
+      exit 1
+    fi
+
+    # Copy hook to stable user-local path (~/.claude/read-once/hook.sh)
+    # so settings.json doesn't depend on where the source repo lives
+    INSTALLED_HOOK="${CACHE_DIR}/hook.sh"
+    cp "$HOOK_PATH" "$INSTALLED_HOOK"
+    chmod +x "$INSTALLED_HOOK"
+
+    # Add Read matcher to PreToolUse hooks
+    UPDATED=$(jq --arg hook "~/.claude/read-once/hook.sh" '
+      .hooks //= {} |
+      .hooks.PreToolUse //= [] |
+      .hooks.PreToolUse += [{
+        "matcher": "Read",
+        "hooks": [{
+          "type": "command",
+          "command": $hook
+        }]
+      }]
+    ' "$SETTINGS")
+
+    echo "$UPDATED" > "$SETTINGS"
+    echo "read-once hook installed."
+    echo "Hook: ${INSTALLED_HOOK}"
+    echo ""
+    echo "Your Claude Code sessions will now track and deduplicate file reads."
+    echo "The hook is installed at a stable path — you can move or delete the source repo."
+    ;;
+
+  upgrade)
+    # Copy latest hook.sh to the installed location
+    INSTALLED_HOOK="${CACHE_DIR}/hook.sh"
+    if [ ! -f "$INSTALLED_HOOK" ]; then
+      echo "Hook not installed yet. Run: read-once install"
+      exit 1
+    fi
+    cp "$HOOK_PATH" "$INSTALLED_HOOK"
+    chmod +x "$INSTALLED_HOOK"
+    echo "Hook upgraded to latest version."
+    ;;
+
+  status)
+    SETTINGS="${HOME}/.claude/settings.json"
+    INSTALLED_HOOK="${CACHE_DIR}/hook.sh"
+
+    echo "read-once status"
+    echo ""
+
+    # Check hook file
+    if [ -f "$INSTALLED_HOOK" ]; then
+      echo "  Hook file:     ${INSTALLED_HOOK} (exists)"
+    else
+      echo "  Hook file:     NOT INSTALLED — run: read-once install"
+    fi
+
+    # Check settings.json
+    if grep -q "read-once" "$SETTINGS" 2>/dev/null; then
+      echo "  Settings:      Configured in ~/.claude/settings.json"
+    else
+      echo "  Settings:      NOT configured — run: read-once install"
+    fi
+
+    # Check stats
+    if [ -f "$STATS_FILE" ]; then
+      TOTAL=$(wc -l < "$STATS_FILE" | tr -d ' ')
+      HITS=$(grep -c '"event":"hit"' "$STATS_FILE" 2>/dev/null || true)
+      echo "  Data:          ${TOTAL} events, ${HITS} hits"
+    else
+      echo "  Data:          No data yet"
+    fi
+
+    # Check TTL
+    TTL="${READ_ONCE_TTL:-1200}"
+    echo "  TTL:           ${TTL}s ($((TTL/60))m)"
+    echo "  Disabled:      ${READ_ONCE_DISABLED:-0}"
+    ;;
+
+  verify|check|test)
+    # Full diagnostic: dependencies, settings, and dry-run test
+    SETTINGS="${HOME}/.claude/settings.json"
+    INSTALLED_HOOK="${CACHE_DIR}/hook.sh"
+    ISSUES=0
+    CHECKS=0
+    PASSED=0
+
+    echo "read-once verify"
+    echo ""
+
+    check_pass() {
+      CHECKS=$((CHECKS + 1))
+      PASSED=$((PASSED + 1))
+      echo "  [ok]   $1"
+    }
+    check_fail() {
+      CHECKS=$((CHECKS + 1))
+      ISSUES=$((ISSUES + 1))
+      echo "  [FAIL] $1"
+      if [ -n "${2:-}" ]; then
+        echo "         Fix: $2"
+      fi
+    }
+    check_warn() {
+      CHECKS=$((CHECKS + 1))
+      echo "  [warn] $1"
+    }
+
+    # --- Dependencies ---
+    echo "Dependencies:"
+
+    if command -v jq &>/dev/null; then
+      JQ_VER=$(jq --version 2>&1 || echo "unknown")
+      check_pass "jq found ($JQ_VER)"
+    else
+      check_fail "jq not found" "brew install jq (macOS) or apt install jq (Linux)"
+    fi
+
+    BASH_VER="${BASH_VERSINFO[0]:-0}"
+    if [ "$BASH_VER" -ge 4 ]; then
+      check_pass "bash ${BASH_VERSION} (4+ recommended)"
+    else
+      check_warn "bash ${BASH_VERSION} (4+ recommended, but hook works on 3.2+)"
+    fi
+
+    if command -v python3 &>/dev/null; then
+      check_pass "python3 found (needed for diff mode)"
+    else
+      check_warn "python3 not found (diff mode will be unavailable)"
+    fi
+
+    if command -v stat &>/dev/null; then
+      check_pass "stat found"
+    else
+      check_fail "stat not found" "Part of coreutils, should be available on any Unix system"
+    fi
+
+    echo ""
+
+    # --- Installation ---
+    echo "Installation:"
+
+    if [ -f "$INSTALLED_HOOK" ]; then
+      check_pass "Hook file exists at ${INSTALLED_HOOK}"
+      if [ -x "$INSTALLED_HOOK" ]; then
+        check_pass "Hook file is executable"
+      else
+        check_fail "Hook file is not executable" "chmod +x ${INSTALLED_HOOK}"
+      fi
+      # Check if installed hook matches source
+      if [ -f "$HOOK_PATH" ] && [ "$HOOK_PATH" != "$INSTALLED_HOOK" ]; then
+        if diff -q "$HOOK_PATH" "$INSTALLED_HOOK" >/dev/null 2>&1; then
+          check_pass "Installed hook matches source (up to date)"
+        else
+          check_warn "Installed hook differs from source (run: read-once upgrade)"
+        fi
+      fi
+    else
+      check_fail "Hook file not found at ${INSTALLED_HOOK}" "read-once install"
+    fi
+
+    if [ -f "$SETTINGS" ]; then
+      check_pass "~/.claude/settings.json exists"
+      # Validate JSON
+      if jq empty "$SETTINGS" 2>/dev/null; then
+        check_pass "settings.json is valid JSON"
+      else
+        check_fail "settings.json is invalid JSON" "Check for syntax errors: jq . ~/.claude/settings.json"
+      fi
+      # Check for Read matcher
+      HAS_READ_HOOK=$(jq -r '.hooks.PreToolUse // [] | map(select(.matcher == "Read")) | length' "$SETTINGS" 2>/dev/null || echo "0")
+      if [ "$HAS_READ_HOOK" -gt 0 ]; then
+        check_pass "PreToolUse Read matcher configured"
+        # Check the command path exists
+        HOOK_CMD=$(jq -r '.hooks.PreToolUse[] | select(.matcher == "Read") | .hooks[0].command // empty' "$SETTINGS" 2>/dev/null | head -1)
+        # Expand ~ to HOME
+        HOOK_CMD_EXPANDED="${HOOK_CMD/#\~/$HOME}"
+        if [ -n "$HOOK_CMD_EXPANDED" ] && [ -f "$HOOK_CMD_EXPANDED" ]; then
+          check_pass "Hook command path resolves (${HOOK_CMD})"
+        elif [ -n "$HOOK_CMD" ]; then
+          check_fail "Hook command path does not exist: ${HOOK_CMD}" "read-once install"
+        fi
+      else
+        check_fail "No PreToolUse Read matcher in settings.json" "read-once install"
+      fi
+    else
+      check_fail "~/.claude/settings.json not found" "read-once install"
+    fi
+
+    echo ""
+
+    # --- Dry-run test ---
+    echo "Dry-run test:"
+
+    # Find the hook to test (prefer installed, fall back to source)
+    TEST_HOOK="$INSTALLED_HOOK"
+    if [ ! -f "$TEST_HOOK" ]; then
+      TEST_HOOK="$HOOK_PATH"
+    fi
+
+    if [ -f "$TEST_HOOK" ] && [ -x "$TEST_HOOK" ]; then
+      # Create a temp environment for the test
+      TEST_TMP=$(mktemp -d)
+      TEST_FILE="${TEST_TMP}/verify-test-file.txt"
+      echo "read-once verify test content" > "$TEST_FILE"
+
+      # Run the hook with a simulated Read input (first read = should pass)
+      TEST_SESSION="verify-$(date +%s)-$$"
+      TEST_INPUT=$(jq -cn --arg path "$TEST_FILE" --arg sid "$TEST_SESSION" \
+        '{tool_name:"Read", tool_input:{file_path:$path}, session_id:$sid}')
+
+      FIRST_OUTPUT=$(echo "$TEST_INPUT" | HOME="$TEST_TMP" "$TEST_HOOK" 2>/dev/null || true)
+      FIRST_EXIT=$?
+
+      if [ "$FIRST_EXIT" -eq 0 ] && [ -z "$FIRST_OUTPUT" ]; then
+        check_pass "First read: allowed (no output = pass-through)"
+      elif [ "$FIRST_EXIT" -eq 0 ]; then
+        check_warn "First read: unexpected output (expected empty for first read)"
+      else
+        check_fail "First read: hook exited with code $FIRST_EXIT" "Check hook.sh for syntax errors"
+      fi
+
+      # Second read of same file = should produce warn/deny output
+      SECOND_OUTPUT=$(echo "$TEST_INPUT" | HOME="$TEST_TMP" "$TEST_HOOK" 2>/dev/null || true)
+      SECOND_EXIT=$?
+
+      if [ "$SECOND_EXIT" -eq 0 ] && [ -n "$SECOND_OUTPUT" ]; then
+        # Verify it's valid JSON
+        if echo "$SECOND_OUTPUT" | jq empty 2>/dev/null; then
+          check_pass "Second read: produced valid JSON response"
+          # Check for expected fields
+          HAS_DECISION=$(echo "$SECOND_OUTPUT" | jq -r 'if .decision then "deny" elif .hookSpecificOutput.permissionDecision then "warn" else "unknown" end' 2>/dev/null)
+          if [ "$HAS_DECISION" = "warn" ] || [ "$HAS_DECISION" = "deny" ]; then
+            check_pass "Second read: correctly detected re-read (mode: ${HAS_DECISION})"
+          else
+            check_warn "Second read: output format unexpected"
+          fi
+        else
+          check_fail "Second read: output is not valid JSON" "Check hook.sh for output formatting issues"
+        fi
+      elif [ "$SECOND_EXIT" -eq 0 ] && [ -z "$SECOND_OUTPUT" ]; then
+        check_fail "Second read: no output (should have blocked or warned)" "Hook may not be caching reads correctly"
+      else
+        check_fail "Second read: hook exited with code $SECOND_EXIT" "Check hook.sh for errors"
+      fi
+
+      rm -rf "$TEST_TMP"
+    else
+      check_warn "Skipping dry-run (no executable hook found)"
+    fi
+
+    echo ""
+
+    # --- Configuration ---
+    echo "Configuration:"
+    MODE="${READ_ONCE_MODE:-warn}"
+    TTL="${READ_ONCE_TTL:-1200}"
+    DIFF="${READ_ONCE_DIFF:-0}"
+    DISABLED="${READ_ONCE_DISABLED:-0}"
+    echo "  Mode:     ${MODE} (READ_ONCE_MODE)"
+    echo "  TTL:      ${TTL}s ($((TTL/60))m) (READ_ONCE_TTL)"
+    echo "  Diff:     ${DIFF} (READ_ONCE_DIFF)"
+    echo "  Disabled: ${DISABLED} (READ_ONCE_DISABLED)"
+    echo ""
+
+    # --- Summary ---
+    if [ "$ISSUES" -eq 0 ]; then
+      echo "${PASSED}/${CHECKS} checks passed. read-once is ready."
+    else
+      echo "${PASSED}/${CHECKS} checks passed, ${ISSUES} issue(s) found."
+      echo "Fix the issues above, then run 'read-once verify' again."
+      exit 1
+    fi
+    ;;
+
+  uninstall)
+    SETTINGS="${HOME}/.claude/settings.json"
+    if [ ! -f "$SETTINGS" ]; then
+      echo "No settings file found."
+      exit 0
+    fi
+
+    UPDATED=$(jq '
+      .hooks.PreToolUse //= [] |
+      .hooks.PreToolUse |= map(select(.hooks[0].command | contains("read-once") | not))
+    ' "$SETTINGS")
+
+    echo "$UPDATED" > "$SETTINGS"
+    echo "read-once hook removed from settings."
+    ;;
+
+  help|--help|-h)
+    echo "read-once — Stop Claude Code from re-reading files it already has"
+    echo ""
+    echo "Usage:"
+    echo "  read-once stats       Show token savings"
+    echo "  read-once gain        Same as stats (RTK-style)"
+    echo "  read-once status      Quick health check"
+    echo "  read-once verify      Full diagnostic with dry-run test"
+    echo "  read-once clear       Clear session cache"
+    echo "  read-once install     Install hook to ~/.claude/"
+    echo "  read-once upgrade     Update hook to latest version"
+    echo "  read-once uninstall   Remove hook"
+    echo ""
+    echo "How it works:"
+    echo "  A PreToolUse hook intercepts Read calls. When Claude tries to"
+    echo "  re-read a file it already read this session (and the file hasn't"
+    echo "  changed), the hook blocks the read and tells Claude the content"
+    echo "  is already in context. Saves ~2000+ tokens per prevented re-read."
+    echo ""
+    echo "Compaction safety:"
+    echo "  Cache entries expire after READ_ONCE_TTL seconds (default: 1200 = 20m)."
+    echo "  After expiry, re-reads are allowed because Claude may have compacted"
+    echo "  the context window and lost the earlier content."
+    echo ""
+    echo "Config (environment variables):"
+    echo "  READ_ONCE_MODE=warn     'warn' (default) allows read with advisory."
+    echo "                          'deny' blocks reads entirely (maximum savings)."
+    echo "  READ_ONCE_TTL=1200      Cache TTL in seconds (default: 1200)"
+    echo "  READ_ONCE_DISABLED=1    Disable the hook entirely"
+    ;;
+
+  *)
+    echo "Unknown command: $cmd"
+    echo "Run 'read-once help' for usage."
+    exit 1
+    ;;
+esac
