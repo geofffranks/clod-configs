@@ -4,3 +4,4 @@ home/read-once/stats.jsonl
 home/read-once/.last-cleanup
 home/**/.DS_Store
 *.bak-*
+docs/superpowers

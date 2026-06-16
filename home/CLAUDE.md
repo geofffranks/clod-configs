@@ -49,3 +49,23 @@ Before persisting anything, route it. Memory is the last resort, not the default
   tracker only if unfinished at session end.
 - Write a **memory** only when it is none of the above: a durable user-profile
   fact or an external reference pointer not tied to a ticket.
+
+## RTK — search & test commands
+
+The RTK hook only intercepts **Bash**; the built-in `Grep`/`Glob`/`Read` tools
+bypass it and save nothing. RTK earns ~94% of its savings on **grep**, with
+**pytest/mypy/go test** the next-biggest lever (verbose, traceback-heavy output).
+
+- **Search contents → `Bash: rtk grep <pattern> [path]`** (not the `Grep` tool).
+- **Find files → `Bash: rtk find <pattern>`** (not the `Glob` tool).
+- **Python tests / typecheck → `rtk pytest …` / `rtk mypy …`**, never
+  `.venv/bin/pytest` / `.venv/bin/mypy` (the `.venv/bin/` prefix bypasses RTK).
+  rtk spawns a **bare** `pytest`/`mypy`, so the venv must be on `PATH` for the
+  call: `PATH=".venv/bin:$PATH" rtk pytest tests`. Without it rtk errors
+  `Failed to spawn process`. (`black` has no handler — run it raw.)
+- **Go tests → `rtk go test ./...`** — works as-is; Go has no per-project venv,
+  so there's no PATH gotcha (already ~99% savings in practice).
+- **Read files → use the built-in `Read` tool freely**, especially with
+  `offset`/`limit` for large or targeted reads. `rtk read` saves ~2% and on
+  large files returns a persisted-file *pointer* instead of content (forcing a
+  re-read), so it's not worth mandating — use it only for quick full-file reads.

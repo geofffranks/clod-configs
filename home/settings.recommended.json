@@ -27,6 +27,12 @@
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/no-remote-writes.sh" } ] },
       { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] }
     ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] }
+    ],
     "PostCompact": [
       { "matcher": "", "hooks": [ { "type": "command", "command": "~/.claude/read-once/compact.sh" } ] }
     ]
