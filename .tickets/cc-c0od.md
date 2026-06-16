@@ -1,6 +1,6 @@
 ---
 id: cc-c0od
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-06-16T16:41:17Z
