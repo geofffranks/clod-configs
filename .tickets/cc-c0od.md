@@ -8,7 +8,7 @@ type: feature
 priority: 2
 assignee: Geoff Franks
 branch: feat/bootstrap-config
-lifecycle: in-development
+lifecycle: validated
 ---
 # Shareable Claude Code config repo (skills, hooks, settings, statusline)
 
