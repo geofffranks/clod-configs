@@ -31,15 +31,15 @@ ajq "$D/settings.json" '.permissions.allow[0] == "Bash(echo:*)"' "permissions ke
 test -f "$D/statusline.sh" && ok "files copied (step 1 intact)" || no "files copied"
 rm -rf "$D"
 
-# --- S2: conflict, non-interactive -> keep-mine (safe default) ---
-sc "S2 conflict non-interactive -> keep-mine"
+# --- S2: conflict, non-interactive (no TTY) -> conflict declined, additive applied ---
+sc "S2 conflict non-interactive -> keep-mine, additive applied"
 D="$(seed x "$CONFLICT")"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
-has "$out" "OVERWRITE"                                  "warned about overwrite"
-has "$out" "theme"                                      "named the overwritten key"
-ajq "$D/settings.json" '.theme == "light"'             "theme kept (keep-mine)"
-ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "opus"' "env still added"
-ajq "$D/settings.json" '.hooks.PreToolUse | length == 6' "hooks still added"
+has "$out" "differ"                                     "warned conflicts differ from yours"
+has "$out" "theme"                                      "named the conflicting key"
+ajq "$D/settings.json" '.theme == "light"'             "theme kept (conflict declined w/o TTY)"
+ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "opus"' "additive env still added"
+ajq "$D/settings.json" '.hooks.PreToolUse | length == 6' "additive hooks still added"
 ajq "$D/settings.json" '.permissions.allow[0] == "Bash(echo:*)"' "permissions kept"
 hasbak "$D" && ok "backup written (file changed)" || no "backup written"
 rm -rf "$D"
@@ -69,23 +69,25 @@ out="$(CLAUDE_CONFIG_DIR="$D" "$REPO/install.sh" --bogus 2>&1)"; rc=$?
 has "$out" "usage"                                     "printed usage"
 rm -rf "$D"
 
-# --- S5: interactive 'y' -> fragment wins ---
-sc "S5 interactive y -> overwrite"
-D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; printf 'y\n' >"$TTY"
+# --- S5: interactive, accept every patch -> all recommended applied ---
+sc "S5 interactive accept-all -> overwrite"
+D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; printf 'y\n%.0s' $(seq 1 40) >"$TTY"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
-ajq "$D/settings.json" '.theme == "dark"'              "theme overwritten on y"
+ajq "$D/settings.json" '.theme == "dark"'              "theme overwritten when accepted"
+ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "opus"' "env addition accepted"
 rm -rf "$D" "$TTY"
 
-# --- S6: interactive 'N' -> keep-mine ---
-sc "S6 interactive N -> keep-mine"
-D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; printf 'N\n' >"$TTY"
+# --- S6: interactive, decline every patch -> file unchanged ---
+sc "S6 interactive decline-all -> keep-mine, nothing added"
+D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; printf 'n\n%.0s' $(seq 1 40) >"$TTY"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
-ajq "$D/settings.json" '.theme == "light"'             "theme kept on N"
-ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "opus"' "env still added on N"
+ajq "$D/settings.json" '.theme == "light"'             "theme kept on decline"
+ajq "$D/settings.json" '.env == null or (.env.ANTHROPIC_MODEL == null)' "env addition declined too"
+hasbak "$D" && no "no backup when all declined" || ok "no backup when all declined"
 rm -rf "$D" "$TTY"
 
-# --- S7: interactive empty input -> defaults to keep-mine ---
-sc "S7 interactive empty -> keep-mine (default)"
+# --- S7: interactive empty input -> defaults to decline (keep-mine) ---
+sc "S7 interactive empty -> decline (default)"
 D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; : >"$TTY"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
 ajq "$D/settings.json" '.theme == "light"'             "theme kept on empty input"
@@ -121,15 +123,12 @@ ajq "$D/settings.json" '.skillListingBudgetFraction == 0.03' "value semantically
 ajq "$D/settings.json" '.theme == "dark"'              "other recommended keys still added"
 rm -rf "$D"
 
-# --- S11: the overwrite advisory (warning + diff) goes to stderr, not stdout ---
-# So a human still sees what changes even when stdout is piped to a log.
+# --- S11: the conflict advisory goes to stderr, not stdout ---
 sc "S11 advisory on stderr, not stdout"
 D="$(seed x "$CONFLICT")"
 CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >"$D/out.txt" 2>"$D/err.txt" || true
-# Match the warning phrase, not the bare word — stdout legitimately carries the
-# "CLAUDE_CONFIG_OVERWRITE=1" hint, which contains the substring "OVERWRITE".
-grep -q "would OVERWRITE" "$D/err.txt" && ok "warning on stderr" || no "warning on stderr"
-grep -q "would OVERWRITE" "$D/out.txt" && no "warning kept off stdout" || ok "warning kept off stdout"
+grep -q "differ from yours" "$D/err.txt" && ok "advisory on stderr" || no "advisory on stderr"
+grep -q "differ from yours" "$D/out.txt" && no "advisory kept off stdout" || ok "advisory kept off stdout"
 rm -rf "$D"
 
 # Hook arrays must be UNIONED (concat + dedup by command), never replaced — jq's
@@ -184,6 +183,74 @@ D="$(seed x "$TILDEHOOK")"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
 ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | map(select(test("agent-state"))) | length == 1' "agent-state not duplicated across tilde/expanded forms"
 ajq "$D/settings.json" '.hooks.Stop | length == 1'     "no net new Stop entry (same hook)"
+rm -rf "$D"
+
+# --- S17: partial accept across two conflicts (deterministic order) ---
+# Seed = the fragment with two values changed, so the ONLY patches are two
+# conflicts: env.ANTHROPIC_MODEL (sorts first) then theme. Decline the first,
+# accept the second.
+sc "S17 partial accept -> per-conflict control"
+D="$(mktemp -d)"; jq '.theme="light" | .env.ANTHROPIC_MODEL="haiku"' "$FRAG" > "$D/settings.json"
+TTY="$(mktemp)"; rm "$TTY"; mkfifo "$TTY"
+(printf 'n\ny\n'; sleep 10) >"$TTY" &
+_s17_wp=$!
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
+kill $_s17_wp 2>/dev/null; wait $_s17_wp 2>/dev/null
+ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "haiku"' "declined conflict kept yours"
+ajq "$D/settings.json" '.theme == "dark"'                "accepted conflict took recommended"
+has "$out" "applied 1 (1 conflict, 0 new, 0 hook), declined 1" "summary line accurate"
+rm -rf "$D" "$TTY"
+
+# --- S18: array conflict is atomic (single y/n governs whole array) ---
+sc "S18 array conflict atomic"
+D="$(mktemp -d)"; jq '.availableModels=["mine"]' "$FRAG" > "$D/settings.json"
+TTY="$(mktemp)"; printf 'n\n' >"$TTY"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
+ajq "$D/settings.json" '.availableModels == ["mine"]' "whole array kept on decline (atomic)"
+TTY2="$(mktemp)"; printf 'y\n' >"$TTY2"
+D2="$(mktemp -d)"; jq '.availableModels=["mine"]' "$FRAG" > "$D2/settings.json"
+CLAUDE_CONFIG_DIR="$D2" CLAUDE_CONFIG_TTY="$TTY2" "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D2/settings.json" '.availableModels == ["opus","sonnet","haiku"]' "whole array replaced on accept (atomic)"
+rm -rf "$D" "$D2" "$TTY" "$TTY2"
+
+# --- S19: hook patch accepted/declined per entry ---
+# Seed = fragment minus the Stop hook, so the only patch is one hook addition.
+sc "S19 hook patch per-entry"
+D="$(mktemp -d)"; jq 'del(.hooks.Stop)' "$FRAG" > "$D/settings.json"
+TTY="$(mktemp)"; printf 'n\n' >"$TTY"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '(.hooks.Stop // []) | length == 0' "declined hook NOT added"
+D2="$(mktemp -d)"; jq 'del(.hooks.Stop)' "$FRAG" > "$D2/settings.json"
+TTY2="$(mktemp)"; printf 'y\n' >"$TTY2"
+CLAUDE_CONFIG_DIR="$D2" CLAUDE_CONFIG_TTY="$TTY2" "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D2/settings.json" '[.hooks.Stop[].hooks[].command] | any(test("agent-state"))' "accepted hook added"
+rm -rf "$D" "$D2" "$TTY" "$TTY2"
+
+# --- S20: no-TTY -> additive applied, conflict declined ---
+sc "S20 no-TTY additive-only"
+D="$(mktemp -d)"; jq '.theme="light" | del(.hooks.Stop)' "$FRAG" > "$D/settings.json"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '.theme == "light"'              "conflict declined w/o TTY"
+ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | any(test("agent-state"))' "additive hook applied w/o TTY"
+rm -rf "$D"
+
+# --- S21: all declined interactively -> file byte-identical, no backup ---
+sc "S21 all-declined -> no write"
+D="$(seed x "$CONFLICT")"; before="$(cat "$D/settings.json")"
+TTY="$(mktemp)"; printf 'n\n%.0s' $(seq 1 40) >"$TTY"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
+[ "$(cat "$D/settings.json")" = "$before" ] && ok "file byte-identical when all declined" || no "file byte-identical when all declined"
+hasbak "$D" && no "no backup when nothing applied" || ok "no backup when nothing applied"
+has "$out" "unchanged — no write"                       "reported unchanged"
+rm -rf "$D" "$TTY"
+
+# --- S22: force accepts every patch (summary shows zero declined) ---
+sc "S22 force accept-all summary"
+D="$(seed x "$CONFLICT")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --overwrite 2>&1)"
+ajq "$D/settings.json" '.theme == "dark"'              "conflict taken under --overwrite"
+has "$out" "declined 0"                                 "force declined nothing"
+hasnt "$out" "differ from yours"                       "force mode omits conflict advisory"
 rm -rf "$D"
 
 echo

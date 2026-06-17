@@ -16,28 +16,29 @@ cd claude-config
 `install.sh` copies everything under `home/` into `~/.claude` (override with
 `CLAUDE_CONFIG_DIR`), backing up any file it would overwrite to
 `<file>.bak-<timestamp>`. It then merges `home/settings.recommended.json` into
-your `settings.json` with `jq` — **non-destructively**: new keys are added, but a
-value you already set is changed only with your consent (see below). If `jq` is
-missing it prints manual merge instructions instead. Re-running is safe — every
-change is backed up first, and an unchanged file is left alone.
+your `settings.json` with `jq` — **non-destructively**: when a `settings.json`
+already exists, you're walked through each difference and approve them
+individually (see below). If `jq` is missing it prints manual merge instructions
+instead. Re-running is safe — every change is backed up first, and an unchanged
+file is left alone.
 
 **Requirements:** `bash` 4+ (the status line uses `mapfile`; macOS ships bash 3.2,
 so install a newer one via Homebrew) and `jq` for the settings merge.
 
-**Merge behavior:** the merge adds the recommended keys without touching values
-you already have. If applying the fragment *would* change something you set — a
-scalar like `theme`, or an entire array like `hooks` (jq replaces arrays
-wholesale) — the installer warns, prints a unified diff, and asks:
+**Merge behavior:** when `settings.json` already exists, the installer compares
+it against the recommended settings and walks you through the differences **one
+patch at a time**. For each difference — a new key, a changed value, or a
+recommended hook you don't have yet — it prints the detail and asks `[y/N]`
+(Enter skips the change — keeps your value, declines new keys). Arrays (e.g. `availableModels`) are treated as a
+single unit.
 
-- **`y`** — take the recommended values (your file is backed up to
-  `settings.json.bak-<timestamp>` first).
-- **`N`** (default) — keep your values, but still add any genuinely new keys.
+- `--overwrite` (or `CLAUDE_CONFIG_OVERWRITE=1`) accepts every patch without
+  prompting.
+- With no terminal to prompt at, the installer applies only additive patches
+  (new keys, new hooks) and keeps your values on any conflict.
 
-The prompt is read from the terminal (`/dev/tty`), so it still works when the
-installer is piped — `curl … | bash` will ask. Only when there's no controlling
-terminal (CI, cron, a non-interactive shell) can it not ask; there it takes the
-safe default (keep yours, add new keys). Pass `--overwrite` or set
-`CLAUDE_CONFIG_OVERWRITE=1` to take the recommended values without prompting.
+Your previous file is saved to `settings.json.bak-<timestamp>` whenever the
+merged result differs from it.
 
 ## What's included
 
