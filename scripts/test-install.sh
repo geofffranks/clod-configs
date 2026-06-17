@@ -1,26 +1,137 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Scenario harness for install.sh's settings.json merge behavior.
+# No `set -e`: assertions must keep running so we see every failure.
+set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+FRAG="$REPO/home/settings.recommended.json"
 
-# Seed a pre-existing settings.json WITH a permissions block to prove it survives.
-cat > "$TMP/settings.json" <<'JSON'
-{ "permissions": { "allow": ["Bash(echo:*)"] }, "theme": "light" }
-JSON
+pass=0 fail=0
+ok() { echo "  ok: $1"; pass=$((pass + 1)); }
+no() { echo "  FAIL: $1"; fail=$((fail + 1)); }
+# ajq <file> <jq-filter> <msg> — assert the filter is truthy against the file.
+ajq() { if jq -e "$2" "$1" >/dev/null 2>&1; then ok "$3"; else no "$3"; fi; }
+# has <haystack> <needle> <msg> / hasnt <...> — assert substring presence/absence.
+has() { case "$1" in *"$2"*) ok "$3" ;; *) no "$3" ;; esac; }
+hasnt() { case "$1" in *"$2"*) no "$3" ;; *) ok "$3" ;; esac; }
+hasbak() { ls "$1"/settings.json.bak-* >/dev/null 2>&1; }
+seed() { local d; d="$(mktemp -d)"; printf '%s' "$2" >"$d/settings.json"; printf '%s' "$d"; }
+sc() { echo; echo "=== $1 ==="; }
 
-CLAUDE_CONFIG_DIR="$TMP" "$REPO/install.sh"
+CONFLICT='{ "permissions": { "allow": ["Bash(echo:*)"] }, "theme": "light" }'
 
-echo "--- assertions ---"
-test -f "$TMP/statusline.sh"                       && echo "ok: statusline copied"
-test -f "$TMP/bash-guard/hook.sh"                  && echo "ok: guard hook copied"
-test -x "$TMP/hooks/agent-state.sh"                && echo "ok: hook executable"
-test ! -f "$TMP/settings.recommended.json"         && echo "ok: fragment not copied verbatim"
-jq -e '.permissions.allow[0] == "Bash(echo:*)"' "$TMP/settings.json" >/dev/null \
-                                                   && echo "ok: existing permissions preserved"
-jq -e '.env.ANTHROPIC_MODEL == "opus"' "$TMP/settings.json" >/dev/null \
-                                                   && echo "ok: env merged"
-jq -e '.hooks.PreToolUse | length == 6' "$TMP/settings.json" >/dev/null \
-                                                   && echo "ok: hooks merged"
-ls "$TMP"/settings.json.bak-* >/dev/null 2>&1      && echo "ok: settings backed up"
-echo "ALL PASS"
+# --- S1: additions only (no conflicting values) -> silent merge, no warning ---
+sc "S1 additions-only -> silent merge"
+D="$(seed x '{ "permissions": { "allow": ["Bash(echo:*)"] }, "env": { "FOO": "bar" } }')"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+hasnt "$out" "OVERWRITE"                    "no overwrite warning"
+ajq "$D/settings.json" '.env.FOO == "bar"'             "existing env key kept"
+ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "opus"' "recommended env added"
+ajq "$D/settings.json" '.theme == "dark"'              "new key (theme) added"
+ajq "$D/settings.json" '.permissions.allow[0] == "Bash(echo:*)"' "permissions kept"
+test -f "$D/statusline.sh" && ok "files copied (step 1 intact)" || no "files copied"
+rm -rf "$D"
+
+# --- S2: conflict, non-interactive -> keep-mine (safe default) ---
+sc "S2 conflict non-interactive -> keep-mine"
+D="$(seed x "$CONFLICT")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+has "$out" "OVERWRITE"                                  "warned about overwrite"
+has "$out" "theme"                                      "named the overwritten key"
+ajq "$D/settings.json" '.theme == "light"'             "theme kept (keep-mine)"
+ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "opus"' "env still added"
+ajq "$D/settings.json" '.hooks.PreToolUse | length == 6' "hooks still added"
+ajq "$D/settings.json" '.permissions.allow[0] == "Bash(echo:*)"' "permissions kept"
+hasbak "$D" && ok "backup written (file changed)" || no "backup written"
+rm -rf "$D"
+
+# --- S3: conflict, CLAUDE_CONFIG_OVERWRITE=1 -> fragment wins ---
+sc "S3 conflict + CLAUDE_CONFIG_OVERWRITE=1 -> overwrite"
+D="$(seed x "$CONFLICT")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_OVERWRITE=1 CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+ajq "$D/settings.json" '.theme == "dark"'              "theme overwritten (fragment wins)"
+ajq "$D/settings.json" '.permissions.allow[0] == "Bash(echo:*)"' "permissions kept"
+hasbak "$D" && ok "backup written" || no "backup written"
+rm -rf "$D"
+
+# --- S4: conflict, --overwrite arg -> fragment wins ---
+sc "S4 conflict + --overwrite arg -> overwrite"
+D="$(seed x "$CONFLICT")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --overwrite 2>&1)"
+ajq "$D/settings.json" '.theme == "dark"'              "theme overwritten via --overwrite"
+hasbak "$D" && ok "backup written (--overwrite path)" || no "backup written (--overwrite path)"
+rm -rf "$D"
+
+# --- S4b: unknown arg -> usage error, non-zero exit (no seed needed; exits at parse) ---
+sc "S4b unknown arg -> error exit"
+D="$(mktemp -d)"
+out="$(CLAUDE_CONFIG_DIR="$D" "$REPO/install.sh" --bogus 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && ok "non-zero exit on unknown arg (rc=$rc)" || no "non-zero exit on unknown arg (rc=$rc)"
+has "$out" "usage"                                     "printed usage"
+rm -rf "$D"
+
+# --- S5: interactive 'y' -> fragment wins ---
+sc "S5 interactive y -> overwrite"
+D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; printf 'y\n' >"$TTY"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
+ajq "$D/settings.json" '.theme == "dark"'              "theme overwritten on y"
+rm -rf "$D" "$TTY"
+
+# --- S6: interactive 'N' -> keep-mine ---
+sc "S6 interactive N -> keep-mine"
+D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; printf 'N\n' >"$TTY"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
+ajq "$D/settings.json" '.theme == "light"'             "theme kept on N"
+ajq "$D/settings.json" '.env.ANTHROPIC_MODEL == "opus"' "env still added on N"
+rm -rf "$D" "$TTY"
+
+# --- S7: interactive empty input -> defaults to keep-mine ---
+sc "S7 interactive empty -> keep-mine (default)"
+D="$(seed x "$CONFLICT")"; TTY="$(mktemp)"; : >"$TTY"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY="$TTY" "$REPO/install.sh" 2>&1)"
+ajq "$D/settings.json" '.theme == "light"'             "theme kept on empty input"
+rm -rf "$D" "$TTY"
+
+# --- S8: already up to date -> no backup, no write ---
+sc "S8 already up to date -> no backup"
+D="$(mktemp -d)"; cp "$FRAG" "$D/settings.json"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+has "$out" "up to date"                                "reported already up to date"
+hasbak "$D" && no "no backup when unchanged" || ok "no backup when unchanged"
+rm -rf "$D"
+
+# --- S9: no prior settings.json -> fragment copied verbatim, no prompt ---
+sc "S9 fresh install (no settings.json) -> fragment copied"
+D="$(mktemp -d)"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+hasnt "$out" "OVERWRITE"                                "no overwrite warning on fresh install"
+ajq "$D/settings.json" '.theme == "dark"'              "theme from fragment present"
+ajq "$D/settings.json" '.hooks.PreToolUse | length == 6' "hooks from fragment present"
+cmp -s <(jq -S . "$FRAG") <(jq -S . "$D/settings.json") && ok "settings.json == fragment" || no "settings.json == fragment"
+hasbak "$D" && no "no backup on fresh install" || ok "no backup on fresh install"
+rm -rf "$D"
+
+# --- S10: a re-spelled number (0.0300 vs 0.03) is NOT an overwrite ---
+# jq preserves number literals, so byte-comparing the two merges would falsely
+# flag this; the semantic jq `==` check must treat it as no change.
+sc "S10 re-spelled number -> not an overwrite"
+D="$(seed x '{ "skillListingBudgetFraction": 0.0300 }')"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+hasnt "$out" "OVERWRITE"                                "no spurious overwrite for re-spelled number"
+ajq "$D/settings.json" '.skillListingBudgetFraction == 0.03' "value semantically intact"
+ajq "$D/settings.json" '.theme == "dark"'              "other recommended keys still added"
+rm -rf "$D"
+
+# --- S11: the overwrite advisory (warning + diff) goes to stderr, not stdout ---
+# So a human still sees what changes even when stdout is piped to a log.
+sc "S11 advisory on stderr, not stdout"
+D="$(seed x "$CONFLICT")"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >"$D/out.txt" 2>"$D/err.txt" || true
+# Match the warning phrase, not the bare word — stdout legitimately carries the
+# "CLAUDE_CONFIG_OVERWRITE=1" hint, which contains the substring "OVERWRITE".
+grep -q "would OVERWRITE" "$D/err.txt" && ok "warning on stderr" || no "warning on stderr"
+grep -q "would OVERWRITE" "$D/out.txt" && no "warning kept off stdout" || ok "warning kept off stdout"
+rm -rf "$D"
+
+echo
+echo "=== $pass passed, $fail failed ==="
+[ "$fail" -eq 0 ]

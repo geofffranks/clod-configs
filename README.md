@@ -15,19 +15,29 @@ cd claude-config
 
 `install.sh` copies everything under `home/` into `~/.claude` (override with
 `CLAUDE_CONFIG_DIR`), backing up any file it would overwrite to
-`<file>.bak-<timestamp>`. It merges `home/settings.recommended.json` into your
-`settings.json` with `jq`, leaving any existing `permissions` block untouched.
-If `jq` is missing it prints manual merge instructions instead. Re-running is
-safe — every overwrite is backed up first.
+`<file>.bak-<timestamp>`. It then merges `home/settings.recommended.json` into
+your `settings.json` with `jq` — **non-destructively**: new keys are added, but a
+value you already set is changed only with your consent (see below). If `jq` is
+missing it prints manual merge instructions instead. Re-running is safe — every
+change is backed up first, and an unchanged file is left alone.
 
 **Requirements:** `bash` 4+ (the status line uses `mapfile`; macOS ships bash 3.2,
 so install a newer one via Homebrew) and `jq` for the settings merge.
 
-**Merge behavior:** the `jq` merge is recursive for objects (your existing
-`env` keys are kept) but **replaces array-valued keys wholesale** — if you already
-have a `hooks` block in `settings.json`, the fragment's `hooks` replaces it. Your
-previous file is saved to `settings.json.bak-<timestamp>`, so re-add any custom
-hooks from there afterward.
+**Merge behavior:** the merge adds the recommended keys without touching values
+you already have. If applying the fragment *would* change something you set — a
+scalar like `theme`, or an entire array like `hooks` (jq replaces arrays
+wholesale) — the installer warns, prints a unified diff, and asks:
+
+- **`y`** — take the recommended values (your file is backed up to
+  `settings.json.bak-<timestamp>` first).
+- **`N`** (default) — keep your values, but still add any genuinely new keys.
+
+The prompt is read from the terminal (`/dev/tty`), so it still works when the
+installer is piped — `curl … | bash` will ask. Only when there's no controlling
+terminal (CI, cron, a non-interactive shell) can it not ask; there it takes the
+safe default (keep yours, add new keys). Pass `--overwrite` or set
+`CLAUDE_CONFIG_OVERWRITE=1` to take the recommended values without prompting.
 
 ## What's included
 

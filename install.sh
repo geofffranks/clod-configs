@@ -7,6 +7,26 @@ TS="$(date +%Y%m%d-%H%M%S)"
 FRAG="$SRC_DIR/settings.recommended.json"
 SETTINGS="$DEST/settings.json"
 
+# Force-overwrite knob: env CLAUDE_CONFIG_OVERWRITE=1 or the --overwrite flag.
+force=0
+[ "${CLAUDE_CONFIG_OVERWRITE:-}" = "1" ] && force=1
+for arg in "$@"; do
+  case "$arg" in
+    --overwrite) force=1 ;;
+    -h | --help)
+      echo "usage: install.sh [--overwrite]"
+      echo "  --overwrite                 take recommended settings over your existing values (no prompt)"
+      echo "  CLAUDE_CONFIG_OVERWRITE=1   same, via environment"
+      exit 0
+      ;;
+    *)
+      echo "install.sh: unknown argument: $arg" >&2
+      echo "usage: install.sh [--overwrite]" >&2
+      exit 2
+      ;;
+  esac
+done
+
 echo "Installing Claude config into: $DEST"
 mkdir -p "$DEST"
 
@@ -30,15 +50,75 @@ for f in statusline.sh bash-guard/hook.sh branch-guard/hook.sh git-safe/hook.sh 
   [ -f "$DEST/$f" ] && chmod +x "$DEST/$f"
 done
 
-# 3. Merge the settings fragment (deep merge; fragment has no permissions, so an
-#    existing permissions block is preserved).
+# 3. Merge the settings fragment. Non-destructive by default: new keys are added,
+#    but a value you already set is overwritten only with consent (an interactive
+#    "y", --overwrite, or CLAUDE_CONFIG_OVERWRITE=1). jq's `*` is asymmetric, so
+#    merging both directions and comparing tells us whether any existing value
+#    would change: fragwins == keepmine exactly when nothing of yours changes.
 if command -v jq >/dev/null 2>&1; then
   if [ -f "$SETTINGS" ]; then
-    cp "$SETTINGS" "$SETTINGS.bak-$TS"
-    tmp="$(mktemp)"
-    jq -s '.[0] * .[1]' "$SETTINGS" "$FRAG" > "$tmp" && mv "$tmp" "$SETTINGS"
-    echo "  merged settings.recommended.json into settings.json (existing permissions preserved)"
-    echo "  previous settings.json saved to settings.json.bak-$TS"
+    work="$(mktemp -d)"
+    staged=""                                # in-$DEST staging file, removed on abort
+    trap 'rm -rf "$work"; [ -n "$staged" ] && rm -f "$staged"' EXIT
+    fragwins="$work/fragwins.json"   # recommended wins on conflicts (existing * fragment)
+    keepmine="$work/keepmine.json"   # your values win, new keys still added (fragment * existing)
+    existing="$work/existing.json"
+    jq -S -s '.[0] * .[1]' "$SETTINGS" "$FRAG" > "$fragwins"
+    jq -S -s '.[1] * .[0]' "$SETTINGS" "$FRAG" > "$keepmine"
+    jq -S . "$SETTINGS" > "$existing"
+
+    # Semantic compare (jq ==), not byte compare: jq preserves number literals,
+    # so a value re-spelled as 1.0 vs 1 must not masquerade as an overwrite.
+    if [ "$(jq -s '.[0] == .[1]' "$fragwins" "$keepmine")" = "true" ]; then
+      chosen="$fragwins"                       # only additions — nothing of yours changes
+    else
+      overkeys="$(jq -r -s '.[0] as $e | .[1] as $m | [ $e | keys[] | select($e[.] != $m[.]) ] | join(", ")' "$SETTINGS" "$fragwins")"
+      # Warning, diff, and prompt are advisories for a human decision — send them
+      # to stderr together so they stay coherent if stdout is redirected to a log.
+      {
+        echo ""
+        echo "  ⚠  Recommended settings would OVERWRITE value(s) you already set: $overkeys"
+        echo ""
+        diff -u -L "your settings.json" -L "after recommended merge" "$existing" "$fragwins" || true
+        echo ""
+      } >&2
+      tty_src="${CLAUDE_CONFIG_TTY:-/dev/tty}"
+      if [ "$force" = "1" ]; then
+        chosen="$fragwins"
+        echo "  --overwrite / CLAUDE_CONFIG_OVERWRITE set — taking recommended values."
+      elif [ -r "$tty_src" ]; then
+        # Prompt to stderr so it stays visible if stdout is redirected to a log.
+        {
+          echo "  Apply recommended values over yours?"
+          echo "    y = take recommended (your file is backed up to settings.json.bak-$TS)"
+          echo "    N = keep your values, still add new recommended keys   [default]"
+          printf "  [y/N]: "
+        } >&2
+        reply=""
+        read -r reply < "$tty_src" || reply=""
+        case "$reply" in
+          y | Y) chosen="$fragwins" ;;
+          *) chosen="$keepmine" ;;
+        esac
+      else
+        chosen="$keepmine"
+        echo "  No terminal to prompt at — kept your values and added new keys."
+        echo "  Re-run with --overwrite (or CLAUDE_CONFIG_OVERWRITE=1) to take recommended values."
+      fi
+    fi
+
+    if [ "$(jq -s '.[0] == .[1]' "$chosen" "$existing")" = "true" ]; then
+      echo "  settings.json already up to date — no changes."
+    else
+      # Stage first, back up second, then atomically swap — a failure at any step
+      # leaves settings.json intact (never half-written) and no orphan files.
+      staged="$SETTINGS.new-$TS"
+      cp "$chosen" "$staged"
+      cp "$SETTINGS" "$SETTINGS.bak-$TS"
+      mv "$staged" "$SETTINGS"                 # atomic replace (same directory)
+      staged=""
+      echo "  updated settings.json (previous saved to settings.json.bak-$TS)"
+    fi
   else
     cp "$FRAG" "$SETTINGS"
     echo "  wrote new settings.json from the recommended fragment"
