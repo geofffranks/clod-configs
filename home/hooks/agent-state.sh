@@ -1,8 +1,14 @@
 #!/bin/bash
 # Writes the agent's current activity state to a flag file the statusLine reads.
 # Registered on multiple hook events; derives state from hook_event_name.
-#   UserPromptSubmit / PreToolUse / PostToolUse / SubagentStop -> working
-#   Stop                                                       -> idle
+#   UserPromptSubmit / PreToolUse / PostToolUse / SubagentStart -> working
+#   Stop                                                        -> idle
+#   SubagentStop / Notification                                 -> no-op
+# SubagentStop/Notification are completion/ping events, NOT main-thread work, so
+# they must not overwrite an idle state set by a prior Stop (which left the badge
+# stuck "working" when a background subagent finished after the turn ended).
+# They leave the file (and its mtime) untouched; mtime then doubles as a
+# staleness signal the statusLine uses to recover from a missed Stop.
 # The statusLine renders a colored badge from this. Permission/question states
 # are intentionally omitted — Claude hides the status line during permission
 # prompts, so they could never display.
@@ -16,7 +22,10 @@ fi
 
 case "$EVENT" in
   Stop)        STATE=idle ;;
-  UserPromptSubmit|PreToolUse|PostToolUse|SubagentStart|SubagentStop|Notification)
+  SubagentStop|Notification)
+               # Not main-thread activity — leave prior state and mtime intact.
+               exit 0 ;;
+  UserPromptSubmit|PreToolUse|PostToolUse|SubagentStart)
                STATE=working ;;
   *)           STATE=working ;;
 esac

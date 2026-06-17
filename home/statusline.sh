@@ -239,8 +239,26 @@ WIDTH=0
 # ---- agent state badge (written by ~/.claude/hooks/agent-state.sh) ----
 BADGE=""
 STATE_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.agent-state"
+# Safety net for a missed idle transition: every "working" hook event rewrites
+# the state file, refreshing its mtime. If "working" is older than STALE_SECS,
+# the main loop is almost certainly idle (a Stop that never fired, or a late
+# background event) — fall back to idle rather than showing "working" forever.
+# A genuine single tool call longer than STALE_SECS can briefly false-idle;
+# tune via CLAUDE_STATUSLINE_WORKING_STALE_SECS.
+STALE_SECS=${CLAUDE_STATUSLINE_WORKING_STALE_SECS:-120}
 if [ -f "$STATE_FILE" ] && [ ! -L "$STATE_FILE" ]; then
   ST=$(head -c 16 "$STATE_FILE" 2>/dev/null | tr -cd 'a-z')
+  if [ "$ST" = "working" ]; then
+    # mtime of the state file. GNU coreutils first (-c %Y); BSD/macOS stat
+    # second (-f %m). Order matters: GNU's -f means "filesystem info" and would
+    # emit garbage, so never let it run when -c works.
+    MT=$(stat -c %Y "$STATE_FILE" 2>/dev/null || stat -f %m "$STATE_FILE" 2>/dev/null)
+    NOW=$(date +%s)
+    case "$MT" in
+      ''|*[!0-9]*) ;;  # non-numeric (stat failed) — leave as working
+      *) [ $(( NOW - MT )) -ge "$STALE_SECS" ] && ST=idle ;;
+    esac
+  fi
   case "$ST" in
     working) BADGE="${YELLOW}● working${RESET}" ;;
     idle)    BADGE="${GREEN}○ idle${RESET}" ;;
