@@ -132,6 +132,60 @@ grep -q "would OVERWRITE" "$D/err.txt" && ok "warning on stderr" || no "warning 
 grep -q "would OVERWRITE" "$D/out.txt" && no "warning kept off stdout" || ok "warning kept off stdout"
 rm -rf "$D"
 
+# Hook arrays must be UNIONED (concat + dedup by command), never replaced — jq's
+# `*` replaces arrays wholesale, which would silently drop a user's own hooks.
+CUSTOMHOOK='{ "theme": "light", "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/my/custom.sh" } ] } ] } }'
+
+# --- S12: keep-mine path preserves user hooks AND adds recommended ones ---
+sc "S12 keep-mine -> user hooks preserved + recommended added"
+D="$(seed x "$CUSTOMHOOK")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+ajq "$D/settings.json" '.theme == "light"'             "theme kept (keep-mine)"
+ajq "$D/settings.json" '[.hooks.PreToolUse[].hooks[].command] | index("~/my/custom.sh") != null' "user's own hook preserved"
+ajq "$D/settings.json" '[.hooks.PreToolUse[].hooks[].command] | index("~/.claude/read-once/hook.sh") != null' "recommended hook added alongside"
+ajq "$D/settings.json" '.hooks.PreToolUse | length == 7'  "union = 6 recommended + 1 user"
+rm -rf "$D"
+
+# --- S13: overwrite path still preserves user hooks (hooks union regardless) ---
+sc "S13 overwrite -> user hooks STILL preserved"
+D="$(seed x "$CUSTOMHOOK")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --overwrite 2>&1)"
+ajq "$D/settings.json" '.theme == "dark"'              "theme overwritten (scalar conflict)"
+ajq "$D/settings.json" '[.hooks.PreToolUse[].hooks[].command] | index("~/my/custom.sh") != null' "user hook NOT clobbered by --overwrite"
+ajq "$D/settings.json" '.hooks.PreToolUse | length == 7'  "union preserved under overwrite"
+rm -rf "$D"
+
+# --- S14: dedup by command -> an already-present recommended hook isn't duplicated ---
+sc "S14 dedup -> no duplicate, no false conflict warning"
+DUPHOOK='{ "hooks": { "PreToolUse": [ { "matcher": "Read", "hooks": [ { "type": "command", "command": "~/.claude/read-once/hook.sh" } ] } ] } }'
+D="$(seed x "$DUPHOOK")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+hasnt "$out" "OVERWRITE"                                "hook-only diff is not an overwrite conflict"
+ajq "$D/settings.json" '[.hooks.PreToolUse[].hooks[].command] | map(select(. == "~/.claude/read-once/hook.sh")) | length == 1' "read-once hook not duplicated"
+ajq "$D/settings.json" '.hooks.PreToolUse | length == 6'  "no net new entries (already had it)"
+rm -rf "$D"
+
+# --- S15: a user hook on an event the fragment also defines -> union, no prompt ---
+sc "S15 extra hook on shared event -> union, no overwrite prompt"
+EXTRAHOOK='{ "hooks": { "Stop": [ { "matcher": "", "hooks": [ { "type": "command", "command": "~/my/stop.sh" } ] } ] } }'
+D="$(seed x "$EXTRAHOOK")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+hasnt "$out" "OVERWRITE"                                "adding to a shared event is not a conflict"
+ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | index("~/my/stop.sh") != null' "user Stop hook preserved"
+ajq "$D/settings.json" '.hooks.Stop | length == 2'     "recommended Stop hook added too"
+rm -rf "$D"
+
+# --- S16: tilde vs expanded $HOME are the SAME hook -> dedup, not re-add ---
+# Fragment ships "~/.claude/hooks/agent-state.sh"; Claude Code expands ~ at runtime,
+# so a user file holding the expanded form must dedup against it, not duplicate.
+sc "S16 expanded-\$HOME hook dedups against fragment tilde form"
+TILDEHOOK="{ \"hooks\": { \"Stop\": [ { \"matcher\": \"\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$HOME/.claude/hooks/agent-state.sh\" } ] } ] } }"
+D="$(seed x "$TILDEHOOK")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
+ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | map(select(test("agent-state"))) | length == 1' "agent-state not duplicated across tilde/expanded forms"
+ajq "$D/settings.json" '.hooks.Stop | length == 1'     "no net new Stop entry (same hook)"
+rm -rf "$D"
+
 echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
