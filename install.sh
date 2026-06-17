@@ -36,11 +36,16 @@ while IFS= read -r -d '' src; do
   [ "$rel" = "settings.recommended.json" ] && continue
   dst="$DEST/$rel"
   mkdir -p "$(dirname "$dst")"
-  if [ -e "$dst" ] && ! cmp -s "$src" "$dst"; then
+  if [ ! -e "$dst" ]; then
+    cp "$src" "$dst"
+    echo "  new:       $rel"
+  elif cmp -s "$src" "$dst"; then
+    echo "  unchanged: $rel"
+  else
     mv "$dst" "$dst.bak-$TS"
-    echo "  backed up: $rel -> $rel.bak-$TS"
+    cp "$src" "$dst"
+    echo "  updated:   $rel (previous saved to $rel.bak-$TS)"
   fi
-  cp "$src" "$dst"
 done < <(find "$SRC_DIR" -type f -print0)
 
 # 2. Make scripts executable.
