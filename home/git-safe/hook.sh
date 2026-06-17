@@ -48,6 +48,34 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
+# Normalize: strip git global flags (-C <dir>, -c k=v, --git-dir=p, etc.)
+# so subcommand patterns match regardless of how git was invoked.
+_normalize_git_flags() {
+  local result
+  result=$(python3 - "$1" <<'PYEOF' 2>/dev/null
+import re, sys
+TWO = {'-C','-c','--exec-path','--html-path','--man-path','--info-path',
+       '--work-tree','--git-dir','--namespace','--super-prefix','--attr-source'}
+def norm(seg):
+    tok = seg.split()
+    out, i = [], 0
+    while i < len(tok):
+        if tok[i] == 'git':
+            out.append('git'); i += 1
+            while i < len(tok) and tok[i].startswith('-'):
+                i += 2 if tok[i] in TWO and i+1 < len(tok) else 1
+            out.extend(tok[i:]); break
+        else:
+            out.append(tok[i]); i += 1
+    return ' '.join(out)
+parts = re.split(r'(\s*(?:&&|\|\||;)\s*)', sys.argv[1])
+print(''.join(norm(p) if not re.match(r'^\s*(?:&&|\|\||;)\s*$',p) else p for p in parts))
+PYEOF
+)
+  printf '%s' "${result:-$1}"
+}
+COMMAND=$(_normalize_git_flags "$COMMAND")
+
 log() {
   if [ "${GIT_SAFE_LOG:-0}" = "1" ]; then
     echo "[git-safe] $*" >&2
