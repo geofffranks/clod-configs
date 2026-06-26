@@ -51,6 +51,7 @@ done < <(find "$SRC_DIR" -type f -print0)
 # 2. Make scripts executable.
 for f in statusline.sh bash-guard/hook.sh branch-guard/hook.sh git-safe/hook.sh \
          read-once/hook.sh read-once/compact.sh read-once/read-once \
+         skill-once/hook.sh skill-once/compact.sh \
          hooks/no-remote-writes.sh hooks/agent-state.sh \
          agent-join/hook.sh; do
   [ -f "$DEST/$f" ] && chmod +x "$DEST/$f"

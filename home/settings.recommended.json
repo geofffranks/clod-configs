@@ -25,7 +25,8 @@
       { "hooks": [ { "type": "command", "command": "~/.claude/bash-guard/hook.sh" } ] },
       { "hooks": [ { "type": "command", "command": "~/.claude/branch-guard/hook.sh" } ] },
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/no-remote-writes.sh" } ] },
-      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] }
+      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] },
+      { "matcher": "Skill", "hooks": [ { "type": "command", "command": "~/.claude/skill-once/hook.sh" } ] }
     ],
     "PostToolUse": [
       { "matcher": "Agent", "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
@@ -42,7 +43,7 @@
       { "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
     ],
     "PostCompact": [
-      { "matcher": "", "hooks": [ { "type": "command", "command": "~/.claude/read-once/compact.sh" } ] }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "~/.claude/read-once/compact.sh" }, { "type": "command", "command": "~/.claude/skill-once/compact.sh" } ] }
     ]
   }
 }

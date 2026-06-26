@@ -51,6 +51,7 @@ merged result differs from it.
 | `hooks/no-remote-writes.sh` | Blocks unsolicited `git push` / `gh` writes. |
 | `hooks/agent-state.sh` | Writes the working/idle badge the status line shows. |
 | `read-once/` | De-duplicates repeated file reads to save context. |
+| `skill-once/` | Hard-denies re-loading a skill body already loaded this session (per-agent, so subagents are never wrongly blocked); `--force` reloads. |
 | `statusline.sh` | Status line: cwd, git, agent, PR, model, context %, cost, rate limits. |
 | `settings.recommended.json` | `env` (models, thinking budget, autocompact), theme, statusline, and hook wiring. No permissions. |
 | `CLAUDE.md` | Curated global instructions: permission patterns, shell-cwd discipline, commit tips, memory routing. |
