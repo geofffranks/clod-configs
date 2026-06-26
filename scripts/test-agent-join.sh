@@ -5,6 +5,7 @@ HOOK="$REPO/home/agent-join/hook.sh"
 PASS=0; FAIL=0
 ok(){ if [ "$1" = "$2" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: $3 (got '$1' want '$2')"; fi; }
 run(){ printf '%s' "$1" | HOME="$TMP" bash "$HOOK"; }   # $1 = stdin json
+runc(){ jq -r '[.agents[]|select(.status=="RUNNING")]|length' "$1" 2>/dev/null; }  # count of RUNNING agents
 
 TMP="$(mktemp -d)"; export TMP
 
@@ -20,14 +21,14 @@ led="$TMP/.claude/agent-join/state/s2.json"
 ok "$(jq -r '.agents["b77c3e1abc"].status' "$led" 2>/dev/null)" "RUNNING" "dispatch -> RUNNING row"
 ok "$(jq -r '.agents["b77c3e1abc"].label' "$led" 2>/dev/null)" "Review auth tests" "dispatch label captured"
 ok "$(jq -r '.agents["b77c3e1abc"].output_file' "$led" 2>/dev/null)" "/tmp/o/b77c3e1abc.output" "dispatch outputFile captured"
-ok "$(jq -r '.running_fallback' "$led" 2>/dev/null)" "1" "running_fallback incremented"
+ok "$(runc "$led")" "1" "dispatch -> 1 RUNNING agent"
 
 # SubagentStop flips the matching row DONE (output_file from dispatch is preserved)
 sas='{"hook_event_name":"SubagentStop","session_id":"s2","agent_id":"b77c3e1abc","agent_transcript_path":"/tmp/t/agent-b77c3e1abc.jsonl"}'
 printf '%s' "$sas" | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["b77c3e1abc"].status' "$led" 2>/dev/null)" "DONE" "SubagentStop -> DONE"
 ok "$(jq -r '.agents["b77c3e1abc"].output_file' "$led" 2>/dev/null)" "/tmp/o/b77c3e1abc.output" "dispatch outputFile preserved (not overwritten)"
-ok "$(jq -r '.running_fallback' "$led" 2>/dev/null)" "0" "running_fallback decremented"
+ok "$(runc "$led")" "0" "SubagentStop -> 0 RUNNING agents"
 
 # UserPromptSubmit injects an orchestration-status block naming the unread agent
 ups='{"hook_event_name":"UserPromptSubmit","session_id":"s2","prompt":"is it done yet"}'
@@ -54,31 +55,31 @@ ok "$out2" "" "second Stop allows (no infinite loop)"
 led3="$TMP/.claude/agent-join/state/s3.json"
 
 # ── Scenario 1: SubagentStop re-fire idempotency (s4, two-agent setup) ────────
-# Two agents dispatched so running_fallback=2. ONE completes via SubagentStop
-# (running_fallback→1). Re-fire SubagentStop for the SAME completed agent:
-# with the status=="RUNNING" guard the re-fire is a no-op (rf stays 1).
-# Without the guard, rf would drop to 0 — making this assertion non-tautological.
+# Two agents dispatched (2 RUNNING). ONE completes via SubagentStop (1 RUNNING).
+# Re-fire SubagentStop for the SAME completed agent: the transition is a fixed
+# point (DONE stays DONE) and must not touch the other agent or overwrite the
+# completed agent's output_file with the re-fire's transcript path.
 led4="$TMP/.claude/agent-join/state/s4.json"
 printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s4","tool_name":"Agent","tool_input":{"description":"alpha task"},"tool_response":{"isAsync":true,"status":"async_launched","agentId":"cafe000010","outputFile":"/tmp/o/cafe000010.output"}}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s4","tool_name":"Agent","tool_input":{"description":"beta task"},"tool_response":{"isAsync":true,"status":"async_launched","agentId":"cafe000011","outputFile":"/tmp/o/cafe000011.output"}}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
-ok "$(jq -r '.running_fallback' "$led4" 2>/dev/null)" "2" "s4 two agents dispatched: running_fallback=2"
+ok "$(runc "$led4")" "2" "s4 two agents dispatched: 2 RUNNING"
 
-# first SubagentStop for cafe000010 -> DONE, running_fallback 2->1
+# first SubagentStop for cafe000010 -> DONE (2 RUNNING -> 1 RUNNING)
 printf '%s' '{"hook_event_name":"SubagentStop","session_id":"s4","agent_id":"cafe000010","agent_transcript_path":"/tmp/t/cafe000010.jsonl"}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["cafe000010"].status' "$led4" 2>/dev/null)" "DONE" "s4 SubagentStop first fire -> DONE"
-ok "$(jq -r '.running_fallback' "$led4" 2>/dev/null)" "1" "s4 first SubagentStop decrements running_fallback to 1"
+ok "$(runc "$led4")" "1" "s4 first SubagentStop -> 1 RUNNING (one DONE, one RUNNING)"
 ok "$(jq -r '.agents["cafe000011"].status' "$led4" 2>/dev/null)" "RUNNING" "s4 other agent still RUNNING after first SubagentStop"
 
-# re-fire SubagentStop for cafe000010 (already DONE): running_fallback must stay 1
-# THIS FAILS if the status=="RUNNING" guard is removed (rf would drop to 0)
+# re-fire SubagentStop for cafe000010 (already DONE): no-op — stays DONE, the dispatch
+# output_file is NOT overwritten by the re-fire's transcript path, other agent untouched.
 printf '%s' '{"hook_event_name":"SubagentStop","session_id":"s4","agent_id":"cafe000010","agent_transcript_path":"/tmp/t/cafe000010.jsonl"}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["cafe000010"].status' "$led4" 2>/dev/null)" "DONE" "s4 SubagentStop re-fire: completed agent stays DONE"
-ok "$(jq -r '.running_fallback' "$led4" 2>/dev/null)" "1" "s4 SubagentStop re-fire: running_fallback stays 1 (guard prevents double-decrement)"
-ok "$(jq -r '.agents["cafe000011"].status' "$led4" 2>/dev/null)" "RUNNING" "s4 SubagentStop re-fire: other agent still RUNNING"
+ok "$(jq -r '.agents["cafe000010"].output_file' "$led4" 2>/dev/null)" "/tmp/o/cafe000010.output" "s4 SubagentStop re-fire: output_file preserved (idempotent, not overwritten)"
+ok "$(runc "$led4")" "1" "s4 SubagentStop re-fire: still 1 RUNNING (other agent untouched)"
 
 # ── Scenario 2: UserPromptSubmit reconcile from task-notification ─────────────
 # Note: hook uses grep -oE '<task-id>[a-f0-9]+</task-id>' so agent IDs must be hex.
@@ -87,25 +88,27 @@ printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s3","tool_name":"Age
   | HOME="$TMP" bash "$HOOK" >/dev/null
 printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s3","tool_name":"Agent","tool_input":{"description":"xyz3 task"},"tool_response":{"isAsync":true,"status":"async_launched","agentId":"cafe000003","outputFile":"/tmp/o/cafe000003.output"}}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
-ok "$(jq -r '.running_fallback' "$led3" 2>/dev/null)" "2" "s3 two agents dispatched: running_fallback=2"
+ok "$(runc "$led3")" "2" "s3 two agents dispatched: 2 RUNNING"
 
 # UPS with <status>completed</status> for cafe000002 (xyz2)
 printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s3","prompt":"<task-notification><task-id>cafe000002</task-id><status>completed</status><output>all done</output></task-notification>"}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["cafe000002"].status' "$led3" 2>/dev/null)" "DONE" "s3 UPS completed -> xyz2 flips DONE"
-ok "$(jq -r '.running_fallback' "$led3" 2>/dev/null)" "1" "s3 UPS completed -> running_fallback decremented"
+ok "$(runc "$led3")" "1" "s3 UPS completed -> 1 RUNNING left"
 
 # UPS with <status>failed</status> for cafe000003 (xyz3) — terminal status coverage
 printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s3","prompt":"<task-notification><task-id>cafe000003</task-id><status>failed</status><output>crashed</output></task-notification>"}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["cafe000003"].status' "$led3" 2>/dev/null)" "DONE" "s3 UPS failed -> xyz3 flips DONE (terminal status)"
-ok "$(jq -r '.running_fallback' "$led3" 2>/dev/null)" "0" "s3 UPS failed -> running_fallback decremented to 0"
+ok "$(runc "$led3")" "0" "s3 UPS failed -> 0 RUNNING left"
 
-# Re-fire xyz2 completed notification: notified_count increments, running_fallback not below 0
+# Re-fire xyz2 completed notification: notified_count increments (the idempotency witness),
+# status stays DONE, RUNNING count unchanged.
 printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s3","prompt":"<task-notification><task-id>cafe000002</task-id><status>completed</status><output>all done</output></task-notification>"}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["cafe000002"].notified_count' "$led3" 2>/dev/null)" "2" "s3 UPS re-fire: notified_count increments (idempotent reconcile)"
-ok "$(jq -r '.running_fallback' "$led3" 2>/dev/null)" "0" "s3 UPS re-fire: running_fallback not below 0"
+ok "$(jq -r '.agents["cafe000002"].status' "$led3" 2>/dev/null)" "DONE" "s3 UPS re-fire: stays DONE"
+ok "$(runc "$led3")" "0" "s3 UPS re-fire: still 0 RUNNING"
 
 # ── Scenario 3: Stop reconcile-sweep on a missed completion (s5, isolated) ────
 # Fresh session s5: single agent dispatched, no SubagentStop or UPS fired.
@@ -168,14 +171,13 @@ ok "$(jq -r '.agents["cafe0000b1"].status' "$led7" 2>/dev/null)" "DONE" "s7 cafe
 printf '%s' '{"hook_event_name":"Stop","session_id":"s7","background_tasks":[]}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["cafe0000b1"].surfaced' "$led7" 2>/dev/null)" "true" "s7 cafe0000b1 surfaced after Stop"
-rf_before_s7="$(jq -r '.running_fallback' "$led7" 2>/dev/null)"
 
-# Re-dispatch same id: must be no-op (status stays DONE, surfaced stays true, running_fallback unchanged)
+# Re-dispatch same id: must be no-op (status stays DONE, surfaced stays true, NOT re-added as RUNNING)
 printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s7","tool_name":"Agent","tool_input":{"description":"b1 task again"},"tool_response":{"isAsync":true,"status":"async_launched","agentId":"cafe0000b1","outputFile":"/tmp/o/cafe0000b1.output"}}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
 ok "$(jq -r '.agents["cafe0000b1"].status' "$led7" 2>/dev/null)" "DONE" "s7 re-dispatch: status stays DONE (idempotent insert, no clobber)"
 ok "$(jq -r '.agents["cafe0000b1"].surfaced' "$led7" 2>/dev/null)" "true" "s7 re-dispatch: surfaced stays true (no clobber)"
-ok "$(jq -r '.running_fallback' "$led7" 2>/dev/null)" "$rf_before_s7" "s7 re-dispatch: running_fallback not incremented (no clobber)"
+ok "$(runc "$led7")" "0" "s7 re-dispatch: still 0 RUNNING (not re-added as RUNNING — no clobber)"
 
 # ── S-C3: UPS processes ALL bundled task-ids (loop-all fix, charset-agnostic) ─
 # Dispatch two agents; fire ONE UPS with BOTH completion notifications bundled.
@@ -185,7 +187,7 @@ printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s8","tool_name":"Age
   | HOME="$TMP" bash "$HOOK" >/dev/null
 printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s8","tool_name":"Agent","tool_input":{"description":"c2 task"},"tool_response":{"isAsync":true,"status":"async_launched","agentId":"cafe0000c2","outputFile":"/tmp/o/cafe0000c2.output"}}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
-ok "$(jq -r '.running_fallback' "$led8" 2>/dev/null)" "2" "s8 two agents dispatched: running_fallback=2"
+ok "$(runc "$led8")" "2" "s8 two agents dispatched: 2 RUNNING"
 
 # Single UPS carrying two <task-notification> blocks (charset-agnostic ids)
 bundled_ups='{"hook_event_name":"UserPromptSubmit","session_id":"s8","prompt":"<task-notification><task-id>cafe0000c1</task-id><status>completed</status><output>done1</output></task-notification> <task-notification><task-id>cafe0000c2</task-id><status>completed</status><output>done2</output></task-notification>"}'
@@ -219,5 +221,31 @@ ok "$out" "" "s10 pending background_task -> Stop allows rest (no false block)"
 ok "$(jq -r '.agents["cafe0000e1"].status' "$led10" 2>/dev/null)" "RUNNING" "s10 pending background_task -> not swept to DONE"
 out=$(printf '%s' '{"hook_event_name":"Stop","session_id":"s10","background_tasks":[{"type":"subagent","status":"queued","id":"cafe0000e1"}]}' | HOME="$TMP" bash "$HOOK")
 ok "$out" "" "s10 queued background_task -> Stop allows rest"
+
+# ── S11 read-detection (followup): a tool whose input names a DONE-unread agent's id or
+# output_file marks it surfaced, so the Stop guard does not re-block an already-read result.
+led11="$TMP/.claude/agent-join/state/s11.json"
+run '{"hook_event_name":"PostToolUse","session_id":"s11","tool_name":"Agent","tool_input":{"description":"R1"},"tool_response":{"isAsync":true,"agentId":"cafe0000f1","outputFile":"/tmp/o/cafe0000f1.output"}}' >/dev/null
+run '{"hook_event_name":"SubagentStop","session_id":"s11","agent_id":"cafe0000f1"}' >/dev/null
+ok "$(jq -r '.agents["cafe0000f1"].surfaced' "$led11")" "false" "s11 DONE result starts unread"
+# read via TaskOutput referencing the agentId
+run '{"hook_event_name":"PostToolUse","session_id":"s11","tool_name":"TaskOutput","tool_input":{"task_id":"cafe0000f1"}}' >/dev/null
+ok "$(jq -r '.agents["cafe0000f1"].surfaced' "$led11")" "true" "s11 TaskOutput(agentId) -> surfaced (read detected)"
+ok "$(run '{"hook_event_name":"Stop","session_id":"s11","background_tasks":[]}')" "" "s11 Stop after read -> no block (result already consumed)"
+
+# S12: read via Read(output_file path) also surfaces
+led12="$TMP/.claude/agent-join/state/s12.json"
+run '{"hook_event_name":"PostToolUse","session_id":"s12","tool_name":"Agent","tool_input":{"description":"R2"},"tool_response":{"isAsync":true,"agentId":"cafe0000f2","outputFile":"/tmp/o/cafe0000f2.output"}}' >/dev/null
+run '{"hook_event_name":"SubagentStop","session_id":"s12","agent_id":"cafe0000f2"}' >/dev/null
+run '{"hook_event_name":"PostToolUse","session_id":"s12","tool_name":"Read","tool_input":{"file_path":"/tmp/o/cafe0000f2.output"}}' >/dev/null
+ok "$(jq -r '.agents["cafe0000f2"].surfaced' "$led12")" "true" "s12 Read(output_file) -> surfaced (read detected)"
+
+# S13 (negative): an UNRELATED tool read must NOT surface, and an unread result STILL blocks.
+led13="$TMP/.claude/agent-join/state/s13.json"
+run '{"hook_event_name":"PostToolUse","session_id":"s13","tool_name":"Agent","tool_input":{"description":"R3"},"tool_response":{"isAsync":true,"agentId":"cafe0000f3","outputFile":"/tmp/o/cafe0000f3.output"}}' >/dev/null
+run '{"hook_event_name":"SubagentStop","session_id":"s13","agent_id":"cafe0000f3"}' >/dev/null
+run '{"hook_event_name":"PostToolUse","session_id":"s13","tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' >/dev/null
+ok "$(jq -r '.agents["cafe0000f3"].surfaced' "$led13")" "false" "s13 unrelated Read -> not surfaced"
+ok "$(jq -r '.decision // ""' <<<"$(run '{"hook_event_name":"Stop","session_id":"s13","background_tasks":[]}')")" "block" "s13 unread result still blocks (stall-prevention intact)"
 
 echo "PASS=$PASS FAIL=$FAIL"; [ "$FAIL" = 0 ]

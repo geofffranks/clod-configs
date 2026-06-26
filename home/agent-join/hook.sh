@@ -9,10 +9,7 @@ SID=$(jq -r '.session_id // ""' <<<"$INPUT" 2>/dev/null)
 
 STATE_DIR="${HOME}/.claude/agent-join/state"
 LEDGER="${STATE_DIR}/${SID}.json"
-# running_fallback is a DIAGNOSTIC counter only — no control-flow path reads it (actionable()
-# scans .agents statuses; the Stop guard uses the authoritative .background_tasks). Kept for
-# observability/test sanity; safe to drop in a future cleanup if it stops earning its keep.
-DEFAULT='{"agents":{},"running_fallback":0}'
+DEFAULT='{"agents":{}}'
 
 ledger_read(){ [ -f "$LEDGER" ] && cat "$LEDGER" 2>/dev/null || printf '%s' "$DEFAULT"; }
 # Refuse to persist empty/invalid JSON: a jq error anywhere upstream would otherwise write a
@@ -26,8 +23,20 @@ L="$(ledger_read)"
 
 case "$EVENT" in
   PostToolUse)
-    # Non-Agent / non-async dispatches are not tracked: plain exit (no ledger effect).
-    [ "$(jq -r '.tool_name // ""' <<<"$INPUT")" = "Agent" ] || exit 0
+    if [ "$(jq -r '.tool_name // ""' <<<"$INPUT")" != "Agent" ]; then
+      # Read-detection (only when something is outstanding): if THIS tool's input references a
+      # DONE-but-unread agent's id or output_file (e.g. Read <output_file>, TaskOutput <agentId>),
+      # the model has consumed that result -> mark it surfaced so the Stop guard does not re-block
+      # an already-read agent. agentIds are long hex / output_files are unique paths, so a
+      # substring match is collision-safe. (Results delivered inline via a notification leave no
+      # tool trace and stay unread until the one bounded Stop nudge — genuinely undetectable.)
+      actionable "$L" || exit 0
+      TIN=$(jq -c '.tool_input // {}' <<<"$INPUT" 2>/dev/null)
+      [ -n "$TIN" ] || TIN='{}'
+      NEWL=$(jq --argjson tin "$TIN" '($tin|tostring) as $s | .agents |= with_entries(if (.value.status=="DONE" and (.value.surfaced|not) and ((.key|inside($s)) or ((.value.output_file//"")!="" and (.value.output_file|inside($s))))) then .value.surfaced=true else . end)' <<<"$L" 2>/dev/null)
+      [ -n "$NEWL" ] && [ "$NEWL" != "$L" ] && ledger_write "$NEWL"
+      exit 0
+    fi
     # S1 (spike-confirmed): tool_response is a JSON OBJECT (not a string); this build
     # uses `.tool_response` (doc's `.tool_result` kept as fallback). agentId, outputFile,
     # and the label are all structured fields. Only record async dispatches.
@@ -40,7 +49,7 @@ case "$EVENT" in
     # already-tracked agent (or a reused agentId) must not reset a DONE/surfaced row back to
     # RUNNING/surfaced:false, which would re-enter the inject/block paths for a read result.
     L=$(jq --arg id "$AID" --arg lbl "$LABEL" --arg out "$OUT" \
-        'if (.agents|has($id)) then . else .agents[$id]={label:$lbl,status:"RUNNING",output_file:$out,notified_count:0,surfaced:false} | .running_fallback+=1 end' <<<"$L")
+        'if (.agents|has($id)) then . else .agents[$id]={label:$lbl,status:"RUNNING",output_file:$out,notified_count:0,surfaced:false} end' <<<"$L")
     ledger_write "$L"
     exit 0 ;;
   SubagentStop)
@@ -59,7 +68,7 @@ case "$EVENT" in
     # agent_id, the sweep can't recover it — accepted, vs. the worse data-swap of guessing a row.
     # Idempotent: transition only on RUNNING->DONE (SubagentStop and UserPromptSubmit both fire).
     if [ -n "$AID" ] && [ "$(jq -r --arg id "$AID" '.agents[$id]//empty' <<<"$L")" != "" ]; then
-      L=$(jq --arg id "$AID" --arg tp "$TPATH" 'if .agents[$id].status=="RUNNING" then .agents[$id].status="DONE" | (if (.agents[$id].output_file // "")=="" then .agents[$id].output_file=$tp else . end) | .running_fallback=([.running_fallback-1,0]|max) else . end' <<<"$L")
+      L=$(jq --arg id "$AID" --arg tp "$TPATH" 'if .agents[$id].status=="RUNNING" then .agents[$id].status="DONE" | (if (.agents[$id].output_file // "")=="" then .agents[$id].output_file=$tp else . end) else . end' <<<"$L")
       ledger_write "$L"
     fi
     exit 0 ;;
@@ -72,13 +81,13 @@ case "$EVENT" in
     # Terminal status is completed|failed|killed — all mean "no longer running" (a crashed
     # session emits failed). A <task-notification> only ever fires when an agent comes to REST,
     # so every <task-id> in the prompt is a completion — there is no "still-running" notification
-    # to mis-flip. notified_count bumps on every notification (drives dup-notes); the
-    # status/decrement transition fires once, on RUNNING->DONE (idempotent vs SubagentStop).
+    # to mis-flip. notified_count bumps on every notification (drives dup-notes); the status
+    # transition fires once, on RUNNING->DONE (idempotent vs SubagentStop).
     PROMPT=$(jq -r '.prompt // ""' <<<"$INPUT")
     if grep -qE '<status>(completed|failed|killed)</status>' <<<"$PROMPT"; then
       while IFS= read -r TID; do
         [ -n "$TID" ] || continue
-        L=$(jq --arg id "$TID" 'if .agents[$id] then .agents[$id].notified_count+=1 | (if .agents[$id].status=="RUNNING" then .agents[$id].status="DONE" | .running_fallback=([.running_fallback-1,0]|max) else . end) else . end' <<<"$L")
+        L=$(jq --arg id "$TID" 'if .agents[$id] then .agents[$id].notified_count+=1 | (if .agents[$id].status=="RUNNING" then .agents[$id].status="DONE" else . end) else . end' <<<"$L")
       done < <(grep -oE '<task-id>[^<]+</task-id>' <<<"$PROMPT" | sed -E 's/<\/?task-id>//g')
       ledger_write "$L"
     fi
@@ -105,12 +114,15 @@ case "$EVENT" in
     # array (authoritative "nothing running"). If the field is absent/malformed we must NOT sweep
     # — fabricating completions there would falsely block agents that are actually still running.
     if [ "$(jq -r '(.background_tasks|type)=="array"' <<<"$INPUT" 2>/dev/null)" = "true" ]; then
-      L=$(jq '.agents |= with_entries(if .value.status=="RUNNING" then .value.status="DONE" else . end) | .running_fallback=0' <<<"$L")
+      L=$(jq '.agents |= with_entries(if .value.status=="RUNNING" then .value.status="DONE" else . end)' <<<"$L")
     fi
     UNREAD=$(jq -r '[.agents|to_entries[]|select(.value.status=="DONE" and (.value.surfaced|not))|.key]|length' <<<"$L")
     if [ "$UNREAD" -eq 0 ]; then ledger_write "$L"; exit 0; fi
     DETAIL=$(jq -r '[.agents|to_entries[]|select(.value.status=="DONE" and (.value.surfaced|not))|"\(.key) (\(.value.label)) result:\(.value.output_file)"]|join("; ")' <<<"$L")
-    REASON="You are NOT waiting — these subagents already completed and their results are unread: ${DETAIL}. Read each result (its output_file / TaskOutput) and proceed; do not treat the completion notifications as duplicates."
+    # Wording acknowledges the inline-read case (read-detection on PostToolUse handles explicit
+    # Read/TaskOutput; results delivered inline can't be detected, so allow a clean proceed if
+    # already read — while still telling a genuinely-stalled orchestrator it is NOT waiting).
+    REASON="You are not waiting — these subagents have already completed: ${DETAIL}. If you have already read each result, proceed. If not, read it (its output_file / TaskOutput) now — and never dismiss a completion notification as a duplicate of an earlier agent's."
     # Emit the block BEFORE persisting surfaced=true. If the process dies between the two, the
     # worst case is a harmless re-block on the next Stop — never a silently-disarmed guard, which
     # a persist-then-emit ordering would risk (crash after the write = permanent silent stall).
