@@ -108,6 +108,8 @@ out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.
 hasnt "$out" "OVERWRITE"                                "no overwrite warning on fresh install"
 ajq "$D/settings.json" '.theme == "dark"'              "theme from fragment present"
 ajq "$D/settings.json" '.hooks.PreToolUse | length == 6' "hooks from fragment present"
+ajq "$D/settings.json" '.hooks.SubagentStop | map(.hooks[].command) | any(. == "~/.claude/agent-join/hook.sh")' "agent-join SubagentStop registered"
+ajq "$D/settings.json" '.hooks.Stop      | map(.hooks[].command) | any(. == "~/.claude/agent-join/hook.sh")' "agent-join Stop registered"
 cmp -s <(jq -S . "$FRAG") <(jq -S . "$D/settings.json") && ok "settings.json == fragment" || no "settings.json == fragment"
 hasbak "$D" && no "no backup on fresh install" || ok "no backup on fresh install"
 rm -rf "$D"
@@ -171,7 +173,7 @@ D="$(seed x "$EXTRAHOOK")"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
 hasnt "$out" "OVERWRITE"                                "adding to a shared event is not a conflict"
 ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | index("~/my/stop.sh") != null' "user Stop hook preserved"
-ajq "$D/settings.json" '.hooks.Stop | length == 2'     "recommended Stop hook added too"
+ajq "$D/settings.json" '.hooks.Stop | length == 3'     "recommended Stop hooks added too"
 rm -rf "$D"
 
 # --- S16: tilde vs expanded $HOME are the SAME hook -> dedup, not re-add ---
@@ -182,7 +184,7 @@ TILDEHOOK="{ \"hooks\": { \"Stop\": [ { \"matcher\": \"\", \"hooks\": [ { \"type
 D="$(seed x "$TILDEHOOK")"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
 ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | map(select(test("agent-state"))) | length == 1' "agent-state not duplicated across tilde/expanded forms"
-ajq "$D/settings.json" '.hooks.Stop | length == 1'     "no net new Stop entry (same hook)"
+ajq "$D/settings.json" '.hooks.Stop | length == 2'     "agent-state deduped, agent-join added"
 rm -rf "$D"
 
 # --- S17: partial accept across two conflicts (deterministic order) ---

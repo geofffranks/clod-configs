@@ -27,11 +27,19 @@
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/no-remote-writes.sh" } ] },
       { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] }
     ],
+    "PostToolUse": [
+      { "matcher": "Agent", "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
+    ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] }
+      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] },
+      { "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] }
+      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] },
+      { "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
     ],
     "PostCompact": [
       { "matcher": "", "hooks": [ { "type": "command", "command": "~/.claude/read-once/compact.sh" } ] }
