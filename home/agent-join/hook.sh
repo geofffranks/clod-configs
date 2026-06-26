@@ -27,13 +27,18 @@ case "$EVENT" in
       # Read-detection (only when something is outstanding): if THIS tool's input references a
       # DONE-but-unread agent's id or output_file (e.g. Read <output_file>, TaskOutput <agentId>),
       # the model has consumed that result -> mark it surfaced so the Stop guard does not re-block
-      # an already-read agent. agentIds are long hex / output_files are unique paths, so a
-      # substring match is collision-safe. (Results delivered inline via a notification leave no
-      # tool trace and stay unread until the one bounded Stop nudge — genuinely undetectable.)
+      # an already-read agent. Match a leaf STRING VALUE of tool_input EXACTLY (==), never a
+      # substring of the stringified blob: substring matching false-surfaces a genuinely-unread
+      # result — e.g. a Bash `echo agent=<id>` that merely mentions the id, a Read of
+      # `<output_file>.bak` (output_file is a prefix), or a short id that is a substring of another
+      # agent's output_file path — silently skipping the Stop block (the exact stall this guards).
+      # Exact leaf equality fires only on a true read: Read.file_path == output_file, or
+      # TaskOutput.task_id == agentId. (Inline-delivered results leave no tool trace and stay
+      # unread until the one bounded Stop nudge — genuinely undetectable; the softened block copes.)
       actionable "$L" || exit 0
       TIN=$(jq -c '.tool_input // {}' <<<"$INPUT" 2>/dev/null)
       [ -n "$TIN" ] || TIN='{}'
-      NEWL=$(jq --argjson tin "$TIN" '($tin|tostring) as $s | .agents |= with_entries(if (.value.status=="DONE" and (.value.surfaced|not) and ((.key|inside($s)) or ((.value.output_file//"")!="" and (.value.output_file|inside($s))))) then .value.surfaced=true else . end)' <<<"$L" 2>/dev/null)
+      NEWL=$(jq --argjson tin "$TIN" '[$tin | .. | strings] as $vals | .agents |= with_entries(.key as $k | (.value.output_file // "") as $of | if (.value.status=="DONE" and (.value.surfaced|not) and (($vals|index($k)) or ($of!="" and ($vals|index($of))))) then .value.surfaced=true else . end)' <<<"$L" 2>/dev/null)
       [ -n "$NEWL" ] && [ "$NEWL" != "$L" ] && ledger_write "$NEWL"
       exit 0
     fi

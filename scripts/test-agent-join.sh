@@ -72,6 +72,10 @@ printf '%s' '{"hook_event_name":"SubagentStop","session_id":"s4","agent_id":"caf
 ok "$(jq -r '.agents["cafe000010"].status' "$led4" 2>/dev/null)" "DONE" "s4 SubagentStop first fire -> DONE"
 ok "$(runc "$led4")" "1" "s4 first SubagentStop -> 1 RUNNING (one DONE, one RUNNING)"
 ok "$(jq -r '.agents["cafe000011"].status' "$led4" 2>/dev/null)" "RUNNING" "s4 other agent still RUNNING after first SubagentStop"
+# Inner output_file-preservation guard bite: the FIRST fire transitions RUNNING->DONE and must
+# keep the dispatch output_file, NOT overwrite it with the transcript path. Drop the inner
+# `if output_file==""` guard and this flips to /tmp/t/cafe000010.jsonl -> this assertion fails.
+ok "$(jq -r '.agents["cafe000010"].output_file' "$led4" 2>/dev/null)" "/tmp/o/cafe000010.output" "s4 first SubagentStop: dispatch output_file preserved, not overwritten by transcript (inner guard bites)"
 
 # re-fire SubagentStop for cafe000010 (already DONE): no-op — stays DONE, the dispatch
 # output_file is NOT overwritten by the re-fire's transcript path, other agent untouched.
@@ -247,5 +251,48 @@ run '{"hook_event_name":"SubagentStop","session_id":"s13","agent_id":"cafe0000f3
 run '{"hook_event_name":"PostToolUse","session_id":"s13","tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' >/dev/null
 ok "$(jq -r '.agents["cafe0000f3"].surfaced' "$led13")" "false" "s13 unrelated Read -> not surfaced"
 ok "$(jq -r '.decision // ""' <<<"$(run '{"hook_event_name":"Stop","session_id":"s13","background_tasks":[]}')")" "block" "s13 unread result still blocks (stall-prevention intact)"
+
+# ── S-outer: SubagentStop outer RUNNING-guard bite (empty output_file, no backfill on re-fire) ──
+# Dispatch with NO outputFile -> output_file="". UPS completes it -> DONE (output_file stays "").
+# A later SubagentStop re-fire carrying a transcript must NOT backfill: the outer status==RUNNING
+# guard short-circuits the whole transition on the already-DONE row. Drop the outer guard and the
+# inner `if output_file==""` backfill runs -> output_file becomes the transcript path -> fails.
+led14="$TMP/.claude/agent-join/state/s14.json"
+run '{"hook_event_name":"PostToolUse","session_id":"s14","tool_name":"Agent","tool_input":{"description":"E1"},"tool_response":{"isAsync":true,"agentId":"cafe0000e9"}}' >/dev/null
+ok "$(jq -r '.agents["cafe0000e9"].output_file' "$led14" 2>/dev/null)" "" "s14 dispatch without outputFile -> empty output_file"
+run '{"hook_event_name":"UserPromptSubmit","session_id":"s14","prompt":"<task-notification><task-id>cafe0000e9</task-id><status>completed</status></task-notification>"}' >/dev/null
+ok "$(jq -r '.agents["cafe0000e9"].status' "$led14" 2>/dev/null)" "DONE" "s14 UPS completed -> DONE (output_file still empty)"
+run '{"hook_event_name":"SubagentStop","session_id":"s14","agent_id":"cafe0000e9","agent_transcript_path":"/tmp/t/cafe0000e9.jsonl"}' >/dev/null
+ok "$(jq -r '.agents["cafe0000e9"].output_file' "$led14" 2>/dev/null)" "" "s14 SubagentStop re-fire on DONE row -> transcript NOT backfilled (outer RUNNING guard bites)"
+
+# ── S15 (false-surface, bug1): a tool that merely MENTIONS an agentId must NOT surface it ──────
+# Exact leaf-value match, not substring: a Bash `echo agent=<id>` is not a read. With the old
+# substring `inside()`, this false-surfaced the row and the Stop guard skipped a real unread
+# result — the exact stall the feature prevents. Must stay unread and STILL block.
+led15="$TMP/.claude/agent-join/state/s15.json"
+run '{"hook_event_name":"PostToolUse","session_id":"s15","tool_name":"Agent","tool_input":{"description":"G1"},"tool_response":{"isAsync":true,"agentId":"cafe0000g1","outputFile":"/tmp/o/cafe0000g1.output"}}' >/dev/null
+run '{"hook_event_name":"SubagentStop","session_id":"s15","agent_id":"cafe0000g1"}' >/dev/null
+run '{"hook_event_name":"PostToolUse","session_id":"s15","tool_name":"Bash","tool_input":{"command":"echo agent=cafe0000g1 status"}}' >/dev/null
+ok "$(jq -r '.agents["cafe0000g1"].surfaced' "$led15" 2>/dev/null)" "false" "s15 Bash mentioning agentId -> NOT surfaced (exact match, not substring)"
+ok "$(jq -r '.decision // ""' <<<"$(run '{"hook_event_name":"Stop","session_id":"s15","background_tasks":[]}')")" "block" "s15 unread result STILL blocks (no false-surface stall)"
+
+# ── S16 (false-surface, bug2): reading <output_file>.bak must NOT surface (output_file is a prefix) ──
+led16="$TMP/.claude/agent-join/state/s16.json"
+run '{"hook_event_name":"PostToolUse","session_id":"s16","tool_name":"Agent","tool_input":{"description":"G2"},"tool_response":{"isAsync":true,"agentId":"cafe0000g2","outputFile":"/tmp/o/cafe0000g2.output"}}' >/dev/null
+run '{"hook_event_name":"SubagentStop","session_id":"s16","agent_id":"cafe0000g2"}' >/dev/null
+run '{"hook_event_name":"PostToolUse","session_id":"s16","tool_name":"Read","tool_input":{"file_path":"/tmp/o/cafe0000g2.output.bak"}}' >/dev/null
+ok "$(jq -r '.agents["cafe0000g2"].surfaced' "$led16" 2>/dev/null)" "false" "s16 Read of <output_file>.bak -> NOT surfaced (exact match, not prefix)"
+
+# ── S17 (false-surface, bug3): short id that is a substring of another agent's output_file path ──
+# A id='cafe' (short), B output_file='/tmp/o/cafe0000g3.output'. Reading B's result surfaces B
+# only; A's short id is a substring of B's path but must NOT surface under exact leaf matching.
+led17="$TMP/.claude/agent-join/state/s17.json"
+run '{"hook_event_name":"PostToolUse","session_id":"s17","tool_name":"Agent","tool_input":{"description":"A"},"tool_response":{"isAsync":true,"agentId":"cafe","outputFile":"/tmp/o/cafe.output"}}' >/dev/null
+run '{"hook_event_name":"SubagentStop","session_id":"s17","agent_id":"cafe"}' >/dev/null
+run '{"hook_event_name":"PostToolUse","session_id":"s17","tool_name":"Agent","tool_input":{"description":"B"},"tool_response":{"isAsync":true,"agentId":"cafe0000g3","outputFile":"/tmp/o/cafe0000g3.output"}}' >/dev/null
+run '{"hook_event_name":"SubagentStop","session_id":"s17","agent_id":"cafe0000g3"}' >/dev/null
+run '{"hook_event_name":"PostToolUse","session_id":"s17","tool_name":"Read","tool_input":{"file_path":"/tmp/o/cafe0000g3.output"}}' >/dev/null
+ok "$(jq -r '.agents["cafe0000g3"].surfaced' "$led17" 2>/dev/null)" "true" "s17 reading B output -> B surfaced (exact match fires for real read)"
+ok "$(jq -r '.agents["cafe"].surfaced' "$led17" 2>/dev/null)" "false" "s17 short id 'cafe' substring of B path -> A NOT surfaced (no prefix collision)"
 
 echo "PASS=$PASS FAIL=$FAIL"; [ "$FAIL" = 0 ]
