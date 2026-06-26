@@ -86,7 +86,7 @@ ok "$(jq -r '.agents["cafe000010"].output_file' "$led4" 2>/dev/null)" "/tmp/o/ca
 ok "$(runc "$led4")" "1" "s4 SubagentStop re-fire: still 1 RUNNING (other agent untouched)"
 
 # ── Scenario 2: UserPromptSubmit reconcile from task-notification ─────────────
-# Note: hook uses grep -oE '<task-id>[a-f0-9]+</task-id>' so agent IDs must be hex.
+# Note: hook matches <task-id>[^<]+</task-id> (charset-agnostic); ids here are hex by convention.
 # dispatch xyz2 (cafe000002) and xyz3 (cafe000003)
 printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s3","tool_name":"Agent","tool_input":{"description":"xyz2 task"},"tool_response":{"isAsync":true,"status":"async_launched","agentId":"cafe000002","outputFile":"/tmp/o/cafe000002.output"}}' \
   | HOME="$TMP" bash "$HOOK" >/dev/null
