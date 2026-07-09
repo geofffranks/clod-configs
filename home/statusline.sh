@@ -2,13 +2,12 @@
 # Custom Claude Code status line.
 #
 # Layout:  [LEFT]                                                      [RIGHT]
-#   LEFT : [CAVEMAN]  <cwd> |<branch> (<worktree>) <gitstatus>|  {agent}  PR#n
+#   LEFT : <cwd> |<branch> (<worktree>) <gitstatus>|  {agent}  PR#n
 #   RIGHT: <model> <effort> <think> | ctx%/size | $cost | 5h%(reset) 7d%(reset)
 #   where (reset) is compact time until each window resets, e.g. (2h14m) / (2d7h).
 #
 # git status uses gitprompt.pl if found ($CLAUDE_STATUSLINE_GITPROMPT or PATH),
 # else falls back to plain git. Requires bash 4+ (uses mapfile).
-# Self-contained: caveman badge logic inlined, not sourced from the plugin cache.
 # Runs as a shell command outside the model => zero token cost.
 
 INPUT=$(cat)
