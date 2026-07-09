@@ -79,8 +79,6 @@ These are referenced by or complement this config but are not bundled:
 
 - **[superpowers](https://github.com/obra/superpowers-marketplace)** — the
   skill framework `git-workflow` defers to for branch/PR/worktree mechanics.
-- **[caveman](https://github.com/JuliusBrussee/caveman)** — terse-output mode;
-  `statusline.sh` shows a `[CAVEMAN]` badge when it's active.
 - **rtk** — read/grep/test output compressor. If installed, wire its hook:
   add `{ "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/rtk-rewrite.sh" } ] }`
   to `hooks.PreToolUse` (script ships with rtk).

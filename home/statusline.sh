@@ -32,29 +32,8 @@ vlen() {
   printf '%s' "${#s}"
 }
 
-# ================= LEFT: caveman badge =================
+# ================= LEFT =================
 LEFT=""
-FLAG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.caveman-active"
-if [ -f "$FLAG" ] && [ ! -L "$FLAG" ]; then
-  MODE=$(head -c 64 "$FLAG" 2>/dev/null | tr -d '\n\r' | tr '[:upper:]' '[:lower:]')
-  MODE=$(printf '%s' "$MODE" | tr -cd 'a-z0-9-')
-  case "$MODE" in
-    off|lite|full|ultra|wenyan-lite|wenyan|wenyan-full|wenyan-ultra|commit|review|compress)
-      if [ -z "$MODE" ] || [ "$MODE" = "full" ]; then
-        LEFT+="${ORANGE}[CAVEMAN]${RESET}"
-      elif [ "$MODE" != "off" ]; then
-        LEFT+="${ORANGE}[CAVEMAN:$(printf '%s' "$MODE" | tr '[:lower:]' '[:upper:]')]${RESET}"
-      fi
-      if [ "${CAVEMAN_STATUSLINE_SAVINGS:-1}" != "0" ]; then
-        SF="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.caveman-statusline-suffix"
-        if [ -f "$SF" ] && [ ! -L "$SF" ]; then
-          SAV=$(head -c 64 "$SF" 2>/dev/null | tr -d '\000-\037')
-          [ -n "$SAV" ] && LEFT+=" ${ORANGE}${SAV}${RESET}"
-        fi
-      fi
-      ;;
-  esac
-fi
 
 # ================= fields from stdin =================
 if [ -z "$INPUT" ] || ! command -v jq >/dev/null 2>&1; then
