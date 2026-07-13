@@ -1,0 +1,1 @@
+{"event":"pre_tool_use","matcher_subject":"shell_exec","prompt_id":"019f593b-3ad9-7b72-8fdc-8b09f786e565","tool_name":"shell_exec","call_id":"call_jrXna3o7Rjl88HtlavACLdgM","input":{"command":"printf task1","timeout_seconds":30}}

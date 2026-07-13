@@ -1,0 +1,4 @@
+{
+  "event": "post_compaction",
+  "matcher_subject": "post_compaction"
+}

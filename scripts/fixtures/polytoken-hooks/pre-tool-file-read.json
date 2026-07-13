@@ -1,0 +1,1 @@
+{"event":"pre_tool_use","matcher_subject":"file_read","prompt_id":"019f593b-3ad9-7b72-8fdc-8b09f786e565","tool_name":"file_read","call_id":"call_S5p2LEUAa643faW3TShXi54m","input":{"path":"/Users/gfranks/workspace/claude-config/.worktrees/polytoken-install/scripts/test-polytoken-contracts.sh","offset":0,"limit":200,"max_bytes":32000,"mode":"default"}}
