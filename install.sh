@@ -1,33 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/home" && pwd)"
-DEST="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-TS="$(date +%Y%m%d-%H%M%S)"
-FRAG="$SRC_DIR/settings.recommended.json"
-SETTINGS="$DEST/settings.json"
+usage() {
+  cat <<'EOF'
+usage: install.sh [--target claude|polytoken|all] [--overwrite]
+  --target claude             install Claude Code config (default)
+  --target polytoken          install Polytoken config
+  --target all                install both targets, independently
+  --overwrite                 take recommended settings over your existing values (no prompt)
+  CLAUDE_CONFIG_OVERWRITE=1   same, via environment
+EOF
+}
 
-# Force-overwrite knob: env CLAUDE_CONFIG_OVERWRITE=1 or the --overwrite flag.
+usage_error() {
+  [ "$#" -gt 0 ] && echo "install.sh: $*" >&2
+  usage >&2
+  exit 2
+}
+
+# Parse arguments once. `--target` selects the install mode (default: claude);
+# `--overwrite` (or CLAUDE_CONFIG_OVERWRITE=1) accepts recommended conflicts.
+target=claude
 force=0
 [ "${CLAUDE_CONFIG_OVERWRITE:-}" = "1" ] && force=1
-for arg in "$@"; do
-  case "$arg" in
-    --overwrite) force=1 ;;
-    -h | --help)
-      echo "usage: install.sh [--overwrite]"
-      echo "  --overwrite                 take recommended settings over your existing values (no prompt)"
-      echo "  CLAUDE_CONFIG_OVERWRITE=1   same, via environment"
-      exit 0
-      ;;
-    *)
-      echo "install.sh: unknown argument: $arg" >&2
-      echo "usage: install.sh [--overwrite]" >&2
-      exit 2
-      ;;
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target) [ "$#" -ge 2 ] || usage_error "--target requires a value"; target=$2; shift 2 ;;
+    --overwrite) force=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage_error "unknown argument: $1" ;;
   esac
 done
+case "$target" in claude|polytoken|all) ;; *) usage_error "unknown target: $target" ;; esac
 
-echo "Installing Claude config into: $DEST"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+install_claude() {
+  SRC_DIR="$(cd "$SELF_DIR/home" && pwd)"
+  DEST="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  TS="$(date +%Y%m%d-%H%M%S)"
+  FRAG="$SRC_DIR/settings.recommended.json"
+  SETTINGS="$DEST/settings.json"
+
+  echo "Installing Claude config into: $DEST"
 mkdir -p "$DEST"
 
 # 1. Copy every file under home/ EXCEPT the settings fragment (merged separately).
@@ -225,4 +240,28 @@ else
   echo "  into: $SETTINGS  (do NOT overwrite your permissions block)"
 fi
 
-echo "Done."
+  echo "Done."
+}
+
+case "$target" in
+  claude)
+    install_claude
+    ;;
+  polytoken)
+    bash "$SELF_DIR/scripts/install-polytoken.sh" "$force"
+    ;;
+  all)
+    # Run both targets independently; report each result and exit nonzero if
+    # either failed. A success is not rolled back when the other target fails.
+    rc=0
+    echo "==> target claude"
+    if install_claude; then echo "target claude: OK"; else echo "target claude: FAILED"; rc=1; fi
+    echo "==> target polytoken"
+    if bash "$SELF_DIR/scripts/install-polytoken.sh" "$force"; then
+      echo "target polytoken: OK"
+    else
+      echo "target polytoken: FAILED"; rc=1
+    fi
+    exit "$rc"
+    ;;
+esac

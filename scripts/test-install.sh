@@ -255,6 +255,38 @@ has "$out" "declined 0"                                 "force declined nothing"
 hasnt "$out" "differ from yours"                       "force mode omits conflict advisory"
 rm -rf "$D"
 
+# --- S23: no-argument and --target claude create identical Claude artifacts ---
+sc "S23 no-arg == --target claude (identical artifacts)"
+D1="$(mktemp -d)"; D2="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D1" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+CLAUDE_CONFIG_DIR="$D2" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --target claude >/dev/null 2>&1
+diff -r "$D1" "$D2" >/dev/null 2>&1 && ok "no-arg and --target claude identical" || no "no-arg and --target claude identical"
+rm -rf "$D1" "$D2"
+
+# --- S23b: --target claude is the documented default (no-arg path unchanged) ---
+sc "S23b --target claude installs settings.json"
+D="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --target claude >/dev/null 2>&1
+[ -f "$D/settings.json" ] && ok "--target claude installed settings.json" || no "--target claude installed settings.json"
+rm -rf "$D"
+
+# --- S24: unknown target value -> exit 2 with usage ---
+sc "S24 unknown target -> exit 2 + usage"
+D="$(mktemp -d)"
+out="$(CLAUDE_CONFIG_DIR="$D" "$REPO/install.sh" --target bogus 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && ok "exit 2 on unknown target (rc=$rc)" || no "exit 2 on unknown target (rc=$rc)"
+has "$out" "usage"                              "printed usage on unknown target"
+has "$out" "target"                             "error mentions target"
+rm -rf "$D"
+
+# --- S25: missing --target value -> exit 2 with usage ---
+sc "S25 missing --target value -> exit 2 + usage"
+D="$(mktemp -d)"
+out="$(CLAUDE_CONFIG_DIR="$D" "$REPO/install.sh" --target 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && ok "exit 2 on missing --target value (rc=$rc)" || no "exit 2 on missing --target value (rc=$rc)"
+has "$out" "usage"                              "printed usage on missing target value"
+rm -rf "$D"
+
 echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
