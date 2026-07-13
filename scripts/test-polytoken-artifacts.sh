@@ -12,25 +12,6 @@ cd "$ROOT" || exit 1
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-normalize_diagnostic() {
-  # Remove ANSI control sequences, non-ASCII box-drawing bytes, and formatting
-  # whitespace so terminal wrapping cannot split fingerprint words or tokens.
-  LC_ALL=C sed $'s/\033\\[[0-9;?]*[ -\\/]*[@-~]//g' \
-    | LC_ALL=C tr -cd '\11\12\15\40-\176' \
-    | LC_ALL=C tr -d '[:space:]'
-}
-
-is_known_git_workflow_failure() {
-  local normalized fingerprint
-  normalized=$(printf '%s' "$1" | normalize_diagnostic)
-  fingerprint="skillfile${GIT_WORKFLOW_SKILL}frontmatterparseerror:mappingvaluesarenotallowedinthiscontextatline2column"
-
-  case "$normalized" in
-    *"$fingerprint"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 command -v jq   >/dev/null 2>&1 || fail "jq is required"
 command -v polytoken >/dev/null 2>&1 || fail "polytoken is required"
 # The config merge relies on mikefarah/yq v4 deep-merge semantics
@@ -131,65 +112,49 @@ polytoken --config-dir "$TMP" config validate --user \
 
 # --- skill validation ---
 #
-# Validate every skill under home/skills/. Three of the four skills validate
-# cleanly. The fourth, home/skills/git-workflow/SKILL.md, has a pre-existing
-# YAML frontmatter parse error (`mapping values are not allowed in this
-# context at line 2`) caused by an unquoted colon in its description. Task 4
-# scope is native artifacts only and explicitly forbids editing skills; skill
-# portability is owned by Task 6. So rather than fail the whole suite on that
-# one known-bad file, we pin its expected failure here and require every
-# *other* skill to pass.
-#
-# >>> TASK 6 GATE (remove this comment when resolved) <<<
-# When Task 6 ports/repairs the git-workflow skill so it validates, DELETE the
-# entire GIT_WORKFLOW_KNOWN_BAD expected-failure branch below and require all
-# skills to pass unconditionally (revert to a plain `fail` on any failure).
-# Leaving this branch in place after the skill is fixed would let a
-# regression pass silently.
-GIT_WORKFLOW_SKILL="home/skills/git-workflow/SKILL.md"
-
-# Mutation guards: neither a different parser defect nor the known message at
-# a different line may satisfy the Task 6 expected-failure gate.
-mutation_out="Error: validate skill failed: skill file $GIT_WORKFLOW_SKILL frontmatter parse error: unexpected end of stream at line 7"
-if is_known_git_workflow_failure "$mutation_out"; then
-  fail "mutation guard: a different git-workflow parse error matched the known defect"
-fi
-mutation_out="Error: validate skill failed: skill file $GIT_WORKFLOW_SKILL frontmatter parse error: mapping values are not allowed in this context at line 7 column 1"
-if is_known_git_workflow_failure "$mutation_out"; then
-  fail "mutation guard: the known git-workflow parse error at a different line matched the known defect"
-fi
+# Validate every skill under home/skills/. All four skills must validate
+# cleanly: the git-workflow frontmatter parse error (an unquoted colon in its
+# description) was repaired in Task 6, so there is no longer a known-bad file to
+# pin. Any validation failure fails the suite.
 
 if ! ls home/skills/*/SKILL.md >/dev/null 2>&1; then
   fail "no skills found under home/skills/*/SKILL.md"
 fi
 
 for f in home/skills/*/SKILL.md; do
-  if out=$(polytoken validate skill "$f" 2>&1); then
-    rc=0
-  else
-    rc=$?
+  if ! out=$(polytoken validate skill "$f" 2>&1); then
+    fail "skill validation failed: $f"$'\n'"$out"
   fi
-
-  if [ "$f" = "$GIT_WORKFLOW_SKILL" ]; then
-    # The one skill Task 4 cannot touch: it MUST fail with the known parse
-    # error. If it unexpectedly passes (e.g. Task 6 already fixed it) we fail
-    # loudly so the expected-failure branch is removed.
-    if [ "$rc" -eq 0 ]; then
-      fail "$GIT_WORKFLOW_SKILL unexpectedly validated; Task 6 likely fixed it — remove the GIT_WORKFLOW_KNOWN_BAD expected-failure branch and require all skills green"
-    fi
-    # Match only the known defect after normalizing ANSI/box formatting and
-    # wrapped lines: exact skill path, parser message, and source line.
-    if ! is_known_git_workflow_failure "$out"; then
-      fail "$GIT_WORKFLOW_SKILL failed, but not with the known frontmatter parse error; got: $out"
-    fi
-  else
-    # Every other skill must validate cleanly.
-    if [ "$rc" -ne 0 ]; then
-      fail "skill validation failed: $f"$'\n'"$out"
-    fi
-  fi
+  echo "  - $f: OK"
 done
 
-echo "  - $GIT_WORKFLOW_SKILL: expected frontmatter parse failure (Task 6 gate pending)"
+# --- semantic portability assertions (Task 6) ---
+#
+# The canonical skills live in one tree shared by both harnesses, so each
+# harness-specific claim must carry its counterpart. These assertions reject
+# prose that is accurate in only one harness — e.g. an orchestration rule built
+# solely on Claude's Agent tool with no Polytoken branch, or a "the CLAUDE.md"
+# reference that pretends AGENTS.md does not exist.
+
+ORCH="home/skills/agent-orchestration/SKILL.md"
+RETRO="home/skills/agent-session-retro/SKILL.md"
+GITWF="home/skills/git-workflow/SKILL.md"
+
+# agent-orchestration: both native orchestration workflows, side by side.
+grep -q '## Claude Code'        "$ORCH" || fail "$ORCH must document the Claude Code workflow"
+grep -q '## Polytoken'          "$ORCH" || fail "$ORCH must document the Polytoken workflow"
+grep -q 'SendMessage'           "$ORCH" || fail "$ORCH must reference Claude Agent/SendMessage"
+grep -q 'agent-join'            "$ORCH" || fail "$ORCH must reference the Claude agent-join status block"
+grep -q 'subagent'              "$ORCH" || fail "$ORCH must reference the Polytoken subagent tool"
+grep -Eq 'job_block|job_result' "$ORCH" || fail "$ORCH must reference Polytoken job_block/job_result"
+grep -q 'auto-drained'          "$ORCH" || fail "$ORCH must reference Polytoken auto-drained notifications"
+
+# agent-session-retro: harness-neutral instruction-file terminology.
+grep -q 'CLAUDE.md'             "$RETRO" || fail "$RETRO must reference CLAUDE.md"
+grep -q 'AGENTS.md'             "$RETRO" || fail "$RETRO must reference AGENTS.md"
+
+# git-workflow: equivalent Claude/Polytoken tool names where behavior matters.
+grep -q 'Bash'                  "$GITWF" || fail "$GITWF must reference the Claude Bash tool"
+grep -q 'shell_exec'            "$GITWF" || fail "$GITWF must reference the Polytoken shell_exec tool"
 
 echo "OK: all polytoken artifact assertions passed"

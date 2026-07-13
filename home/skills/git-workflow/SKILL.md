@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: Use when doing any git work in this environment — branching, committing, using worktrees, preparing a push/PR, or cleaning up branches/worktrees. Covers branching decisions, commit hygiene, worktree setup and cleanup, and how to work WITH the git-safe / branch-guard / no-remote-writes hooks. Defers to superpowers:finishing-a-development-branch (merge/PR mechanics) and superpowers:using-git-worktrees (worktree mechanics), and to each repo's CLAUDE.md for its specific branching model. Trigger on: "branch", "commit", "worktree", "push", "PR", "rebase", "clean up branches", or before any git state change.
+description: 'Use when doing any git work in this environment — branching, committing, using worktrees, preparing a push/PR, or cleaning up branches/worktrees. Covers branching decisions, commit hygiene, worktree setup and cleanup, and how to work WITH the git-safe / branch-guard / no-remote-writes hooks. Defers to superpowers:finishing-a-development-branch (merge/PR mechanics) and superpowers:using-git-worktrees (worktree mechanics), and to each repo''s instruction file (CLAUDE.md or AGENTS.md) for its specific branching model. Trigger on: "branch", "commit", "worktree", "push", "PR", "rebase", "clean up branches", or before any git state change.'
 ---
 
 # Git Workflow Skill
@@ -53,13 +53,13 @@ Before branching or committing in any repo, learn its model — don't assume:
 
 ## 4. Worktrees & worktree hygiene
 
-Use a worktree to work on a branch **in physical isolation** — essential for parallel agents (the Agent tool's `isolation: worktree`) or when you need the main checkout untouched. For simple single-branch work, a worktree is optional. (Mechanics: `superpowers:using-git-worktrees`.)
+Use a worktree to work on a branch **in physical isolation** — essential for parallel agents that need isolated checkouts, or when you need the main checkout untouched. For simple single-branch work, a worktree is optional. (Mechanics: `superpowers:using-git-worktrees`.)
 
 **Hygiene rules:**
 - **One location, git-excluded:** put worktrees under `.worktrees/<branch>` inside the repo, and ensure `/.worktrees/` is in `.git/info/exclude`. Discoverable, and never committed.
 - **Name the dir for the branch** it holds — no `tmp2`, `wt-final`.
 - **One branch ↔ one worktree.** Git refuses to check a branch out twice; don't try to game it.
-- **cwd is not your friend.** The Bash cwd can silently flip between turns. In worktree work, **always use `git -C <abs-path>`** and absolute paths; verify with `pwd` after any restart before committing. Committing from the wrong worktree is the classic worktree bug.
+- **cwd is not your friend.** The shell tool's working directory can silently flip between calls (Claude's `Bash` and Polytoken's `shell_exec` both persist cwd across invocations). In worktree work, **always use `git -C <abs-path>`** and absolute paths; verify with `pwd` after any restart before committing. Committing from the wrong worktree is the classic worktree bug.
 - **Clean up when done:** once a branch is merged or abandoned, `git worktree remove <path>` then delete the branch (`git branch -d`). Run `git worktree prune` periodically to clear stale entries. Don't let `.worktrees/` accumulate.
 - **Never nest** a worktree inside another worktree or inside the main checkout's tracked tree.
 

@@ -1,7 +1,7 @@
 ---
 name: agent-session-retro
 effort: high
-description: Conduct end-of-session retrospectives to identify improvements to skills, CLAUDE.md, processes, and collaboration patterns. Use at session end to reflect on what worked well, what could be improved, and propose concrete changes to tooling or documentation.
+description: Conduct end-of-session retrospectives to identify improvements to skills, the harness instruction file (CLAUDE.md or AGENTS.md), processes, and collaboration patterns. Use at session end to reflect on what worked well, what could be improved, and propose concrete changes to tooling or documentation.
 ---
 
 # Agent Session Retrospective
@@ -15,7 +15,7 @@ Conduct structured retrospectives at session end to continuously improve agent-u
 End-of-session retrospectives help identify:
 - **Skill gaps**: Missing or incomplete skills that would have helped
 - **Skill improvements**: Updates to existing skills based on learnings
-- **Process improvements**: Changes to CLAUDE.md, workflows, or collaboration patterns
+- **Process improvements**: Changes to the harness instruction file (CLAUDE.md or AGENTS.md), workflows, or collaboration patterns
 - **Tooling issues**: Problems with tools or their integration
 - **Communication patterns**: What worked well or poorly in agent-user interaction
 
@@ -105,7 +105,7 @@ For each issue identified, propose specific, actionable changes:
 **Location**: [which section to update]
 ```
 
-**CLAUDE.md updates:**
+**Harness instruction file (CLAUDE.md / AGENTS.md) updates:**
 ```markdown
 **Section**: [which section to update]
 **Proposed addition**:
@@ -201,7 +201,7 @@ Pay attention to patterns in user feedback:
 - Missing cross-references
 
 ### Process Documentation
-- Missing guidance in CLAUDE.md
+- Missing guidance in the harness instruction file (CLAUDE.md or AGENTS.md)
 - Contradictory guidance
 - Unclear decision criteria
 - Missing examples or templates
@@ -248,12 +248,12 @@ A good retrospective:
 - Distinguishes systemic from one-off issues
 - Reflects on collaboration patterns
 - Asks clarifying questions about user preferences
-- Results in actual changes to skills, CLAUDE.md, or processes
+- Results in actual changes to skills, the harness instruction file (CLAUDE.md or AGENTS.md), or processes
 
 ## Integration with Other Skills
 
 - **skill-writing**: Use when proposing new skills or skill updates
-- **CLAUDE.md**: Reference when proposing process changes
+- **Harness instruction file (CLAUDE.md / AGENTS.md)**: Reference when proposing process changes
 
 ## Example Output
 
@@ -276,7 +276,7 @@ Implemented OAuth2 authentication system with 8 new endpoints, updated tests, do
 ### Proposed Improvements
 - **pr-review skill**: Add "For repetitive changes, establish pattern from first instance and apply consistently"
 - **agent-issue-tracking skill**: Add "Verify issue exists in current state before creating improvement tickets"
-- **CLAUDE.md**: Add "Capture frequently-referenced context in persistent location to avoid repeated requests"
+- **Harness instruction file (CLAUDE.md / AGENTS.md)**: Add "Capture frequently-referenced context in persistent location to avoid repeated requests"
 - **User coordination**: Would it help if agent announced which files it's working on to avoid edit conflicts?
 
 ### Questions
