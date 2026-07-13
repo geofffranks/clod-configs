@@ -6,7 +6,7 @@ FIX="$ROOT/scripts/fixtures/polytoken-hooks"
 ADAPTER="$ROOT/polytoken/hooks/adapter.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/config" "$TMP/canonical/hooks"
+mkdir -p "$TMP/config" "$TMP/canonical/hooks" "$TMP/home"
 printf 'adapter fixture\n' > "$TMP/read-target.txt"
 if stat -c '%Y' "$TMP/read-target.txt" >/dev/null 2>&1; then
   TEST_OSTYPE=linux-gnu
@@ -31,6 +31,7 @@ run_adapter() {
   RUN_STDERR="$TMP/stderr"
   set +e
   printf '%s' "$payload" | env \
+    HOME="$TMP/home" \
     POLYTOKEN_CANONICAL_ROOT="$ROOT/home" \
     POLYTOKEN_CONFIG_DIR="$TMP/config" \
     POLYTOKEN_SESSION_ID="fallback-session" \
@@ -111,10 +112,10 @@ assert_outcome "$RUN_OUT" allow
 printf '%s\n' '#!/usr/bin/env bash' 'input=$(cat)' 'printf "%s" "$input" > "$CAPTURE"' 'if [ "$(jq -r .hook_event_name <<<"$input")" = PostCompact ]; then exit 0; fi' 'jq -nc '\''{hookSpecificOutput:{permissionDecision:"allow"}}'\''' > "$TMP/canonical/hooks/capture.sh"
 chmod +x "$TMP/canonical/hooks/capture.sh"
 
-payload=$(jq '.prompt_id="runtime-prompt-A" | .call_id="runtime-call-A" | .agent_id="agent-A"' <<<"$shell_payload")
+payload=$(jq '.prompt_id="runtime-prompt-A" | .call_id="runtime-call-A" | .agent_id="agent-A" | .subagent_id="subagent-A"' <<<"$shell_payload")
 run_adapter "$payload" hooks/capture.sh shell POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
 assert_outcome "$RUN_OUT" allow
-jq -e '.hook_event_name == "PreToolUse" and .session_id == "fallback-session" and .tool_name == "Bash" and .tool_input == {command:"printf task1"} and .agent_id == "agent-A" and (has("prompt_id") | not) and (has("call_id") | not)' "$TMP/captured" >/dev/null
+jq -e '.hook_event_name == "PreToolUse" and .session_id == "fallback-session" and .tool_name == "Bash" and .tool_input == {command:"printf task1"} and .agent_id == "agent-A" and .subagent_id == "subagent-A" and (has("prompt_id") | not) and (has("call_id") | not)' "$TMP/captured" >/dev/null
 payload=$(jq '.prompt_id="runtime-prompt-B" | .call_id="runtime-call-B" | .session_id="stdin-session" | .input.offset=4 | .input.limit=9' <<<"$read_payload")
 run_adapter "$payload" hooks/capture.sh read POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
 assert_outcome "$RUN_OUT" allow
@@ -155,6 +156,7 @@ printf '%s\n' '#!/usr/bin/env bash' 'cat >/dev/null' 'printf "{\\"hookSpecificOu
 printf '%s\n' '#!/usr/bin/env bash' 'cat >/dev/null' 'printf "nonzero diagnostic\\n" >&2' 'exit 7' > "$TMP/canonical/hooks/nonzero.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'cat >/dev/null' 'jq -nc '\''{hookSpecificOutput:{permissionDecision:"ask"}}'\''' > "$TMP/canonical/hooks/unsupported.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'cat >/dev/null' 'jq -nc '\''{hookSpecificOutput:{permissionDecision:"allow"}}'\''' > "$TMP/canonical/hooks/compact-output.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'cat >/dev/null' 'printf "%s\n" "$STRUCTURAL_OUTPUT"' > "$TMP/canonical/hooks/structural-output.sh"
 chmod +x "$TMP/canonical/hooks/"*.sh
 
 run_adapter "$shell_payload" hooks/bad-output.sh shell POLYTOKEN_CANONICAL_ROOT="$TMP/canonical"
@@ -171,6 +173,26 @@ test "$(cat "$RUN_STDERR")" = "nonzero diagnostic" || fail "nonzero stderr not p
 run_adapter "$shell_payload" hooks/unsupported.sh shell POLYTOKEN_CANONICAL_ROOT="$TMP/canonical"
 assert_outcome "$RUN_OUT" error
 jq -e '.message | contains("unsupported canonical decision")' <<<"$RUN_OUT" >/dev/null
+
+# Parseable JSON with missing, null, or wrong-typed required fields is malformed canonical output.
+structural_outputs=(
+  '{}'
+  '{"hookSpecificOutput":null}'
+  '{"hookSpecificOutput":"invalid"}'
+  '{"hookSpecificOutput":{}}'
+  '{"hookSpecificOutput":{"permissionDecision":null}}'
+  '{"hookSpecificOutput":{"permissionDecision":7}}'
+  '{"hookSpecificOutput":{"permissionDecision":"deny"}}'
+  '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":null}}'
+  '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":false}}'
+)
+for structural_output in "${structural_outputs[@]}"; do
+  run_adapter "$shell_payload" hooks/structural-output.sh shell POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" STRUCTURAL_OUTPUT="$structural_output"
+  test "$RUN_RC" -eq 0 || fail "structurally malformed canonical output exited $RUN_RC: $structural_output"
+  assert_outcome "$RUN_OUT" error
+  jq -e '.message == "polytoken hook hooks/structural-output.sh: malformed canonical output"' <<<"$RUN_OUT" >/dev/null || fail "wrong structural error: $RUN_OUT"
+done
+
 run_adapter "$compact_payload" hooks/compact-output.sh compact POLYTOKEN_CANONICAL_ROOT="$TMP/canonical"
 assert_outcome "$RUN_OUT" error
 jq -e '.message | contains("unexpected canonical output")' <<<"$RUN_OUT" >/dev/null

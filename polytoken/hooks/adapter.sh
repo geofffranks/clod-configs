@@ -116,10 +116,27 @@ if [ "$mapping" = compact ]; then
   emit_error "unexpected canonical output"
 fi
 
-decision=$(jq -r '.hookSpecificOutput.permissionDecision // empty' <<<"$canonical_output")
+if ! jq -e '
+  try (
+    (.hookSpecificOutput | type) == "object"
+    and (.hookSpecificOutput.permissionDecision | type) == "string"
+    and (if .hookSpecificOutput.permissionDecision == "deny"
+         then (.hookSpecificOutput.permissionDecisionReason | type) == "string"
+         else true
+         end)
+  ) catch false
+' >/dev/null 2>&1 <<<"$canonical_output"; then
+  emit_error "malformed canonical output"
+fi
+
+if ! decision=$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$canonical_output" 2>/dev/null); then
+  emit_error "malformed canonical output"
+fi
 case "$decision" in
   deny)
-    jq -c '{outcome:"deny",reason:(.hookSpecificOutput.permissionDecisionReason // "")}' <<<"$canonical_output"
+    if ! jq -c '{outcome:"deny",reason:.hookSpecificOutput.permissionDecisionReason}' <<<"$canonical_output"; then
+      emit_error "malformed canonical output"
+    fi
     ;;
   allow)
     jq -nc '{outcome:"allow"}'
