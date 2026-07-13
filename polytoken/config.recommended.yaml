@@ -1,0 +1,10 @@
+version: 2
+tui:
+  theme: dark
+  status-line:
+    - kind: cwd
+    - kind: source-control
+    - kind: facet
+    - kind: model
+    - kind: permissions
+    - kind: context-usage

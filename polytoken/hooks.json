@@ -1,0 +1,64 @@
+[
+  {
+    "name": "bash-guard",
+    "event": "pre_tool_use",
+    "matcher": "shell_exec",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" bash-guard/hook.sh shell"
+    }
+  },
+  {
+    "name": "branch-guard",
+    "event": "pre_tool_use",
+    "matcher": "shell_exec",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" branch-guard/hook.sh shell"
+    }
+  },
+  {
+    "name": "git-safe",
+    "event": "pre_tool_use",
+    "matcher": "shell_exec",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" git-safe/hook.sh shell"
+    }
+  },
+  {
+    "name": "no-remote-writes",
+    "event": "pre_tool_use",
+    "matcher": "shell_exec",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" hooks/no-remote-writes.sh shell"
+    }
+  },
+  {
+    "name": "read-once",
+    "event": "pre_tool_use",
+    "matcher": "file_read",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" read-once/hook.sh read"
+    }
+  },
+  {
+    "name": "skill-once",
+    "event": "pre_tool_use",
+    "matcher": "skill",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" skill-once/hook.sh skill"
+    }
+  },
+  {
+    "name": "read-once-reset",
+    "event": "post_compaction",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" read-once/compact.sh compact"
+    }
+  },
+  {
+    "name": "skill-once-reset",
+    "event": "post_compaction",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" skill-once/compact.sh compact"
+    }
+  }
+]
