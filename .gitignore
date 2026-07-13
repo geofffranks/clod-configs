@@ -5,4 +5,5 @@ home/read-once/.last-cleanup
 home/**/.DS_Store
 *.bak-*
 docs/superpowers
+.worktrees/
 .tickets
