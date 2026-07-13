@@ -68,6 +68,18 @@ H5RESET=${F[15]}; D7RESET=${F[16]}
 # full model id (e.g. claude-sonnet-4-6); fall back to display name
 MODEL=${MID:-$MNAME}
 
+# used_percentage/context_window_size from the payload are relative to the
+# model's full context window, but Claude Code actually auto-compacts against
+# CLAUDE_CODE_AUTO_COMPACT_WINDOW (often much smaller, e.g. 200k on a 1M-window
+# model). Back out used tokens from the full-window percentage, then re-express
+# as a fraction of the auto-compact window so ctx% reflects when compaction
+# will actually fire.
+if [ -n "$CTXPCT" ] && [ -n "$CTXSIZE" ] && [ -n "$CLAUDE_CODE_AUTO_COMPACT_WINDOW" ]; then
+  CTXPCT=$(awk -v p="$CTXPCT" -v size="$CTXSIZE" -v w="$CLAUDE_CODE_AUTO_COMPACT_WINDOW" \
+    'BEGIN{ if (w+0>0) printf "%.0f", p*size/w; else print p }')
+  CTXSIZE=$CLAUDE_CODE_AUTO_COMPACT_WINDOW
+fi
+
 hum() {
   awk -v n="$1" 'BEGIN{
     if (n=="" || n+0!=n) { print ""; exit }
@@ -171,8 +183,12 @@ fi
 [ "$THINK" = "true" ] && RIGHT+=" ${DIM}think${RESET}"
 
 if [ -n "$CTXPCT" ]; then
-  if   [ "$CTXPCT" -ge 80 ] 2>/dev/null; then CCOL=$RED
-  elif [ "$CTXPCT" -ge 50 ] 2>/dev/null; then CCOL=$YELLOW
+  # color relative to the auto-compact trigger threshold (CLAUDE_AUTOCOMPACT_PCT_OVERRIDE,
+  # default 80): red at/past it, yellow from 75% of the way there, green below that.
+  ACPCT=${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-80}
+  CTX_YELLOW=$(( ACPCT * 3 / 4 ))
+  if   [ "$CTXPCT" -ge "$ACPCT" ] 2>/dev/null; then CCOL=$RED
+  elif [ "$CTXPCT" -ge "$CTX_YELLOW" ] 2>/dev/null; then CCOL=$YELLOW
   else CCOL=$GREEN; fi
   RIGHT+=" ${DIM}|${RESET} ${DIM}ctx ${RESET}${CCOL}${CTXPCT}%${RESET}"
   if [ -n "$CTXSIZE" ]; then

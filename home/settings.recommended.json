@@ -1,15 +1,20 @@
 {
   "env": {
     "ENABLE_CLAUDEAI_MCP_SERVERS": false,
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "60",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000",
     "MAX_THINKING_TOKENS": "5000",
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
     "ANTHROPIC_MODEL": "opus",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001"
   },
-  "availableModels": ["opus", "sonnet", "haiku"],
+  "availableModels": [
+    "opus",
+    "sonnet",
+    "haiku"
+  ],
   "theme": "dark",
   "verbose": true,
   "effortLevel": "medium",
@@ -21,30 +26,137 @@
   },
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Read", "hooks": [ { "type": "command", "command": "~/.claude/read-once/hook.sh" } ] },
-      { "hooks": [ { "type": "command", "command": "~/.claude/git-safe/hook.sh" } ] },
-      { "hooks": [ { "type": "command", "command": "~/.claude/bash-guard/hook.sh" } ] },
-      { "hooks": [ { "type": "command", "command": "~/.claude/branch-guard/hook.sh" } ] },
-      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/no-remote-writes.sh" } ] },
-      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] },
-      { "matcher": "Skill", "hooks": [ { "type": "command", "command": "~/.claude/skill-once/hook.sh" } ] }
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/read-once/hook.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/git-safe/hook.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/bash-guard/hook.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/branch-guard/hook.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/no-remote-writes.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agent-state.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/skill-once/hook.sh"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "matcher": "Agent", "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/agent-join/hook.sh"
+          }
+        ]
+      }
     ],
     "SubagentStop": [
-      { "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/agent-join/hook.sh"
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] },
-      { "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agent-state.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/agent-join/hook.sh"
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "~/.claude/hooks/agent-state.sh" } ] },
-      { "hooks": [ { "type": "command", "command": "~/.claude/agent-join/hook.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agent-state.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/agent-join/hook.sh"
+          }
+        ]
+      }
     ],
     "PostCompact": [
-      { "matcher": "", "hooks": [ { "type": "command", "command": "~/.claude/read-once/compact.sh" }, { "type": "command", "command": "~/.claude/skill-once/compact.sh" } ] }
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/read-once/compact.sh"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/skill-once/compact.sh"
+          }
+        ]
+      }
     ]
   }
 }
