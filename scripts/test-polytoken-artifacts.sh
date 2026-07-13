@@ -12,6 +12,25 @@ cd "$ROOT" || exit 1
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+normalize_diagnostic() {
+  # Remove ANSI control sequences, non-ASCII box-drawing bytes, and formatting
+  # whitespace so terminal wrapping cannot split fingerprint words or tokens.
+  LC_ALL=C sed $'s/\033\\[[0-9;?]*[ -\\/]*[@-~]//g' \
+    | LC_ALL=C tr -cd '\11\12\15\40-\176' \
+    | LC_ALL=C tr -d '[:space:]'
+}
+
+is_known_git_workflow_failure() {
+  local normalized fingerprint
+  normalized=$(printf '%s' "$1" | normalize_diagnostic)
+  fingerprint="skillfile${GIT_WORKFLOW_SKILL}frontmatterparseerror:mappingvaluesarenotallowedinthiscontextatline2column"
+
+  case "$normalized" in
+    *"$fingerprint"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 command -v jq   >/dev/null 2>&1 || fail "jq is required"
 command -v polytoken >/dev/null 2>&1 || fail "polytoken is required"
 # The config merge relies on mikefarah/yq v4 deep-merge semantics
@@ -129,6 +148,17 @@ polytoken --config-dir "$TMP" config validate --user \
 # regression pass silently.
 GIT_WORKFLOW_SKILL="home/skills/git-workflow/SKILL.md"
 
+# Mutation guards: neither a different parser defect nor the known message at
+# a different line may satisfy the Task 6 expected-failure gate.
+mutation_out="Error: validate skill failed: skill file $GIT_WORKFLOW_SKILL frontmatter parse error: unexpected end of stream at line 7"
+if is_known_git_workflow_failure "$mutation_out"; then
+  fail "mutation guard: a different git-workflow parse error matched the known defect"
+fi
+mutation_out="Error: validate skill failed: skill file $GIT_WORKFLOW_SKILL frontmatter parse error: mapping values are not allowed in this context at line 7 column 1"
+if is_known_git_workflow_failure "$mutation_out"; then
+  fail "mutation guard: the known git-workflow parse error at a different line matched the known defect"
+fi
+
 if ! ls home/skills/*/SKILL.md >/dev/null 2>&1; then
   fail "no skills found under home/skills/*/SKILL.md"
 fi
@@ -147,14 +177,11 @@ for f in home/skills/*/SKILL.md; do
     if [ "$rc" -eq 0 ]; then
       fail "$GIT_WORKFLOW_SKILL unexpectedly validated; Task 6 likely fixed it — remove the GIT_WORKFLOW_KNOWN_BAD expected-failure branch and require all skills green"
     fi
-    # The error wraps across terminal lines with a `│` glyph between `front`
-    # and `matter`, so squeeze all whitespace first and then match on the
-    # contiguous `matter parse error` fragment (always present on one line).
-    oneline=$(printf '%s' "$out" | tr -s ' \t\r\n' ' ')
-    case "$oneline" in
-      *"matter parse error"*) ;;
-      *) fail "$GIT_WORKFLOW_SKILL failed, but not with the known frontmatter parse error; got: $out" ;;
-    esac
+    # Match only the known defect after normalizing ANSI/box formatting and
+    # wrapped lines: exact skill path, parser message, and source line.
+    if ! is_known_git_workflow_failure "$out"; then
+      fail "$GIT_WORKFLOW_SKILL failed, but not with the known frontmatter parse error; got: $out"
+    fi
   else
     # Every other skill must validate cleanly.
     if [ "$rc" -ne 0 ]; then
