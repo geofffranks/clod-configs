@@ -7,16 +7,16 @@ description: 'Use when doing any git work in this environment — branching, com
 
 **When using this skill, begin by stating:** "I'm using the git-workflow skill — orienting on the repo's model, branching off the right base, and keeping commits/worktrees clean."
 
-This skill covers everyday git **hygiene and decisions** in this environment. It does NOT restate git basics or the safety hooks — those are enforced automatically. It fills the gap between the guard hooks (enforcement) and per-repo CLAUDE.md (specific models).
+This skill covers everyday git **hygiene and decisions** in this environment. It does NOT restate git basics or the safety hooks — those are enforced automatically. It fills the gap between the guard hooks (enforcement) and the harness instruction file (CLAUDE.md or AGENTS.md) (specific models).
 
 **Defers to:**
 - `superpowers:finishing-a-development-branch` — merge vs PR vs cleanup decisions at the end of work.
 - `superpowers:using-git-worktrees` — the mechanics of creating/switching worktrees.
-- **the repo's own `CLAUDE.md`** — the authoritative branching model for *that* repo. Always read it first.
+- **the repo's own harness instruction file (`CLAUDE.md` or `AGENTS.md`)** — the authoritative branching model for *that* repo. Always read it first.
 
 ## The guard hooks are allies, not obstacles
 
-Three PreToolUse hooks enforce safety. Don't fight them — they encode intent:
+Three pre-tool-use guard hooks enforce safety. Don't fight them — they encode intent:
 - **branch-guard** — blocks commits to protected branches (`main`/`master`/`dev`). If blocked, you were about to commit to the wrong branch: **branch first.**
 - **no-remote-writes** — blocks `git push` and `gh` writes. Pushing/PRing is a **user-authorized** act: ask before you push, never auto-push.
 - **git-safe** — blocks destructive ops (hard reset, force-delete, clean -fd) that lose work. If blocked, stop and reconsider rather than working around it.
@@ -26,7 +26,7 @@ A block is a signal, not a roadblock. Adjust intent; don't escalate or bypass.
 ## 1. Orient before you touch git
 
 Before branching or committing in any repo, learn its model — don't assume:
-1. **Read the repo's `CLAUDE.md`** (or `.claude/rules/`) for its branching model.
+1. **Read the repo's harness instruction file (`CLAUDE.md` or `AGENTS.md`)** (or equivalent instruction rules directory) for its branching model.
 2. `git remote -v` — is this a **fork** (separate `upstream` + `origin`) or your **own repo** (just `origin`)?
 3. `git branch --show-current` and `git status -sb` — where am I, is the tree dirty?
 4. Check open PRs and in-flight work however you track it (e.g. `gh pr list`, your ticket system).
@@ -47,7 +47,7 @@ Before branching or committing in any repo, learn its model — don't assume:
 - **Granular commits — one logical change each.** A commit should be revertable and bisectable in isolation. Split unrelated changes; don't bundle a refactor with a feature.
 - **Message style:** imperative subject (`Fix …`, `Add …`), ≤72 chars; the body explains **why**, not what. Reference the issue/PR.
 - **Long or apostrophe-containing messages:** `Write` the body to a temp file and `git commit -F <file>` (not a heredoc). Apostrophes in `-m "it's fine"` are fine for one-liners.
-- **Footer:** end Claude-authored commits with the `Co-Authored-By` line the harness specifies.
+- **Footer:** end agent-authored commits with the `Co-Authored-By` line the harness specifies.
 - **Don't commit:** generated artifacts, secrets, `.venv`/build output, or local tooling/state directories that aren't part of the project — git-exclude them by convention; verify with `git status` before staging.
 - **Stage deliberately** — review `git diff --staged` before committing; never `git add -A` blind.
 
