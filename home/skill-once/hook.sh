@@ -58,7 +58,8 @@ if [ -z "$SKILL" ] || [ -z "$SESSION_ID" ]; then
   exit 0
 fi
 
-CACHE_DIR="${HOME}/.claude/skill-once"
+CONFIG_DIR="${AGENT_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+CACHE_DIR="$CONFIG_DIR/skill-once"
 mkdir -p "$CACHE_DIR"
 
 TTL="${SKILL_ONCE_TTL:-1800}"

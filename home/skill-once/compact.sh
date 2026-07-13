@@ -15,7 +15,8 @@ if [ -z "$SESSION_ID" ]; then
   exit 0
 fi
 
-CACHE_DIR="${HOME}/.claude/skill-once"
+CONFIG_DIR="${AGENT_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+CACHE_DIR="$CONFIG_DIR/skill-once"
 
 if command -v sha256sum >/dev/null 2>&1; then
   SESSION_HASH=$(echo -n "$SESSION_ID" | sha256sum | cut -c1-16)

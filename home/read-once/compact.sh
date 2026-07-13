@@ -17,7 +17,8 @@ if [ -z "$SESSION_ID" ]; then
   exit 0
 fi
 
-CACHE_DIR="${HOME}/.claude/read-once"
+CONFIG_DIR="${AGENT_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+CACHE_DIR="$CONFIG_DIR/read-once"
 
 # Must hash session_id the same way hook.sh does
 if command -v sha256sum >/dev/null 2>&1; then

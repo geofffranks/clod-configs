@@ -57,7 +57,8 @@ if [ -n "$OFFSET" ] || [ -n "$LIMIT" ]; then
 fi
 
 # Session-scoped cache directory
-CACHE_DIR="${HOME}/.claude/read-once"
+CONFIG_DIR="${AGENT_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+CACHE_DIR="$CONFIG_DIR/read-once"
 mkdir -p "$CACHE_DIR"
 
 # Mode: "warn" (default) allows read with advisory message, "deny" blocks it.
