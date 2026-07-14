@@ -7,3 +7,4 @@ home/**/.DS_Store
 docs/superpowers
 .worktrees/
 .tickets
+.polytoken
