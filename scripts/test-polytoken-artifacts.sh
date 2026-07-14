@@ -157,4 +157,23 @@ grep -q 'AGENTS.md'             "$RETRO" || fail "$RETRO must reference AGENTS.m
 grep -q 'Bash'                  "$GITWF" || fail "$GITWF must reference the Claude Bash tool"
 grep -q 'shell_exec'            "$GITWF" || fail "$GITWF must reference the Polytoken shell_exec tool"
 
+# --- README coverage assertions (Task 7) ---
+#
+# README.md must document the full installation mode: the exact commands users
+# run, the Polytoken destination override, the agent-join omission (Polytoken
+# uses native job/sidebar behavior instead), and the provider-neutral scope of
+# the recommended config. These grep -Fq checks pin the literal strings so a
+# prose rewrite cannot silently drop a documented capability.
+
+grep -Fq './install.sh --target polytoken' "$ROOT/README.md" \
+  || fail "README must document './install.sh --target polytoken'"
+grep -Fq './install.sh --target all' "$ROOT/README.md" \
+  || fail "README must document './install.sh --target all'"
+grep -Fq 'POLYTOKEN_CONFIG_DIR' "$ROOT/README.md" \
+  || fail "README must document the POLYTOKEN_CONFIG_DIR override"
+grep -Fq 'agent-join' "$ROOT/README.md" \
+  || fail "README must document the agent-join omission/replacement"
+grep -Fq 'provider-neutral' "$ROOT/README.md" \
+  || fail "README must state the config is provider-neutral"
+
 echo "OK: all polytoken artifact assertions passed"
