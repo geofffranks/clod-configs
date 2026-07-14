@@ -226,6 +226,19 @@ has "$out" "recommended:"        "conflict shows recommended: label"
 [ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "echo CUSTOM-HOOK-MARKER" ] && ok "declined conflict kept your handler" || no "declined conflict kept your handler"
 rm -rf "$D" "$TTY"
 
+# --- P15: existing hooks with non-recommended events (e.g. session_start) survive merge ---
+sc "P15 hooks with session_start -> merge succeeds, existing hook preserved"
+D="$(valid_base)"
+printf '%s\n' '[ {"name":"superpowers-session-start","event":"session_start","handler":{"bash":"echo session-start"}},
+  {"name":"herdle-gatekeeper","event":"pre_tool_use","matcher":"*","handler":{"bash":"echo gatekeeper"}} ]' > "$D/hooks.json"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
+ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
+ajq "$D/hooks.json" 'length == 10'                       "2 existing + 8 recommended"
+ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
+pt_valid "$D" && ok "config validate passes" || no "config validate passes"
+rm -rf "$D"
+
 echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

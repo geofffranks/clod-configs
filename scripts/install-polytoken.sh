@@ -117,7 +117,9 @@ validate_staged() {
     hooks)
       jq -e 'type == "array"
              and (([.[]?.name] | length) == ([.[]?.name] | unique | length))
-             and all(.[]?; has("name") and (.event == "pre_tool_use" or .event == "post_compaction") and (.handler.bash | type == "string"))' \
+             and all(.[]?; has("name")
+                      and (.event | IN("session_start","pre_user_prompt","pre_model_turn","post_model_turn","pre_tool_use","post_tool_use","post_tool_use_failure","stop","pre_compaction","post_compaction","notification","facet_switch","subagent_start","subagent_stop"))
+                      and (.handler.bash | type == "string"))' \
         "$staged" >/dev/null 2>&1 \
         || { echo "polytoken: $rel validation failed (bad hook array structure); existing file unchanged" >&2; return 1; }
       ;;
