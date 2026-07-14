@@ -192,6 +192,40 @@ has "$out" "polytoken"                                 "reported polytoken targe
 has "$out" "polytoken: FAILED"                         "marked polytoken target failed"
 rm -rf "$C" "$blocker"
 
+# --- P12: differing managed file shows a diff before the replace prompt ---
+sc "P12 differing AGENTS.md -> diff shown before replace prompt"
+D="$(valid_base)"
+printf '# CUSTOM-AGENTS-MARKER-7\n' > "$D/AGENTS.md"
+TTY="$(mktemp)"; printf 'n\n' > "$TTY"
+out="$(run_pt "$D" "$TTY" 0)"
+has "$out" "CUSTOM-AGENTS-MARKER-7"  "diff shows your current content"
+has "$out" "Permission Rules"        "diff shows recommended content"
+[ "$(cat "$D/AGENTS.md")" = "# CUSTOM-AGENTS-MARKER-7" ] && ok "declined diff kept your AGENTS.md" || no "declined diff kept your AGENTS.md"
+rm -rf "$D" "$TTY"
+
+# --- P13: config conflict prompt shows both yours and recommended values ---
+sc "P13 config conflict -> prompt shows yours and recommended values"
+D="$(valid_base)"
+yq -i '.tui.theme = "light"' "$D/config.yaml"
+TTY="$(mktemp)"; printf 'n\n' > "$TTY"
+out="$(run_pt "$D" "$TTY" 0)"
+has "$out" "light"          "conflict shows your current value (light)"
+has "$out" "recommended:"   "conflict shows recommended: label + value"
+ayq "$D/config.yaml" '.tui.theme == "light"'   "declined conflict kept your theme (light)"
+rm -rf "$D" "$TTY"
+
+# --- P14: hook conflict prompt shows both yours and recommended handlers ---
+sc "P14 hook conflict -> prompt shows yours and recommended"
+D="$(valid_base)"
+yq -i '.tui.theme = "dark"' "$D/config.yaml"   # match recommended: isolate the hook as the only conflict
+printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"echo CUSTOM-HOOK-MARKER"}} ]' > "$D/hooks.json"
+TTY="$(mktemp)"; printf 'n\n' > "$TTY"
+out="$(run_pt "$D" "$TTY" 0)"
+has "$out" "CUSTOM-HOOK-MARKER"  "conflict shows your handler value"
+has "$out" "recommended:"        "conflict shows recommended: label"
+[ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "echo CUSTOM-HOOK-MARKER" ] && ok "declined conflict kept your handler" || no "declined conflict kept your handler"
+rm -rf "$D" "$TTY"
+
 echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

@@ -92,6 +92,12 @@ copy_managed_file() {
   elif cmp -s "$src" "$dst"; then
     echo "  unchanged: $rel"
   else
+    {
+      echo
+      echo "  --- $rel differs: '-' lines are yours, '+' lines are recommended ---"
+      diff -u "$dst" "$src" || true
+      echo
+    } >&2
     if prompt_yn "$rel differs; replace with recommended?" conflict; then
       cp "$dst" "$dst.bak-$TS"
       cp "$src" "$dst"
@@ -217,10 +223,11 @@ install_hooks() {
     $e[0] as $ex | $r[0] as $rec
     | [ $rec[] | . as $entry
         | ([ $ex[] | select(.name == $entry.name) ] | length) as $have
+        | ([ $ex[] | select(.name == $entry.name) ] | .[0]) as $yours
         | ([ $ex[] | select(.name == $entry.name and . == $entry) ] | length) as $same
         | if $have == 0 then {ckind:"new", name:$entry.name, rec:$entry}
           elif $same == 1 then empty
-          else {ckind:"conflict", name:$entry.name, rec:$entry} end ]
+          else {ckind:"conflict", name:$entry.name, rec:$entry, your:$yours} end ]
     | sort_by(.name) | .[]
   '
   jq -c -n --slurpfile e "$work/ex.json" --slurpfile r "$work/rec.json" "$enum_filter" > "$work/patches.ndjson"
@@ -245,10 +252,20 @@ install_hooks() {
     : > "$work/accepted.ndjson"
     local a_new=0 a_conf=0 declined=0
     while IFS= read -r patch; do
-      local ckind name
+      local ckind name pmsg
       ckind="$(jq -r '.ckind' <<<"$patch")"
       name="$(jq -r '.name' <<<"$patch")"
-      if prompt_yn "  ~ hook $name: replace with recommended?" "$ckind"; then
+      if [ "$ckind" = "conflict" ]; then
+        {
+          echo "  ~ hook $name"
+          echo "      yours:       $(jq -rc '.your' <<<"$patch")"
+          echo "      recommended: $(jq -rc '.rec'  <<<"$patch")"
+        } >&2
+        pmsg="    accept recommended?"
+      else
+        pmsg="  + hook $name (new)"
+      fi
+      if prompt_yn "$pmsg" "$ckind"; then
         printf '%s\n' "$patch" >> "$work/accepted.ndjson"
         case "$ckind" in new) a_new=$((a_new + 1)) ;; conflict) a_conf=$((a_conf + 1)) ;; esac
       else
@@ -356,10 +373,20 @@ install_config() {
     : > "$work/accepted.ndjson"
     local a_new=0 a_conf=0 declined=0
     while IFS= read -r patch; do
-      local ckind key
+      local ckind key pmsg
       ckind="$(jq -r '.ckind' <<<"$patch")"
       key="$(jq -r '.key' <<<"$patch")"
-      if prompt_yn "  ~ $key = $(jq -rc '.rec' <<<"$patch")" "$ckind"; then
+      if [ "$ckind" = "conflict" ]; then
+        {
+          echo "  ~ $key"
+          echo "      yours:       $(jq -rc '.your' <<<"$patch")"
+          echo "      recommended: $(jq -rc '.rec'  <<<"$patch")"
+        } >&2
+        pmsg="    accept recommended?"
+      else
+        pmsg="  + $key (new) = $(jq -rc '.rec' <<<"$patch")"
+      fi
+      if prompt_yn "$pmsg" "$ckind"; then
         printf '%s\n' "$patch" >> "$work/accepted.ndjson"
         case "$ckind" in new) a_new=$((a_new + 1)) ;; conflict) a_conf=$((a_conf + 1)) ;; esac
       else
