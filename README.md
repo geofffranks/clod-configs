@@ -183,6 +183,21 @@ negation mechanism (e.g. add a same-named entry that disables it in the
 project's own hook config). The global installer never edits project hook
 files.
 
+#### Known limitations (Polytoken target)
+
+- **read-once is advisory-inert under Polytoken until `READ_ONCE_MODE=deny`
+  is set.** The canonical `read-once` hook defaults to `warn` mode: on a
+  repeated read it allows the read *and* attaches an advisory reason
+  ("…already in context, ~X tokens…"). Polytoken's `pre_tool_use` **`allow`**
+  outcome has no `reason` field (only `deny` carries one), so the adapter
+  emits a bare `{"outcome":"allow"}` and the advisory is discarded. Net effect:
+  with the shipped default, the `read-once` hook permits every re-read and the
+  de-duplication nudge never reaches the model — it provides no context savings
+  under Polytoken until you opt into hard enforcement. To get real de-dup,
+  set `READ_ONCE_MODE=deny` in the read-once hook's environment (e.g. in your
+  shell profile or `hooks.json` handler). (`skill-once` is unaffected — it
+  denies by default.)
+
 ## Merge behavior
 
 Both targets merge structured files **one patch at a time**. For each

@@ -125,6 +125,17 @@ validate_staged() {
   # parse+structural checks above, since the recommended overlay alone is not a
   # standalone-valid config.
   if [ -f "$DEST/config.yaml" ]; then
+    if ! command -v polytoken >/dev/null 2>&1; then
+      # The polytoken CLI is absent: in-context validation is not possible, so
+      # we fall back to the parse+structural checks already performed above.
+      # Warn once (across all structured merges) so the degradation is observable
+      # rather than silent, but never block the install.
+      if [ "${_pt_cli_warned:-0}" != "1" ]; then
+        _pt_cli_warned=1
+        echo "polytoken: polytoken CLI not found; structured validation skipped — manual verification recommended" >&2
+      fi
+      return 0
+    fi
     local t
     t="$(mktemp -d)"
     cp -R "$DEST/." "$t/" 2>/dev/null || true
