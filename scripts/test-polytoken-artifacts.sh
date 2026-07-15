@@ -179,5 +179,7 @@ grep -Fq 'agent-join' "$ROOT/README.md" \
   || fail "README must document the agent-join omission/replacement"
 grep -Fq 'provider-neutral' "$ROOT/README.md" \
   || fail "README must state the config is provider-neutral"
+grep -Fq 'rtk guidance' "$ROOT/README.md" \
+  || fail "README must document rtk for the polytoken target"
 
 echo "OK: all polytoken artifact assertions passed"

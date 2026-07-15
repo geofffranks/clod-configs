@@ -100,7 +100,7 @@ with Polytoken-native equivalents.
 | `config.yaml` | `polytoken/config.recommended.yaml` | `version: 2` + a `tui` block only (see below). |
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
 | `hooks.json` | `polytoken/hooks.json` | Eight native hooks, all routed through `hooks/adapter.sh`. |
-| `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names). |
+| `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
 | `compat/` | `home/{bash-guard,branch-guard,git-safe,read-once,skill-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`, invoked via the adapter. |
 
@@ -197,6 +197,12 @@ files.
   set `READ_ONCE_MODE=deny` in the read-once hook's environment (e.g. in your
   shell profile or `hooks.json` handler). (`skill-once` is unaffected — it
   denies by default.)
+- **rtk under Polytoken is rules-only.** rtk's savings only materialize when the
+  model uses `rtk grep` (via `shell_exec`) rather than the built-in `grep`, and
+  Polytoken cannot transparently rewrite commands the way Claude's
+  `rtk-rewrite.sh` does (`pre_tool_use` allows/denies only). The built-in `grep`
+  tool remains available for structured searches (multiple roots, `include`,
+  `context_lines`).
 
 ## Merge behavior
 
@@ -255,9 +261,13 @@ These are referenced by or complement this config but are not bundled:
 
 - **[superpowers](https://github.com/obra/superpowers-marketplace)** — the
   skill framework `git-workflow` defers to for branch/PR/worktree mechanics.
-- **rtk** — read/grep/test output compressor. If installed, wire its hook:
-  add `{ "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/rtk-rewrite.sh" } ] }`
-  to `hooks.PreToolUse` (script ships with rtk).
+- **rtk** — read/grep/test output compressor. **Claude Code:** if installed,
+  wire its hook — add `{ "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/rtk-rewrite.sh" } ] }`
+  to `hooks.PreToolUse` (script ships with rtk); the rules live in `CLAUDE.md`.
+  **Polytoken:** wired via `AGENTS.md` rules only — the model uses `rtk grep`
+  (content search) and `rtk <framework>` (tests/build). There is no hook:
+  Polytoken's `pre_tool_use` can only allow/deny, so it cannot rewrite a command
+  the way Claude's `rtk-rewrite.sh` does.
 - **cavemem** — memory MCP + hooks. If installed, add its `mcpServers` entry and
   `UserPromptSubmit`/`PostToolUse`/`Stop`/`SessionStart`/`SessionEnd` hooks per
   cavemem's docs.
