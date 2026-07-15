@@ -52,8 +52,12 @@ grep -q '__POLYTOKEN_CONFIG_DIR__' "$HOOKS" \
 # AGENTS.md exists and is Polytoken-native (Polytoken tool names, no Claude ones).
 [ -f "$AGENTS" ] || fail "AGENTS.md missing"
 grep -q 'shell_exec' "$AGENTS" || fail "AGENTS.md must reference Polytoken tool names"
-! grep -Eq 'settings\.json|PreToolUse|CLAUDE_CONFIG_DIR|rtk ' "$AGENTS" \
+! grep -Eq 'settings\.json|PreToolUse|CLAUDE_CONFIG_DIR' "$AGENTS" \
     || fail "AGENTS.md must not reference Claude-specific concepts"
+grep -q 'rtk grep' "$AGENTS" \
+    || fail "AGENTS.md must carry rtk content-search guidance"
+grep -q 'executable: rtk' "$AGENTS" \
+    || fail "AGENTS.md must carry the rtk permission-rules row"
 
 # --- isolated config validation ---
 #
