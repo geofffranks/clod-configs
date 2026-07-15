@@ -459,6 +459,13 @@ if [ -d "$ROOT/home/skills" ]; then
     copy_managed_file "$src" "$DEST/skills/$rel"
   done < <(find "$ROOT/home/skills" -type f -print0)
 fi
+# Native Polytoken subagent definitions.
+if [ -d "$ROOT/polytoken/subagents" ]; then
+  while IFS= read -r -d '' src; do
+    rel="${src#"$ROOT/polytoken/subagents/"}"
+    copy_managed_file "$src" "$DEST/subagents/$rel"
+  done < <(find "$ROOT/polytoken/subagents" -type f -print0)
+fi
 
 # 2. Mark executable scripts executable.
 for s in "${EXEC_SCRIPTS[@]}"; do

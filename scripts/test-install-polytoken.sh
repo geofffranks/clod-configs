@@ -42,6 +42,9 @@ for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/h
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
+for f in subagents/implementer.md subagents/reviewer.md subagents/triage.md subagents/validator.md; do
+  [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
+done
 [ -x "$D/hooks/adapter.sh" ] && ok "adapter executable" || no "adapter executable"
 for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -x "$D/$x" ] && ok "executable: $x" || no "executable: $x"
