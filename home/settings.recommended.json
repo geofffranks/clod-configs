@@ -15,6 +15,9 @@
     "sonnet",
     "haiku"
   ],
+  "permissions": {
+    "defaultMode": "auto"
+  },
   "theme": "dark",
   "verbose": true,
   "effortLevel": "medium",
