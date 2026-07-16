@@ -60,5 +60,12 @@
     "handler": {
       "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" skill-once/compact.sh compact"
     }
+  },
+  {
+    "name": "container-awareness",
+    "event": "session_start",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/container-awareness.sh\""
+    }
   }
 ]

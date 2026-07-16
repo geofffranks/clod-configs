@@ -28,6 +28,7 @@ COMPAT_HOOKS=(hooks/no-remote-writes.sh)
 # Executable managed scripts, relative to DEST.
 EXEC_SCRIPTS=(
   hooks/adapter.sh
+  hooks/container-awareness.sh
   compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh
   compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once
   compat/skill-once/hook.sh compat/skill-once/compact.sh
@@ -189,9 +190,11 @@ atomic_write() {
 
 # ---- hooks.json: render token + merge by unique name ----
 render_hooks() {
-  # Substitute the literal __POLYTOKEN_CONFIG_DIR__ token with the jq-escaped
-  # absolute DEST, safely (no shell interpolation into JSON).
-  jq --arg dir "$DEST" \
+  # Substitute the literal __POLYTOKEN_CONFIG_DIR__ token with a runtime-resolved
+  # expression so hooks work wherever $HOME differs (e.g. macOS host vs container).
+  # ${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken} is expanded by bash when the
+  # hook handler runs; jq --arg keeps it a safe JSON string (no interpolation).
+  jq --arg dir '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' \
      'walk(if type == "string" then gsub("__POLYTOKEN_CONFIG_DIR__"; $dir) else . end)' \
      "$PT_HOOKS"
 }
@@ -425,8 +428,9 @@ install_permissions() {
     atomic_write permissions "$dst" "$staged"
     return
   fi
-  # A valid existing file is left byte-identical: the recommendation carries no
-  # rules to merge. An invalid file is reported but never rewritten.
+  # A valid existing file is left byte-identical: your rules are always yours.
+  # The recommended file seeds a safety baseline (written only when
+  # permissions.yaml is absent). An invalid file is reported but never rewritten.
   if yq e . "$dst" >/dev/null 2>&1; then
     echo "  unchanged: permissions.yaml (existing rules preserved)"
   else
@@ -435,12 +439,34 @@ install_permissions() {
 }
 
 # =========================================================================
+# ---- host-side MCP launchers (~/.local/bin) ----
+# Host counterpart to the container's baked wrappers: bare command names that
+# `go run` / node the MCP servers from ~/workspace, so source edits apply with
+# no rebuild. Idempotent via copy_managed_file; warns if ~/.local/bin not on PATH.
+install_mcp_wrappers() {
+  local srcdir="$ROOT/polytoken-container/mcp-wrappers" bindir="$HOME/.local/bin"
+  [ -d "$srcdir" ] || { echo "  (MCP wrappers source not found: $srcdir)"; return 0; }
+  mkdir -p "$bindir"
+  local w
+  for w in foundry-mcp codex-imagegen-mcp minime-vision; do
+    copy_managed_file "$srcdir/$w" "$bindir/$w"
+    [ -f "$bindir/$w" ] && chmod +x "$bindir/$w"
+  done
+  # Ensure ~/.local/bin is on PATH for future shells (append to ~/.bashrc once).
+  local rc="$HOME/.bashrc" line='export PATH="$HOME/.local/bin:$PATH"'
+  if ! grep -qF '.local/bin' "$rc" 2>/dev/null; then
+    printf '\n# Added by claude-config polytoken installer (MCP wrappers live in ~/.local/bin)\n%s\n' "$line" >> "$rc"
+    echo "  added:     PATH export -> $rc"
+  fi
+}
+
 echo "Installing Polytoken config into: $DEST"
 mkdir -p "$DEST"
 
 # 1. Plain managed files: AGENTS.md, adapter, compat scripts, skills.
 copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
 copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
+copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/container-awareness.sh"
 for d in "${COMPAT_DIRS[@]}"; do
   if [ -d "$ROOT/home/$d" ]; then
     while IFS= read -r -d '' src; do
@@ -476,5 +502,6 @@ done
 install_permissions
 install_hooks
 install_config
+install_mcp_wrappers
 
 echo "Done."

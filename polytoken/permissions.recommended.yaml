@@ -1,1 +1,65 @@
+# permissions.recommended.yaml — Polytoken safety baseline.
+#
+# Seeded by the installer only when permissions.yaml is ABSENT; an existing
+# permissions.yaml is always preserved (your rules are yours).
+#
+# In Autonomous/Standard mode:
+#   deny  -> hard wall (enforced before the classifier; cannot be overridden)
+#   ask   -> routed to the classifier (Autonomous) / prompts you (Standard)
+#
+# The `deny` rules are universal (host + container). The `filesystem: ask`
+# paths target the polytoken-dev container (/home/dev) and are inert on a macOS
+# host — add your own home path there if you want the same prompts on the host.
+
 version: 2
+
+deny:
+  # No pushing remote history — push it yourself from a terminal.
+  - tool: shell_exec
+    args:
+      executable: git
+      subcommand: ["push"]
+    message: "git push is denied — run it yourself in a terminal."
+
+  # No recursive / forced deletion.
+  - tool: shell_exec
+    args: { executable: rm, flags_present: ["-rf"] }
+    message: "Recursive/forced delete blocked."
+  - { tool: shell_exec, args: { executable: rm, flags_present: ["-fr"] } }
+  - { tool: shell_exec, args: { executable: rm, flags_present: ["-r", "-f"] } }
+  - { tool: shell_exec, args: { executable: rm, flags_present: ["-r"] } }
+
+  # gh: block write / create / delete / update verbs (reads stay allowed).
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["pr", "merge"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["pr", "create"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["pr", "close"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["pr", "edit"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["pr", "review"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["issue", "create"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["issue", "close"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["issue", "edit"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["issue", "delete"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["repo", "create"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["repo", "edit"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["repo", "delete"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["repo", "archive"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["release", "create"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["release", "edit"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["release", "delete"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["secret", "set"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["secret", "delete"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["run", "cancel"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["workflow", "run"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["gist", "create"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["gist", "edit"] } }
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["gist", "delete"] } }
+  # gh api with an explicit method (-X POST/PATCH/PUT/DELETE); bare GET has no -X.
+  - { tool: shell_exec, args: { executable: gh, subcommand: ["api"], flags_present: ["-X"] } }
+
+# Ask before mutating your own config / scripts (classifier-judged in Autonomous).
+filesystem:
+  ask:
+    - access: [write]
+      path: "/home/dev/.config/polytoken{,/**}"
+    - access: [write]
+      path: "/home/dev/bin{,/**}"

@@ -8,3 +8,28 @@ tui:
     - kind: model
     - kind: permissions
     - kind: context-usage
+
+# MCP servers. Commands are bare names (PATH-resolved) so the same config works
+# on the host (darwin binaries on PATH) and in the container (linux binaries at
+# /home/dev/.local/bin). Secrets (e.g. FOUNDRY_API_KEY) are intentionally NOT
+# committed — they live in your installed config.yaml, which the installer
+# preserves. After installing, remove the old `localhost_vision` entry by hand.
+mcp_servers:
+  foundry:
+    args: []
+    command: foundry-mcp
+    env:
+      FOUNDRY_RELAY_URL: http://192.168.2.247:3010
+    transport: stdio
+  codex-imagegen:
+    args: []
+    command: codex-imagegen-mcp
+    env:
+      CODEX_BIN: codex
+    transport: stdio
+  minime_vision:
+    args: []
+    command: minime-vision
+    env:
+      LM_STUDIO_URL: http://192.168.2.247:1234
+    transport: stdio
