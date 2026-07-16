@@ -1,155 +1,142 @@
 # polytoken-dev container
 
-An isolated Linux dev container for running **Polytoken** in **Autonomous** mode,
-with a curated deny-list as a hard safety wall and bind mounts as a filesystem
-boundary. Brew provides the tools; `mise` provides the language runtimes so each
-repo can pin its own Python/Node/Go.
+An isolated Linux dev container for running **Polytoken** in **Bypass+** mode, with
+native MCP servers and your repos/config mounted in. Brew provides the tools;
+`mise` provides the language runtimes; the Go MCP servers run from source via
+`go run` (no rebuild when you edit them).
 
 ## What's inside
 
 | Tool | Source | Version |
 |---|---|---|
-| polytoken | `brew tap polytoken/tap` | `polytoken-unstable` (latest unstable) |
-| gh | brew | latest |
-| rtk | brew | latest |
-| tk (ticket) | `brew tap wedow/tools` | latest |
-| jq, yq, ripgrep, perl | brew | latest |
+| polytoken | `brew tap polytoken/tap` | `polytoken-unstable` |
+| gh, rtk, tk (ticket), jq, yq, ripgrep, perl | brew | latest |
 | mise | brew | latest |
-| python | mise | **3.13** (default) + **3.11** |
+| python | mise | 3.13 (default) + 3.11 |
 | node | mise | lts |
 | go | mise | latest |
+| codex CLI | npm (`@openai/codex`) | latest |
+| foundry-mcp, codex-imagegen-mcp | `go run` wrappers (source in ~/workspace) | live |
+| minime-vision | node wrapper (lm-studio-mcp-server) | live |
 
-## 1. Build the image
+## 1. Build
 
 ```bash
-cd polytoken-container
-./build.sh        # builds polytoken-dev:latest, matching your host uid
+cd polytoken-container && ./build.sh     # docker build, DEV_UID=$(id -u)
 ```
 
-`build.sh` passes `DEV_UID=$(id -u)` so bind-mounted files are owned by you.
-Rebuild any time you edit the `Dockerfile`; your host config and workspace are
-never touched.
+MCP servers are **not** compiled into the image — they run from source via
+`go run`/node wrappers, so editing their repos takes effect on next launch with
+no rebuild.
 
-## 2. Configure
+## 2. Configure (host, once)
 
-### API keys (never baked into the image)
-
+### API keys
 ```bash
-cp .env.example ~/.config/polytoken-container.env
-$EDITOR ~/.config/polytoken-container.env   # fill in provider keys
+cp .env.example ~/.config/polytoken-container.env && $EDITOR $_
 ```
+run.sh also forwards provider tokens already exported in your shell
+(`ANTHROPIC_API_KEY`, `ZAI_API_KEY`, `FOUNDRY_API_KEY`, … — see `POLY_PASS_ENV`).
 
-`run.sh` passes this via `--env-file` (override the path with `POLY_ENV_FILE`).
-
-Provider tokens **already exported in your shell** are also forwarded into the
-container automatically (e.g. `ZAI_API_KEY`, `ANTHROPIC_API_KEY`, …) via
-`-e VAR`, so you don't have to duplicate them in the env file. Extend the list
-with `POLY_PASS_ENV="FOO_KEY BAR_TOKEN"`. The env file is a fallback for keys
-you'd rather not export in your shell. (The var must be `export`ed in the shell
-you launch `run.sh` from.)
-
-### Install the global permissions
-
-Your global permissions are shared into the container (via the
-`~/.config/polytoken` mount), so install the deny/ask list there:
-
+### Polytoken config + permissions + MCP wrappers (via the claude-config installer)
 ```bash
-cp permissions.yaml ~/.config/polytoken/permissions.yaml
+./install.sh --target polytoken --overwrite
 ```
+Installs into `~/.config/polytoken`:
+- the **permissions baseline** (deny `git push` / `rm -rf` / gh write verbs),
+- portable **mcp_servers** (bare commands),
+- the **container-awareness** session_start hook,
+- and the **host MCP wrappers** at `~/.local/bin` (and appends `~/.local/bin` to
+  `~/.bashrc`; if your shell is zsh, add it to `~/.zshrc` too).
 
-> The `claude-config` installer leaves an empty `version: 2` permissions file, so
-> this is a safe replace. If you already have rules, merge the `deny` / `ask`
-> buckets instead of overwriting.
+Then set the host to **Autonomous** in a session (`/permissions`) — the container
+forces Bypass+ itself (see below).
 
-Then switch Polytoken to **Autonomous** mode (inside a session): `/permissions`
-→ Autonomous. (These rules also work in Standard; only pure Bypass/Bypass+
-ignore the `ask` bucket.)
+> After installing, delete the old `localhost_vision:` block from
+> `~/.config/polytoken/config.yaml` (the installer adds `minime_vision` but can't
+> remove the old name).
 
-### Pin a runtime per repo (recommended)
-
-`mise` reads `.tool-versions` per directory. Add one to each repo so the right
-Python/Node is used automatically:
-
+### Per-repo runtimes (recommended)
 ```bash
-# in ~/workspace/dcs-retribution  (PySide6 6.4 / numpy 1.26 stack -> 3.11)
-echo "python 3.11" > .tool-versions
-
-# home-assistant needs 3.13 (already the global default, but make it explicit)
-echo "python 3.13" > .tool-versions
+echo "python 3.11" > ~/workspace/dcs-retribution/.tool-versions   # PySide6/numpy stack
+echo "python 3.13" > ~/workspace/<home-assistant-repo>/.tool-versions
 ```
 
 ## 3. Run
 
 ```bash
-cd ~/workspace/dcs-retribution
-/path/to/polytoken-container/run.sh          # interactive polytoken here
-/path/to/polytoken-container/run.sh config validate   # args pass through
+cd ~/workspace/<repo> && polytoken-container/run.sh    # interactive polytoken here
 ```
-
-Run from **anywhere under `~/workspace`** to land in that repo; run from
-elsewhere and you land at the `~/workspace` root. Add an alias:
-
+Run from under `~/workspace` to land in that repo; elsewhere lands at the
+workspace root. Args pass through (`run.sh config validate`). Alias:
 ```bash
-# ~/.zshrc or ~/.bashrc
 alias pt='bash "$HOME/workspace/claude-config/polytoken-container/run.sh"'
 ```
 
-Then `cd ~/workspace/<repo> && pt`.
+The container launches in **Bypass+**: run.sh drops an ephemeral
+`.polytoken/config.yaml` (`default_permission_matcher: bypass_plus`) that
+overrides the host's global Autonomous, and removes it on exit — so the host
+keeps Autonomous.
 
-## How the safety model layers
+## Safety model (layered)
 
 ```
-┌─ container (filesystem boundary: only ~/workspace, ~/.config/polytoken, ~/bin visible) ─┐
-│  ┌─ Autonomous (classifier auto-approves routine calls; escalates when unsure) ──────┐ │
-│  │  deny : git push · rm -rf · gh write/create/delete   ← hard wall, always enforced│ │
-│  │  ask  : writes to polytoken config / ~/bin / sibling repos  ← classifier-judged   │ │
-│  │  else : runs free                                                                 │ │
-│  └───────────────────────────────────────────────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ container (filesystem boundary: only the mounts below are visible) ──────────────┐
+│  ┌─ Bypass+ (zero prompts; deny rules still enforce) ──────────────────────────┐ │
+│  │  deny: git push · rm -rf · gh write verbs        ← from global permissions  │ │
+│  │  everything else runs free                                                   │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────────┘
+host: Autonomous (classifier-judged) from the global config.
 ```
 
-- **deny** is a hard wall in every mode — the classifier can't override it.
-- **ask** routes to the classifier in Autonomous (low interruption); it would
-  prompt *you* in Standard.
-- The per-repo "ask before writing outside this repo" rule is generated by
-  `run.sh` into `<repo>/.polytoken/permissions.local.yaml` at launch and removed
-  on exit. (Add `.polytoken/permissions.local.yaml` to your global gitignore to
-  avoid noise.)
+## Mounts
 
-## Mounts & escape hatches
+| Host | Container | Mode | Purpose |
+|---|---|---|---|
+| `~/workspace` | `/home/dev/workspace` | rw | your repos |
+| `~/.config/polytoken` | `/home/dev/.config/polytoken` | rw | shared polytoken config |
+| `~/bin` | `/home/dev/bin` | rw | your scripts |
+| `~/.gitconfig` | `~/.gitconfig.host` | ro | git identity (via include) |
+| `~/.config/gh` | `/home/dev/.config/gh` | ro | gh auth (writes denied by baseline) |
+| `~/.gitignore` | `/home/dev/.gitignore` | ro | global ignore (excludesfile repointed in image) |
+| `~/.local/share/polytoken-dev` | `~/.local/share/polytoken` | rw | container logs/sessions (dedicated dir) |
+| `~/.codex` | `/home/dev/.codex` | rw | codex auth/config |
+| `~/go/pkg/mod` | `/home/dev/go/pkg/mod` | rw | shared Go module cache |
 
-| Host path | Container path | Mode |
-|---|---|---|
-| `~/workspace` | `/home/dev/workspace` | rw (your repos) |
-| `~/.config/polytoken` | `/home/dev/.config/polytoken` | rw (shared config) |
-| `~/bin` | `/home/dev/bin` | rw (your scripts) |
-| `~/.gitconfig` | `/home/dev/.gitconfig.host` | ro (included via git `include`) |
+Extra mounts: `POLY_EXTRA_MOUNTS='-v /x:/home/dev/x'`.
 
-Extra mounts: `POLY_EXTRA_MOUNTS='-v /opt/data:/home/dev/data'`.
+> The container's polytoken data is a **dedicated** `~/.local/share/polytoken-dev`,
+> not the host's `~/.local/share/polytoken`: macOS Docker stamps dirs a root
+> container once wrote with a `user.containers.override_stat` xattr, making them
+> unwritable. Read container logs/sessions from `~/.local/share/polytoken-dev/`.
+
+## MCP servers
+
+Bare commands (PATH-resolved) so the same config works on host (darwin) and
+container (linux):
+- `foundry-mcp` → `go run` from `~/workspace/foundry-mcp-tools` (relay `192.168.2.247:3010`).
+- `codex-imagegen-mcp` → `go run` from `~/workspace/codex-imagegen-mcp` (wraps the `codex` CLI; needs `~/.codex` auth).
+- `minime-vision` → `node ~/workspace/lm-studio-mcp-server/server.js` (LM Studio at `192.168.2.247:1234`).
+
+A Go server's first start per session takes a few seconds (compile); the shared
+`~/go/pkg/mod` avoids re-fetching deps.
 
 ## Troubleshooting
 
-- **`python`/`node`/`go` not found inside a session.** They resolve via mise
-  shims on `PATH` (works for non-interactive shells too). If a tool is missing,
-  run `mise reshim` in the container, or check `mise ls`. Pin the version with a
-  repo-local `.tool-versions` (above).
-- **Bind-mount files look root-owned / permission denied.** Rebuild with your
-  host uid: `build.sh` already uses `$(id -u)`. On macOS, Docker Desktop usually
-  remaps ownership automatically; if not, ensure `DEV_UID` matches `id -u`.
-- **`tk` not found.** The `ticket` formula is symlinked to `tk` at build time.
-  If it still resolves wrong, run `command -v tk` in the container.
-- **polytoken formula name changed.** If `brew install polytoken-unstable`
-  fails, check `brew search polytoken` and update the `Dockerfile`.
-- **Git identity.** Commits use your host `~/.gitconfig` (mounted read-only). To
-  set identity only inside the container, edit the writable
-  `/home/dev/.gitconfig` (which `include`s the host file).
+- **`python`/`node`/`go` not found in a session:** mise shims are on PATH; pin via `.tool-versions`.
+- **Bind-mount files root-owned / permission denied:** rebuild with `DEV_UID=$(id -u)` (build.sh does this).
+- **`tk` not found:** the `ticket` formula is symlinked to `tk` at build.
+- **Container logs:** `~/.local/share/polytoken-dev/logs/` (daemon) and `.../sessions/<id>/log.jsonl`.
+- **An MCP server won't start:** check `~/.local/share/polytoken-dev/sessions/<id>/__mcp_*.log`.
+- **Host MCP commands not found:** ensure `~/.local/bin` is on PATH (installer appends to `~/.bashrc`; if zsh, add to `~/.zshrc`).
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | Image definition (brew + mise + user + shell env) |
-| `build.sh` | Builds `polytoken-dev:latest` with matching host uid |
-| `run.sh` | Launcher: mounts, cwd resolution, per-launch permissions, arg passthrough |
-| `permissions.yaml` | Global deny/ask template to install at `~/.config/polytoken/` |
-| `.env.example` | API-key template for the `--env-file` |
+| `Dockerfile` | Image (brew + mise + codex + MCP wrapper copy) |
+| `build.sh` | `docker build` with matching host uid |
+| `run.sh` | Launcher: mounts, cwd resolution, Bypass+ override, arg passthrough, env forwarding |
+| `mcp-wrappers/` | Shared MCP launcher scripts (used by the image and installed to the host) |
+| `.env.example` | API-key template for `--env-file` |
