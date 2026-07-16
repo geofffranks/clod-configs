@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+cd "$HOME/workspace/codex-imagegen-mcp" || exit 1
+exec go run . "$@"

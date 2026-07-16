@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec node "$HOME/workspace/lm-studio-mcp-server/server.js" "$@"
