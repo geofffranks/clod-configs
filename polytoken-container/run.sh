@@ -48,17 +48,12 @@ MOUNTS=(
 [[ -f "$HOST_GITCFG" ]] && MOUNTS+=(-v "$HOST_GITCFG:$DEV_HOME/.gitconfig.host:ro")
 [[ -d "$HOME/.config/gh" ]] && MOUNTS+=(-v "$HOME/.config/gh:$DEV_HOME/.config/gh:ro")
 [[ -f "$HOME/.gitignore" ]] && MOUNTS+=(-v "$HOME/.gitignore:$DEV_HOME/.gitignore:ro")
-# Persist the container's polytoken logs/sessions/auth by mounting the host's REAL
-# ~/.local/share/polytoken directly — one source of truth shared with the host, so a
-# provider login done in the container is visible on the host too (and vice versa).
-#
-# CAVEAT: macOS Docker stamps a host dir that a ROOT process writes to with a
-# user.containers.override_stat xattr, making it appear root-owned (700) and
-# unwritable to dev. The container runs as dev (uid 1000), so normal writes are
-# clean — but anything run via `sudo` (NOPASSWD is granted) could trigger it. If the
-# dir ever shows up root-owned/unwritable, fix it on the host:
-#   xattr -cr ~/.local/share/polytoken
-HOST_PTDAT="$HOME/.local/share/polytoken"
+# Persist the container's polytoken logs/sessions to the host via a DEDICATED dir.
+# Do NOT mount the host's ~/.local/share/polytoken directly: macOS Docker stamps a
+# dir that a root container once wrote with a user.containers.override_stat xattr,
+# which makes it appear root-owned (700) and unwritable to the dev user. A fresh
+# dedicated dir avoids that. Created here so it is owned by you, not root.
+HOST_PTDAT="$HOME/.local/share/polytoken-dev"
 mkdir -p "$HOST_PTDAT"
 MOUNTS+=(-v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken")
 # codex CLI auth/config for codex-imagegen-mcp (rw: codex writes sessions/images).
