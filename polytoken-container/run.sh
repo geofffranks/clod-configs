@@ -3,7 +3,7 @@
 # polytoken container launcher.
 #   - mounts:  ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig,
 #              ~/.config/gh (ro), ~/.gitignore (ro), ~/.local/share/polytoken,
-#              ~/.codex, ~/go/pkg/mod, $SSH_AUTH_SOCK (agent forwarding)
+#              ~/.codex, ~/go/pkg/mod
 #   - launches polytoken in the repo under ~/workspace you run this from
 #     (or at the ~/workspace root if launched elsewhere)
 #   - passes ALL arguments through to polytoken
@@ -61,13 +61,6 @@ MOUNTS+=(-v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken")
 # Go module cache (shared, portable across darwin/linux) so the `go run` MCP
 # wrappers don't re-fetch deps on every container session.
 [[ -d "$HOME/go/pkg/mod" ]] && MOUNTS+=(-v "$HOME/go/pkg/mod:$DEV_HOME/go/pkg/mod")
-# SSH agent forwarding: mount the host's agent socket so git over SSH works
-# inside the container. The agent holds the private keys — none are copied.
-SSH_AGENT_ENV=""
-if [[ -n "${SSH_AUTH_SOCK:-}" ]] && [[ -S "${SSH_AUTH_SOCK:-}" ]]; then
-  MOUNTS+=(-v "${SSH_AUTH_SOCK}:/ssh-agent.sock")
-  SSH_AGENT_ENV="-e SSH_AUTH_SOCK=/ssh-agent.sock"
-fi
 if [[ -n "${POLY_EXTRA_MOUNTS:-}" ]]; then
   # shellcheck disable=SC2206
   MOUNTS+=($POLY_EXTRA_MOUNTS)
@@ -122,7 +115,6 @@ docker run --rm -it --init \
   -e TERM="${TERM:-xterm-256color}" \
   -e COLORTERM=truecolor \
   $ENV_FLAGS \
-  $SSH_AGENT_ENV \
   "${MOUNTS[@]}" \
   -w "$CWD" \
   "$IMAGE:$TAG" \

@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ---- base system packages (Homebrew + git need curl/git/procps/file/build tools) ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential ca-certificates curl file git locales procps sudo tmux \
-      unzip zip rsync dnsutils openssh-client \
+      unzip zip rsync dnsutils \
     && localedef -i en_US -f UTF-8 en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
@@ -79,12 +79,14 @@ RUN npm install -g @openai/codex
 # ---- git: include the host ~/.gitconfig (mounted read-only at ~/.gitconfig.host) ----
 # Repoint core.excludesfile to the container's ~/.gitignore (mounted) so the
 # global ignore resolves here instead of the host's absolute /Users/... path.
-RUN printf '[include]\n    path = %s/.gitconfig.host\n[core]\n    excludesfile = ~/.gitignore\n' "$HOME" > ~/.gitconfig
-
-# Pre-populate GitHub's SSH host keys so git over SSH (agent-forwarded) doesn't
-# prompt for host-key verification — there's no interactive TTY during git ops.
-RUN mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
-    ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+# Rewrite SSH GitHub URLs to HTTPS and authenticate with $GH_TOKEN (set at
+# runtime via the env file / POLY_PASS_ENV). The macOS Keychain can't cross the
+# container boundary, and virtiofs can't forward the SSH agent socket, so HTTPS
+# + token is the reliable path for git fetch/pull/clone.
+RUN printf '[include]\n    path = %s/.gitconfig.host\n[core]\n    excludesfile = ~/.gitignore\n' "$HOME" > ~/.gitconfig && \
+    git config --global url."https://github.com/".insteadOf "git@github.com:" && \
+    git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" && \
+    git config --global credential."https://github.com".helper '!f() { test "$1" = get && echo username=x-access-token && echo "password=$GH_TOKEN"; }; f'
 
 RUN mkdir -p /home/dev/workspace
 WORKDIR /home/dev/workspace
