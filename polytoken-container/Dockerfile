@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ---- base system packages (Homebrew + git need curl/git/procps/file/build tools) ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential ca-certificates curl file git locales procps sudo tmux \
-      unzip zip rsync dnsutils \
+      unzip zip rsync dnsutils openssh-client \
     && localedef -i en_US -f UTF-8 en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
@@ -80,6 +80,11 @@ RUN npm install -g @openai/codex
 # Repoint core.excludesfile to the container's ~/.gitignore (mounted) so the
 # global ignore resolves here instead of the host's absolute /Users/... path.
 RUN printf '[include]\n    path = %s/.gitconfig.host\n[core]\n    excludesfile = ~/.gitignore\n' "$HOME" > ~/.gitconfig
+
+# Pre-populate GitHub's SSH host keys so git over SSH (agent-forwarded) doesn't
+# prompt for host-key verification — there's no interactive TTY during git ops.
+RUN mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+    ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
 
 RUN mkdir -p /home/dev/workspace
 WORKDIR /home/dev/workspace
