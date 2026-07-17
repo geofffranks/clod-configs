@@ -29,9 +29,9 @@ AGENTS="$ROOT/polytoken/AGENTS.md"
 
 # --- structural assertions (mirrors task-4-brief.md Step 1) ---
 
-# Exactly ten hook entries, every name unique.
-jq -e 'type == "array" and length == 10 and ([.[].name] | length == (unique | length))' \
-    "$HOOKS" >/dev/null || fail "hooks.json must be an array of 10 uniquely-named hooks"
+# Exactly nine hook entries, every name unique.
+jq -e 'type == "array" and length == 9 and ([.[].name] | length == (unique | length))' \
+    "$HOOKS" >/dev/null || fail "hooks.json must be an array of 9 uniquely-named hooks"
 
 # Every hook fires on a supported event and references a hooks/ script.
 jq -e 'all(.[]; (.event == "pre_tool_use" or .event == "post_compaction" or .event == "session_start") and (.handler.bash | contains("hooks/")))' \
