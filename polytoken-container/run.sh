@@ -73,9 +73,13 @@ ENV_FLAGS=""
 # (b) forward provider tokens already exported in your shell into the container.
 #     `-e VAR` (no value) makes docker read each value from the host environment.
 #     Extend the list with:  POLY_PASS_ENV="FOO_KEY BAR_TOKEN"
+# GH_TOKEN: gh stores its OAuth token in the macOS Keychain (not in the
+# ~/.config/gh files we mount), so it can't cross the container boundary.
+# Pass it as an env var instead — gh prefers GH_TOKEN over the keychain.
 POLY_PASS_ENV_DEFAULT="ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY \
 GROQ_API_KEY DEEPSEEK_API_KEY MISTRAL_API_KEY ZAI_API_KEY OPENROUTER_API_KEY \
-BRAVE_SEARCH_API_KEY TAVILY_API_KEY EXA_API_KEY KAGI_API_KEY FOUNDRY_API_KEY"
+BRAVE_SEARCH_API_KEY TAVILY_API_KEY EXA_API_KEY KAGI_API_KEY FOUNDRY_API_KEY \
+GH_TOKEN"
 for v in $POLY_PASS_ENV_DEFAULT ${POLY_PASS_ENV:-}; do
   if [ -n "${!v:-}" ]; then
     ENV_FLAGS="$ENV_FLAGS -e $v"

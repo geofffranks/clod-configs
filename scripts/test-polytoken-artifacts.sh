@@ -29,13 +29,13 @@ AGENTS="$ROOT/polytoken/AGENTS.md"
 
 # --- structural assertions (mirrors task-4-brief.md Step 1) ---
 
-# Exactly eight hook entries, every name unique.
-jq -e 'type == "array" and length == 8 and ([.[].name] | length == (unique | length))' \
-    "$HOOKS" >/dev/null || fail "hooks.json must be an array of 8 uniquely-named hooks"
+# Exactly ten hook entries, every name unique.
+jq -e 'type == "array" and length == 10 and ([.[].name] | length == (unique | length))' \
+    "$HOOKS" >/dev/null || fail "hooks.json must be an array of 10 uniquely-named hooks"
 
-# Every hook fires on a supported event and invokes the installed adapter.
-jq -e 'all(.[]; (.event == "pre_tool_use" or .event == "post_compaction") and (.handler.bash | contains("hooks/adapter.sh")))' \
-    "$HOOKS" >/dev/null || fail "hooks must use pre_tool_use/post_compaction and the adapter"
+# Every hook fires on a supported event and references a hooks/ script.
+jq -e 'all(.[]; (.event == "pre_tool_use" or .event == "post_compaction" or .event == "session_start") and (.handler.bash | contains("hooks/")))' \
+    "$HOOKS" >/dev/null || fail "hooks must use a supported event and a hooks/ script"
 
 # version: 2 headers on both recommendation files.
 grep -q '^version: 2$' "$CFG"   || fail "config.recommended.yaml missing version: 2"

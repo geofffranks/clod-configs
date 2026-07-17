@@ -24,6 +24,14 @@
     }
   },
   {
+    "name": "herdle-gatekeeper",
+    "event": "pre_tool_use",
+    "matcher": "*",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/herdle-gatekeeper.sh\""
+    }
+  },
+  {
     "name": "no-remote-writes",
     "event": "pre_tool_use",
     "matcher": "shell_exec",

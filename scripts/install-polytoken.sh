@@ -29,6 +29,7 @@ COMPAT_HOOKS=(hooks/no-remote-writes.sh)
 EXEC_SCRIPTS=(
   hooks/adapter.sh
   hooks/container-awareness.sh
+  hooks/herdle-gatekeeper.sh
   compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh
   compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once
   compat/skill-once/hook.sh compat/skill-once/compact.sh
@@ -467,6 +468,7 @@ mkdir -p "$DEST"
 copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
 copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
 copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/container-awareness.sh"
+copy_managed_file "$ROOT/polytoken/hooks/herdle-gatekeeper.sh" "$DEST/hooks/herdle-gatekeeper.sh"
 for d in "${COMPAT_DIRS[@]}"; do
   if [ -d "$ROOT/home/$d" ]; then
     while IFS= read -r -d '' src; do
