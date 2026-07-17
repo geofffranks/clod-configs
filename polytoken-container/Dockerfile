@@ -85,7 +85,7 @@ RUN npm install -g @openai/codex
 # + token is the reliable path for git fetch/pull/clone.
 RUN printf '[include]\n    path = %s/.gitconfig.host\n[core]\n    excludesfile = ~/.gitignore\n' "$HOME" > ~/.gitconfig && \
     git config --global url."https://github.com/".insteadOf "git@github.com:" && \
-    git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" && \
+    git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/" && \
     git config --global credential."https://github.com".helper '!f() { test "$1" = get && echo username=x-access-token && echo "password=$GH_TOKEN"; }; f'
 
 RUN mkdir -p /home/dev/workspace
