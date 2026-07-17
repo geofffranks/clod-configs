@@ -100,16 +100,19 @@ host: Autonomous (classifier-judged) from the global config.
 | `~/.gitconfig` | `~/.gitconfig.host` | ro | git identity (via include) |
 | `~/.config/gh` | `/home/dev/.config/gh` | ro | gh auth (writes denied by baseline) |
 | `~/.gitignore` | `/home/dev/.gitignore` | ro | global ignore (excludesfile repointed in image) |
-| `~/.local/share/polytoken-dev` | `~/.local/share/polytoken` | rw | container logs/sessions (dedicated dir) |
+| `~/.local/share/polytoken` | `~/.local/share/polytoken` | rw | shared polytoken data: logs/sessions/auth (host = container) |
 | `~/.codex` | `/home/dev/.codex` | rw | codex auth/config |
 | `~/go/pkg/mod` | `/home/dev/go/pkg/mod` | rw | shared Go module cache |
 
 Extra mounts: `POLY_EXTRA_MOUNTS='-v /x:/home/dev/x'`.
 
-> The container's polytoken data is a **dedicated** `~/.local/share/polytoken-dev`,
-> not the host's `~/.local/share/polytoken`: macOS Docker stamps dirs a root
-> container once wrote with a `user.containers.override_stat` xattr, making them
-> unwritable. Read container logs/sessions from `~/.local/share/polytoken-dev/`.
+> The container mounts the host's **real** `~/.local/share/polytoken` directly — one
+> source of truth shared with the host (a provider login done in the container is
+> visible on the host too, and vice versa). macOS Docker stamps a host dir that a
+> *root* process writes to with a `user.containers.override_stat` xattr, making it
+> root-owned/700 and unwritable; the container runs as `dev` (uid 1000) so normal
+> writes are clean, but anything run via `sudo` could trigger it. Recover on the host
+> with `xattr -cr ~/.local/share/polytoken`.
 
 ## MCP servers
 
@@ -127,8 +130,8 @@ A Go server's first start per session takes a few seconds (compile); the shared
 - **`python`/`node`/`go` not found in a session:** mise shims are on PATH; pin via `.tool-versions`.
 - **Bind-mount files root-owned / permission denied:** rebuild with `DEV_UID=$(id -u)` (build.sh does this).
 - **`tk` not found:** the `ticket` formula is symlinked to `tk` at build.
-- **Container logs:** `~/.local/share/polytoken-dev/logs/` (daemon) and `.../sessions/<id>/log.jsonl`.
-- **An MCP server won't start:** check `~/.local/share/polytoken-dev/sessions/<id>/__mcp_*.log`.
+- **Container logs:** `~/.local/share/polytoken/logs/` (daemon) and `.../sessions/<id>/log.jsonl`.
+- **An MCP server won't start:** check `~/.local/share/polytoken/sessions/<id>/__mcp_*.log`.
 - **Host MCP commands not found:** ensure `~/.local/bin` is on PATH (installer appends to `~/.bashrc`; if zsh, add to `~/.zshrc`).
 
 ## Files
