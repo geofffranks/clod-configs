@@ -92,3 +92,7 @@ bypass rtk and save nothing.
 
 rtk commands run through `shell_exec`, so allowing `executable: rtk` (see
 Permission Rules) avoids per-call approval prompts.
+
+# Workflow + Ticketing
+Gate repo work on the skills that govern it: load `herdle-tk-flow` and create or locate the tk ticket before starting any feature or bug work, and load `git-workflow` before any branch, commit, or PR.
+
