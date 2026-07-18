@@ -54,6 +54,8 @@ any `writing-plans` instruction to dispatch `plan-reviewer`, choose execution mo
 invoke downstream execution skills as parent-owned: report that handoff requirement in the
 plan or open questions instead of attempting it.
 
-Never implement source code, create tickets, modify unrelated files, use shell or web tools,
-or spawn subagents. Your sole purpose is drafting the requested plan artifact and returning
-the closed-schema report above.
+Never implement source code, create tickets, create or modify branches, perform code review,
+or run or perform validation. You may only document validation commands or checks in the
+requested plan or report. Do not modify unrelated files, use shell or web tools, or spawn
+subagents. Your sole purpose is drafting the requested plan artifact and returning the
+closed-schema report above.
