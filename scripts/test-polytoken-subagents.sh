@@ -38,12 +38,12 @@ declare -A expected_required=(
   [plan-reviewer]='[verdict, summary, report_file]'
   [plan-writer]='[status, summary, plan_file, files_considered, open_questions]'
 )
-declare -A expected_enums=(
-  [implementer]='DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT'
-  [reviewer]='approved,needs_fixes'
-  [validator]='pass,fail,partial'
-  [plan-reviewer]='approved,needs_fixes'
-  [plan-writer]='DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT'
+declare -A expected_enum_fields=(
+  [implementer]='status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT'
+  [reviewer]='verdict=approved,needs_fixes spec_compliance=compliant,issues_found'
+  [validator]='verdict=pass,fail,partial'
+  [plan-reviewer]='verdict=approved,needs_fixes'
+  [plan-writer]='status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT'
 )
 declare -A expected_properties=(
   [implementer]='commits concerns report_file status summary test_summary'
@@ -57,12 +57,37 @@ declare -A expected_properties=(
 for persona in "${files[@]}"; do
   path="polytoken/subagents/$persona.md"
   [[ -f "$path" ]] || { echo "missing persona: $path" >&2; exit 1; }
-  model_lines=$(grep -Ec '^  model:' "$path")
-  [[ "$model_lines" == 1 ]] || { echo "$persona: expected exactly one model key, got $model_lines" >&2; exit 1; }
   frontmatter=$(mktemp)
   trap 'rm -f "$frontmatter"' EXIT
+  [[ "$(grep -c '^---$' "$path")" == 2 ]] || { echo "$persona: expected one frontmatter delimiter pair" >&2; exit 1; }
+  [[ "$(sed -n '1p' "$path")" == '---' ]] || { echo "$persona: missing opening frontmatter delimiter" >&2; exit 1; }
+  [[ "$(sed -n '2,/^---$/p' "$path" | tail -n 1)" == '---' ]] || { echo "$persona: missing closing frontmatter delimiter" >&2; exit 1; }
   sed -n '2,/^---$/p' "$path" | sed '$d' > "$frontmatter"
   yq -e '.' "$frontmatter" >/dev/null || { echo "$persona: malformed YAML" >&2; exit 1; }
+  MODEL_NODES=$(FRONTMATTER="$frontmatter" python3 - <<'PY'
+from pathlib import Path
+import os
+count = 0
+stack = []
+for raw in Path(os.environ['FRONTMATTER']).read_text().splitlines():
+    if not raw.strip() or raw.lstrip().startswith('#'):
+        continue
+    indent = len(raw) - len(raw.lstrip(' '))
+    key, sep, _ = raw.strip().partition(':')
+    if not sep:
+        continue
+    key = key.strip().strip('"\'')
+    while stack and stack[-1][0] >= indent:
+        stack.pop()
+    path = '.'.join(item[1] for item in stack + [(indent, key)])
+    if path == 'polytoken.model':
+        count += 1
+    if raw.rstrip().endswith(':'):
+        stack.append((indent, key))
+print(count)
+PY
+)
+  [[ "$MODEL_NODES" == 1 ]] || { echo "$persona: expected exactly one structural polytoken.model node, got $MODEL_NODES" >&2; exit 1; }
   model=$(yq -r '.polytoken.model' "$frontmatter")
   [[ "$model" == "${expected_model[$persona]}" ]] || { echo "$persona: unexpected model: $model" >&2; exit 1; }
   MODEL="$model" python3 - <<'PY'
@@ -91,10 +116,12 @@ PY
   [[ "$actual_properties" == "${expected_properties[$persona]}" ]] || { echo "$persona: property set mismatch: $actual_properties" >&2; exit 1; }
   while read -r field; do [[ "$(yq -r "$schema.properties.$field.type" "$frontmatter")" == string ]] || { echo "$persona: $field must be string" >&2; exit 1; }; done < <(yq -r "$schema.properties | keys[]" "$frontmatter" | grep -E '^(status|summary|verdict|plan_file|spec_compliance|test_summary|concerns|report_file)$')
   while read -r field; do [[ "$(yq -r "$schema.properties.$field.type" "$frontmatter")" == array ]] || { echo "$persona: $field must be array" >&2; exit 1; }; [[ "$(yq -r "$schema.properties.$field.items.type" "$frontmatter")" == string ]] || { echo "$persona: $field items must be string" >&2; exit 1; }; done < <(yq -r "$schema.required[]" "$frontmatter" | grep -E '^(files|sources|commits|files_considered|open_questions)$' || true)
-  if [[ -n "${expected_enums[$persona]:-}" ]]; then
-    actual=$(yq -r "$schema.properties.status.enum // $schema.properties.verdict.enum | join(\",\")" "$frontmatter")
-    [[ "$actual" == "${expected_enums[$persona]}" ]] || { echo "$persona: enum mismatch" >&2; exit 1; }
-  fi
+  for enum_field in ${expected_enum_fields[$persona]:-}; do
+    field=${enum_field%%=*}
+    expected_enum=${enum_field#*=}
+    actual=$(yq -r "$schema.properties.$field.enum | join(\",\")" "$frontmatter")
+    [[ "$actual" == "$expected_enum" ]] || { echo "$persona: $field enum mismatch" >&2; exit 1; }
+  done
   if [[ "$persona" == plan-writer ]]; then
     python3 - "$ROOT" <<'PY'
 from pathlib import Path
@@ -106,7 +133,11 @@ for raw, ok in ((str(allowed), True), (str(root / "docs/superpowers/plans/subdir
     result = candidate == allowed and candidate.parent == (root / "docs/superpowers/plans").resolve()
     assert result is ok, (raw, candidate, result)
 PY
-    grep -q 'canonical' "$path" || { echo "plan-writer: missing canonical path contract" >&2; exit 1; }
+    grep -Fq 'Canonicalize and validate the requested output path before writing anything.' "$path" || { echo "plan-writer: missing canonicalize instruction" >&2; exit 1; }
+    grep -Fq 'the requested plan artifact, and reject the request if the canonical path is outside' "$path" || { echo "plan-writer: missing canonical rejection instruction" >&2; exit 1; }
+    grep -Fq 'Do not silently substitute a' "$path" && grep -Fq 'the reason and the requested path in `plan_file`.' "$path" || { echo "plan-writer: missing no-substitution/report instruction" >&2; exit 1; }
+    grep -Fq 'the requested path in `plan_file`.' "$path" || { echo "plan-writer: missing exact plan_file reporting instruction" >&2; exit 1; }
+    grep -Fq 'Report the plan path, every repository file directly read or examined in `files_considered`' "$path" || { echo "plan-writer: missing report contract" >&2; exit 1; }
   fi
   rm -f "$frontmatter"; trap - EXIT
   echo "$persona contract verified"
