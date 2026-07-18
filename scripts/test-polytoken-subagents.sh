@@ -54,26 +54,19 @@ declare -A expected_properties=(
   [plan-writer]='files_considered open_questions plan_file status summary'
 )
 
-for persona in "${files[@]}"; do
-  path="polytoken/subagents/$persona.md"
-  [[ -f "$path" ]] || { echo "missing persona: $path" >&2; exit 1; }
-  frontmatter=$(mktemp)
-  trap 'rm -f "$frontmatter"' EXIT
-  [[ "$(grep -c '^---$' "$path")" == 2 ]] || { echo "$persona: expected one frontmatter delimiter pair" >&2; exit 1; }
-  [[ "$(sed -n '1p' "$path")" == '---' ]] || { echo "$persona: missing opening frontmatter delimiter" >&2; exit 1; }
-  [[ "$(sed -n '2,/^---$/p' "$path" | tail -n 1)" == '---' ]] || { echo "$persona: missing closing frontmatter delimiter" >&2; exit 1; }
-  sed -n '2,/^---$/p' "$path" | sed '$d' > "$frontmatter"
-  yq -e '.' "$frontmatter" >/dev/null || { echo "$persona: malformed YAML" >&2; exit 1; }
-  MODEL_NODES=$(FRONTMATTER="$frontmatter" python3 - <<'PY'
+count_model_nodes() {
+  FRONTMATTER="$1" python3 - <<'PY'
 from pathlib import Path
-import os
+import os, re
+
+lines = Path(os.environ['FRONTMATTER']).read_text().splitlines()
 count = 0
 stack = []
-for raw in Path(os.environ['FRONTMATTER']).read_text().splitlines():
+for raw in lines:
     if not raw.strip() or raw.lstrip().startswith('#'):
         continue
     indent = len(raw) - len(raw.lstrip(' '))
-    key, sep, _ = raw.strip().partition(':')
+    key, sep, value = raw.strip().partition(':')
     if not sep:
         continue
     key = key.strip().strip('"\'')
@@ -84,10 +77,31 @@ for raw in Path(os.environ['FRONTMATTER']).read_text().splitlines():
         count += 1
     if raw.rstrip().endswith(':'):
         stack.append((indent, key))
+    if key == 'polytoken' and value.lstrip().startswith('{'):
+        depth = 0
+        inline = value[value.index('{'):]
+        for character in inline:
+            if character == '{': depth += 1
+            elif character == '}': depth -= 1
+            if depth == 0: break
+        count += len(re.findall(r'(?:\{|,)\s*(?:["\']?model["\']?)\s*:', inline))
 print(count)
 PY
-)
-  [[ "$MODEL_NODES" == 1 ]] || { echo "$persona: expected exactly one structural polytoken.model node, got $MODEL_NODES" >&2; exit 1; }
+}
+
+validate_persona() {
+  persona="$1"
+  path="$2"
+  [[ -f "$path" ]] || { echo "missing persona: $path" >&2; return 1; }
+  frontmatter=$(mktemp)
+  trap 'rm -f "$frontmatter"' RETURN
+  [[ "$(grep -c '^---$' "$path")" == 2 ]] || { echo "$persona: expected one frontmatter delimiter pair" >&2; return 1; }
+  [[ "$(sed -n '1p' "$path")" == '---' ]] || { echo "$persona: missing opening frontmatter delimiter" >&2; return 1; }
+  [[ "$(sed -n '2,/^---$/p' "$path" | tail -n 1)" == '---' ]] || { echo "$persona: missing closing frontmatter delimiter" >&2; return 1; }
+  sed -n '2,/^---$/p' "$path" | sed '$d' > "$frontmatter"
+  yq -e '.' "$frontmatter" >/dev/null || { echo "$persona: malformed YAML" >&2; return 1; }
+  MODEL_NODES=$(count_model_nodes "$frontmatter")
+  [[ "$MODEL_NODES" == 1 ]] || { echo "$persona: expected exactly one structural polytoken.model node, got $MODEL_NODES" >&2; return 1; }
   model=$(yq -r '.polytoken.model' "$frontmatter")
   [[ "$model" == "${expected_model[$persona]}" ]] || { echo "$persona: unexpected model: $model" >&2; exit 1; }
   MODEL="$model" python3 - <<'PY'
@@ -141,6 +155,27 @@ PY
   fi
   rm -f "$frontmatter"; trap - EXIT
   echo "$persona contract verified"
+}
+
+if [[ "${1:-}" == --mutation-tests ]]; then
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  for fixture in block inline; do
+    fixture_file="$fixture_dir/$fixture.yaml"
+    if [[ "$fixture" == block ]]; then
+      printf '%s\n' 'polytoken:' '  model: expected' '  model: bad' > "$fixture_file"
+    else
+      printf '%s\n' 'polytoken: {model: expected, model: bad}' > "$fixture_file"
+    fi
+    nodes=$(count_model_nodes "$fixture_file")
+    [[ "$nodes" != 1 ]] || { echo "$fixture duplicate mutation unexpectedly accepted" >&2; exit 1; }
+    echo "$fixture duplicate mutation rejected (model nodes: $nodes)"
+  done
+  exit 0
+fi
+
+for persona in "${files[@]}"; do
+  validate_persona "$persona" "polytoken/subagents/$persona.md"
 done
 found=$(printf '%s\n' polytoken/subagents/*.md | sed 's#polytoken/subagents/##;s#\.md$##' | sort)
 expected=$(printf '%s\n' "${files[@]}" | sort)
