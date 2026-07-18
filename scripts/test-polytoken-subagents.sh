@@ -65,7 +65,13 @@ count = 0
 quote = None
 escaped = False
 for ch in text:
-    if quote:
+    if quote == '#':
+        if ch == '\n':
+            quote = None
+            clean.append(ch)
+        else:
+            clean.append(' ')
+    elif quote:
         if quote == '"' and escaped:
             escaped = False
         elif quote == '"' and ch == '\\\\':
@@ -79,11 +85,6 @@ for ch in text:
     elif ch == '#':
         clean.append(' ')
         quote = '#'
-    elif ch == '\n' and quote == '#':
-        quote = None
-        clean.append(ch)
-    elif quote == '#':
-        clean.append(' ')
     else:
         clean.append(ch)
 clean_text = ''.join(clean)
@@ -183,15 +184,20 @@ if [[ "${1:-}" == --mutation-tests ]]; then
     [single-quoted]=$'polytoken: {value: \'model: fake\'}'
     [double-quoted]=$'polytoken: {value: "model: fake"}'
     [comment]=$'polytoken: {value: safe} # model: fake'
+    [comment-followed-model]=$'polytoken:\n  value: safe # model: fake\n  model: expected'
+    [comment-between-duplicates]=$'polytoken:\n  model: expected # model: fake\n  value: safe\n  model: bad'
   )
-  for fixture in block inline multiline single-quoted double-quoted comment; do
+  for fixture in block inline multiline single-quoted double-quoted comment comment-followed-model comment-between-duplicates; do
     fixture_file="$fixture_dir/$fixture.yaml"
     printf '%s\n' "${fixtures[$fixture]}" > "$fixture_file"
     nodes=$(count_model_nodes "$fixture_file")
     case "$fixture" in
-      block|inline|multiline)
-        [[ "$nodes" != 1 ]] || { echo "$fixture duplicate mutation unexpectedly accepted" >&2; exit 1; }
+      block|inline|multiline|comment-between-duplicates)
+        [[ "$nodes" == 2 ]] || { echo "$fixture expected two model nodes, got $nodes" >&2; exit 1; }
         echo "$fixture duplicate mutation rejected (model nodes: $nodes)" ;;
+      comment-followed-model)
+        [[ "$nodes" == 1 ]] || { echo "$fixture expected one model node, got $nodes" >&2; exit 1; }
+        echo "$fixture comment reset preserved model (model nodes: $nodes)" ;;
       *)
         [[ "$nodes" == 0 ]] || { echo "$fixture quoted/comment model text falsely counted: $nodes" >&2; exit 1; }
         echo "$fixture model text ignored (model nodes: $nodes)" ;;
