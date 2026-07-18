@@ -57,7 +57,10 @@ HOST_PTDAT="$HOME/.local/share/polytoken-dev"
 mkdir -p "$HOST_PTDAT"
 MOUNTS+=(-v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken")
 # codex CLI auth/config for codex-imagegen-mcp (rw: codex writes sessions/images).
-[[ -d "$HOME/.codex" ]] && MOUNTS+=(-v "$HOME/.codex:$DEV_HOME/.codex")
+# Codex creates executable aliases under ~/.codex/tmp/arg0. A prior root-run
+# container may have left that subdirectory root-owned, so repair it below.
+CODEX_MOUNT=0
+[[ -d "$HOME/.codex" ]] && { MOUNTS+=(-v "$HOME/.codex:$DEV_HOME/.codex"); CODEX_MOUNT=1; }
 # Go module cache (shared, portable across darwin/linux) so the `go run` MCP
 # wrappers don't re-fetch deps on every container session.
 [[ -d "$HOME/go/pkg/mod" ]] && MOUNTS+=(-v "$HOME/go/pkg/mod:$DEV_HOME/go/pkg/mod")
@@ -107,6 +110,22 @@ else
   GEN_CFG=""
 fi
 trap '[[ -n "${GEN_CFG:-}" ]] && rm -f "$GEN_CFG"' EXIT
+
+# Repair Codex's helper-alias directory inside the bind mount before launching
+# as dev. The image's USER cannot fix ownership after ~/.codex is mounted.
+if [[ "$CODEX_MOUNT" == 1 ]]; then
+  echo "run.sh: repairing Codex alias directory ownership" >&2
+  docker run --rm --user 0 \
+    -v "$HOME/.codex:$DEV_HOME/.codex" \
+    "$IMAGE:$TAG" \
+    sh -c 'mkdir -p /home/dev/.codex/tmp/arg0 && chmod 700 /home/dev/.codex/tmp/arg0 && chown -R dev:dev /home/dev/.codex/tmp/arg0'
+fi
+
+echo "run.sh: repairing Codex alias directory ownership" >&2
+docker run --rm --user 0 \
+  -v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken" \
+  "$IMAGE:$TAG" \
+  sh -c 'mkdir -p /home/dev/.local/share/polytoken && chmod 700 /home/dev/.local/share/polytoken && chown -R dev:dev /home/dev/.local/share/polytoken'
 
 echo "run.sh: launching polytoken in $CWD" >&2
 

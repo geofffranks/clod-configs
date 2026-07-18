@@ -76,6 +76,14 @@ RUN printf '\nexport PATH="$HOME/bin:%s/shims:/home/linuxbrew/.linuxbrew/bin:/ho
 COPY --chmod=0755 mcp-wrappers/foundry-mcp mcp-wrappers/codex-imagegen-mcp mcp-wrappers/minime-vision /home/dev/.local/bin/
 RUN npm install -g @openai/codex
 
+# Codex creates PATH aliases below this directory at startup. Keep the image
+# default writable; run.sh also repairs this path after the host ~/.codex
+# bind-mount is applied, since the mount can contain stale root-owned state.
+ENV CODEX_HOME=/home/dev/.codex
+RUN mkdir -p /home/dev/.codex/tmp/arg0 \
+    && chmod 700 /home/dev/.codex/tmp/arg0 \
+    && chown -R dev:dev /home/dev/.codex
+
 # ---- git: include the host ~/.gitconfig (mounted read-only at ~/.gitconfig.host) ----
 # Repoint core.excludesfile to the container's ~/.gitignore (mounted) so the
 # global ignore resolves here instead of the host's absolute /Users/... path.
