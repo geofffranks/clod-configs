@@ -59,32 +59,48 @@ count_model_nodes() {
 from pathlib import Path
 import os, re
 
-lines = Path(os.environ['FRONTMATTER']).read_text().splitlines()
+text = Path(os.environ['FRONTMATTER']).read_text()
+clean = []
 count = 0
-stack = []
-for raw in lines:
-    if not raw.strip() or raw.lstrip().startswith('#'):
-        continue
-    indent = len(raw) - len(raw.lstrip(' '))
-    key, sep, value = raw.strip().partition(':')
-    if not sep:
-        continue
-    key = key.strip().strip('"\'')
-    while stack and stack[-1][0] >= indent:
-        stack.pop()
-    path = '.'.join(item[1] for item in stack + [(indent, key)])
-    if path == 'polytoken.model':
-        count += 1
-    if raw.rstrip().endswith(':'):
-        stack.append((indent, key))
-    if key == 'polytoken' and value.lstrip().startswith('{'):
-        depth = 0
-        inline = value[value.index('{'):]
-        for character in inline:
-            if character == '{': depth += 1
-            elif character == '}': depth -= 1
-            if depth == 0: break
-        count += len(re.findall(r'(?:\{|,)\s*(?:["\']?model["\']?)\s*:', inline))
+quote = None
+escaped = False
+for ch in text:
+    if quote:
+        if quote == '"' and escaped:
+            escaped = False
+        elif quote == '"' and ch == '\\\\':
+            escaped = True
+        elif ch == quote:
+            quote = None
+        clean.append(' ' if ch != '\n' else '\n')
+    elif ch in "'\"":
+        quote = ch
+        clean.append(' ')
+    elif ch == '#':
+        clean.append(' ')
+        quote = '#'
+    elif ch == '\n' and quote == '#':
+        quote = None
+        clean.append(ch)
+    elif quote == '#':
+        clean.append(' ')
+    else:
+        clean.append(ch)
+clean_text = ''.join(clean)
+
+for match in re.finditer(r'(?m)^([ ]*)polytoken\s*:\s*\n((?:[ ]+[^\n]*\n?)*)', clean_text):
+    count += len(re.findall(r'(?m)^[ ]+model\s*:', match.group(2)))
+
+for match in re.finditer(r'polytoken\s*:\s*\{', clean_text):
+    start = match.end()
+    depth = 1
+    pos = start
+    while pos < len(clean_text) and depth:
+        if clean_text[pos] == '{': depth += 1
+        elif clean_text[pos] == '}': depth -= 1
+        pos += 1
+    body = clean_text[start:pos - 1]
+    count += len(re.findall(r'(?:^|[,{])\s*model\s*:', body))
 print(count)
 PY
 }
@@ -160,16 +176,26 @@ PY
 if [[ "${1:-}" == --mutation-tests ]]; then
   fixture_dir=$(mktemp -d)
   trap 'rm -rf "$fixture_dir"' EXIT
-  for fixture in block inline; do
+  declare -A fixtures=(
+    [block]=$'polytoken:\n  model: expected\n  model: bad'
+    [inline]=$'polytoken: {model: expected, model: bad}'
+    [multiline]=$'polytoken: {\n  model: expected,\n  model: bad\n}'
+    [single-quoted]=$'polytoken: {value: \'model: fake\'}'
+    [double-quoted]=$'polytoken: {value: "model: fake"}'
+    [comment]=$'polytoken: {value: safe} # model: fake'
+  )
+  for fixture in block inline multiline single-quoted double-quoted comment; do
     fixture_file="$fixture_dir/$fixture.yaml"
-    if [[ "$fixture" == block ]]; then
-      printf '%s\n' 'polytoken:' '  model: expected' '  model: bad' > "$fixture_file"
-    else
-      printf '%s\n' 'polytoken: {model: expected, model: bad}' > "$fixture_file"
-    fi
+    printf '%s\n' "${fixtures[$fixture]}" > "$fixture_file"
     nodes=$(count_model_nodes "$fixture_file")
-    [[ "$nodes" != 1 ]] || { echo "$fixture duplicate mutation unexpectedly accepted" >&2; exit 1; }
-    echo "$fixture duplicate mutation rejected (model nodes: $nodes)"
+    case "$fixture" in
+      block|inline|multiline)
+        [[ "$nodes" != 1 ]] || { echo "$fixture duplicate mutation unexpectedly accepted" >&2; exit 1; }
+        echo "$fixture duplicate mutation rejected (model nodes: $nodes)" ;;
+      *)
+        [[ "$nodes" == 0 ]] || { echo "$fixture quoted/comment model text falsely counted: $nodes" >&2; exit 1; }
+        echo "$fixture model text ignored (model nodes: $nodes)" ;;
+    esac
   done
   exit 0
 fi
