@@ -2,7 +2,7 @@
 name: validator
 description: Execute a validation plan end-to-end — runs each validation item, captures command output as evidence, judges pass/fail, and reports an overall verdict. Does not fix issues; reports them.
 polytoken:
-  model: default_model:full
+  model: <polytoken-ref type="model" name="zai/glm-5.2(high)"/>
   tools: [file_read, glob, grep, shell_exec, file_write]
   undeferred_tools: [file_read, glob, grep, shell_exec, file_write]
   allow_subagent_spawn: false
