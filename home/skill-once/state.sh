@@ -13,6 +13,16 @@ SKILL_ONCE_TRACE_ACTIVE=0
 SKILL_ONCE_TRACE_OP_ID=
 SKILL_ONCE_TRACE_DIR=
 
+skill_once_test_fail_point() {
+  local label=${1-}
+  [ "$SKILL_ONCE_TRACE_ACTIVE" -eq 1 ] || return 1
+  [ "${SKILL_ONCE_TEST_FAIL_POINT-}" = "$label" ] || return 1
+  case "$label" in
+    append) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 skill_once_init() {
   local session_id=${1-} cmd
   SKILL_ONCE_SESSION_HASH=; SKILL_ONCE_CONFIG_DIR=; SKILL_ONCE_CACHE_DIR=
@@ -72,7 +82,7 @@ skill_once_unlock() {
     SKILL_ONCE_TRACE_ACTIVE=0
   fi
 }
-skill_once_append() { [ "$SKILL_ONCE_SESSION_LOCK_OWNED" -eq 1 ] || return 1; printf '%s\n' "$1" 2>/dev/null >>"$SKILL_ONCE_CACHE_FILE"; }
+skill_once_append() { [ "$SKILL_ONCE_SESSION_LOCK_OWNED" -eq 1 ] || return 1; skill_once_test_fail_point append && return 1; printf '%s\n' "$1" 2>/dev/null >>"$SKILL_ONCE_CACHE_FILE"; }
 skill_once_remove() {
   local skill=$1 agent=$2
   [ "$SKILL_ONCE_SESSION_LOCK_OWNED" -eq 1 ] || return 1; [ -f "$SKILL_ONCE_CACHE_FILE" ] || return 0

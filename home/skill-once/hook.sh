@@ -20,19 +20,24 @@ case "$EVENT" in PreToolUse|PostToolUse) ;; *) exit 0 ;; esac
 TTL=${SKILL_ONCE_TTL:-1800}; case "$TTL" in ''|*[!0-9]*) exit 0 ;; esac
 AGENT_KEY=${AGENT_ID:-main}; NOW=$(date +%s) || exit 0
 skill_once_init "$SESSION_ID" || exit 0
-if [ ! -d "$SKILL_ONCE_SESSION_LOCK" ]; then skill_once_cleanup_stale "$NOW" || true; fi
+OP_LABEL=${SKILL_ONCE_TEST_OP_ID:-}
+if [ -z "$OP_LABEL" ]; then
+  if [ "$EVENT" = PostToolUse ]; then OP_LABEL=post
+  elif grep -qiE '(^|[[:space:]])--?force([[:space:]]|$)' <<<"$ARGS"; then OP_LABEL=force
+  else OP_LABEL=pre
+  fi
+fi
+skill_once_lock "$OP_LABEL" || exit 0
+skill_once_cleanup_stale "$NOW" || true
 if [ "$EVENT" = PostToolUse ]; then
-  skill_once_lock "${SKILL_ONCE_TEST_OP_ID:-post}" || exit 0
   line=$(jq -cn --arg skill "$SKILL" --arg agent "$AGENT_KEY" --argjson ts "$NOW" '{skill:$skill,agent:$agent,ts:$ts}') || exit 0
   skill_once_append "$line" || exit 0
   exit 0
 fi
 if grep -qiE '(^|[[:space:]])--?force([[:space:]]|$)' <<<"$ARGS"; then
-  skill_once_lock "${SKILL_ONCE_TEST_OP_ID:-force}" || exit 0
   skill_once_remove "$SKILL" "$AGENT_KEY" || exit 0
   exit 0
 fi
-skill_once_lock "${SKILL_ONCE_TEST_OP_ID:-pre}" || exit 0
 CACHED_TS=$(jq -r --arg s "$SKILL" --arg a "$AGENT_KEY" 'select(.skill == $s and .agent == $a) | .ts' "$SKILL_ONCE_CACHE_FILE" 2>/dev/null | tail -1 || true)
 if [ -n "$CACHED_TS" ] && [ $((NOW-CACHED_TS)) -lt "$TTL" ]; then
   MINUTES_AGO=$(((NOW-CACHED_TS)/60))

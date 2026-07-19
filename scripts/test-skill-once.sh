@@ -382,54 +382,54 @@ assert_clean_runtime
 # Task 3C1 cases 1-8: isolated initialization/session mutation failures.
 case1="$TMP/3c1-case1"; mkdir -p "$case1/home" "$case1/config" "$case1/bin"
 real_sha256sum="$(command -v sha256sum)"; real_shasum="$(command -v shasum)"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 127' >"$case1/bin/sha256sum"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 127' >"$case1/bin/shasum"
+printf '%s\n' '#!/usr/bin/env bash' 'real="'"$real_sha256sum"'"' 'if [ "$#" -eq 0 ]; then exit 127; fi' 'exec "$real" "$@"' >"$case1/bin/sha256sum"
+printf '%s\n' '#!/usr/bin/env bash' 'real="'"$real_shasum"'"' 'if [ "$#" -eq 2 ] && [ "$1" = -a ] && [ "$2" = 256 ]; then exit 127; fi' 'exec "$real" "$@"' >"$case1/bin/shasum"
 chmod +x "$case1/bin/sha256sum" "$case1/bin/shasum"
-before="$(find "$case1/config" -print | sort)"; set +e
-out="$(printf '%s' "$post" | PATH="$case1/bin:$PATH" HOME="$case1/home" AGENT_CONFIG_DIR="$case1/config" bash "$HOOK" 2>"$case1/err")"; rc=$?; set -e
-test "$rc" -eq 0; test -z "$out"; test ! -s "$case1/err"; test "$(find "$case1/config" -print | sort)" = "$before"
+before="$(find "$case1/config" -printf '%y %p\n' | sort)"; set +e
+printf '%s' "$post" | PATH="$case1/bin:$PATH" HOME="$case1/home" AGENT_CONFIG_DIR="$case1/config" bash "$HOOK" >"$case1/out" 2>"$case1/err"; rc=$?; set -e
+test "$rc" -eq 0; test ! -s "$case1/out"; test ! -s "$case1/err"; test "$(find "$case1/config" -printf '%y %p\n' | sort)" = "$before"
 
 case2="$TMP/3c1-case2"; mkdir -p "$case2/home" "$case2/config" "$case2/bin"
 real_mkdir="$(command -v mkdir)"
 printf '%s\n' '#!/usr/bin/env bash' 'real_mkdir="'"$real_mkdir"'"' 'if [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = "'"$case2/config/skill-once"'" ]; then exit 127; fi' 'exec "$real_mkdir" "$@"' >"$case2/bin/mkdir"; chmod +x "$case2/bin/mkdir"
-before="$(find "$case2/config" -print | sort)"; set +e
-out="$(printf '%s' "$post" | PATH="$case2/bin:$PATH" HOME="$case2/home" AGENT_CONFIG_DIR="$case2/config" bash "$HOOK" 2>"$case2/err")"; rc=$?; set -e
-test "$rc" -eq 0; test -z "$out"; test ! -s "$case2/err"; test "$(find "$case2/config" -print | sort)" = "$before"
+before="$(find "$case2/config" -printf '%y %p\n' | sort)"; set +e
+printf '%s' "$post" | PATH="$case2/bin:$PATH" HOME="$case2/home" AGENT_CONFIG_DIR="$case2/config" bash "$HOOK" >"$case2/out" 2>"$case2/err"; rc=$?; set -e
+test "$rc" -eq 0; test ! -s "$case2/out"; test ! -s "$case2/err"; test "$(find "$case2/config" -printf '%y %p\n' | sort)" = "$before"
 
 case3="$TMP/3c1-case3"; mkdir -p "$case3/home" "$case3/config/skill-once"
 case3_session=case3-session; case3_hash="$(printf '%s' "$case3_session" | "$real_sha256sum" | cut -c1-16)"; case3_lock="$case3/config/skill-once/.session-$case3_hash.lock"
-mkdir "$case3_lock"; before="$(find "$case3/config" -print | grep -v "^$case3_lock$" | sort)"; start="$(date +%s%N)"; set +e
-out="$(printf '%s' "$(jq --arg s "$case3_session" '.session_id=$s' <<<"$post")" | timeout 5s env HOME="$case3/home" AGENT_CONFIG_DIR="$case3/config" bash "$HOOK" 2>"$case3/err")"; rc=$?; set -e
-elapsed=$((($(date +%s%N)-start)/1000000)); test "$rc" -eq 0; test "$elapsed" -lt 5000; test -z "$out"; test ! -s "$case3/err"; test -d "$case3_lock"; after="$(find "$case3/config" -print | grep -v "^$case3_lock$" | sort)"; test "$after" = "$before" || { printf 'case3 paths changed\nbefore=%s\nafter=%s\n' "$before" "$after" >&2; exit 1; }; rm -rf "$case3_lock"
+mkdir "$case3_lock"; before="$(find "$case3/config" -printf '%y %p\n' | grep -v " $case3_lock$" | sort)"; start="$(date +%s%N)"; set +e
+printf '%s' "$(jq --arg s "$case3_session" '.session_id=$s' <<<"$post")" | timeout 5s env HOME="$case3/home" AGENT_CONFIG_DIR="$case3/config" bash "$HOOK" >"$case3/out" 2>"$case3/err"; rc=$?; set -e
+elapsed=$((($(date +%s%N)-start)/1000000)); test "$rc" -eq 0; test "$elapsed" -lt 5000; test ! -s "$case3/out"; test ! -s "$case3/err"; test -d "$case3_lock"; after="$(find "$case3/config" -printf '%y %p\n' | grep -v " $case3_lock$" | sort)"; test "$after" = "$before" || { printf 'case3 paths changed\nbefore=%s\nafter=%s\n' "$before" "$after" >&2; exit 1; }; rm -rf "$case3_lock"
 
 case4="$TMP/3c1-case4"; mkdir -p "$case4/home" "$case4/config/skill-once"
-case4_session=case4-session; case4_hash="$(printf '%s' "$case4_session" | "$real_sha256sum" | cut -c1-16)"; case4_file="$case4/config/skill-once/session-$case4_hash.jsonl"
+case4_session=case4-session; mkdir -p "$case4/trace"; case4_hash="$(printf '%s' "$case4_session" | "$real_sha256sum" | cut -c1-16)"; case4_file="$case4/config/skill-once/session-$case4_hash.jsonl"
 printf '%s\n' "$(date +%s)" >"$case4/config/skill-once/.last-cleanup"
-printf '%s\n' '{"skill":"prior","agent":"main","ts":1}' >"$case4_file"; before_bytes="$("$real_sha256sum" "$case4_file")"; before_paths="$(find "$case4/config" -print | sort)"; rm "$case4_file"; mkdir "$case4_file"; set +e
-out="$(printf '%s' "$(jq --arg s "$case4_session" '.session_id=$s' <<<"$post")" | HOME="$case4/home" AGENT_CONFIG_DIR="$case4/config" bash "$HOOK" 2>"$case4/err")"; rc=$?; set -e
-test "$rc" -eq 0; test -z "$out"; test ! -s "$case4/err"; test -d "$case4_file"; test "$(find "$case4/config" -print | sort)" = "$before_paths"; test -z "$(find "$case4/config/skill-once" -maxdepth 1 \( -name '.session-*.lock' -o -name '.cleanup.lock' -o -name '.force.*' \) -print -quit)"
+printf '%s\n' '{"skill":"prior","agent":"main","ts":1}' >"$case4_file"; before_bytes="$("$real_sha256sum" "$case4_file")"; before_paths="$(find "$case4/config" -printf '%y %p\n' | sort)"; set +e
+printf '%s' "$(jq --arg s "$case4_session" '.session_id=$s' <<<"$post")" | HOME="$case4/home" AGENT_CONFIG_DIR="$case4/config" SKILL_ONCE_TEST_TRACE_DIR="$case4/trace" SKILL_ONCE_TEST_OP_ID=case4 SKILL_ONCE_TEST_FAIL_POINT=append bash "$HOOK" >"$case4/out" 2>"$case4/err"; rc=$?; set -e
+test "$rc" -eq 0; test ! -s "$case4/out"; test ! -s "$case4/err"; test "$("$real_sha256sum" "$case4_file")" = "$before_bytes"; test -f "$case4_file"; test "$(find "$case4/config" -printf '%y %p\n' | sort)" = "$before_paths"; test -z "$(find "$case4/config/skill-once" -maxdepth 1 \( -name '.session-*.lock' -o -name '.cleanup.lock' -o -name '.force.*' \) -printf '%y %p\n' -quit)"; test -z "$(find "$case4/trace" \( -name '*.acquired' -o -name '*.hold' \) -printf '%y %p\n' -quit)"
 
 make_force_seed() { local root=$1 session=$2 hash file; hash="$(printf '%s' "$session" | "$real_sha256sum" | cut -c1-16)"; file="$root/config/skill-once/session-$hash.jsonl"; printf '%s\n' '{"skill":"example","agent":"main","ts":1}' '{"skill":"keep","agent":"main","ts":2}' >"$file"; }
 run_force_failure_case() {
   local num=$1 mode=$2; local root="$TMP/3c1-case$num"; local session="case$num-session"; local hash file before_bytes before_paths out rc
-  mkdir -p "$root/home" "$root/config/skill-once" "$root/bin"; printf '%s\n' "$(date +%s)" >"$root/config/skill-once/.last-cleanup"; make_force_seed "$root" "$session"; hash="$(printf '%s' "$session" | "$real_sha256sum" | cut -c1-16)"; file="$root/config/skill-once/session-$hash.jsonl"; before_bytes="$("$real_sha256sum" "$file")"; before_paths="$(find "$root/config" -print | sort)"
+  mkdir -p "$root/home" "$root/config/skill-once" "$root/bin"; printf '%s\n' "$(date +%s)" >"$root/config/skill-once/.last-cleanup"; make_force_seed "$root" "$session"; hash="$(printf '%s' "$session" | "$real_sha256sum" | cut -c1-16)"; file="$root/config/skill-once/session-$hash.jsonl"; before_bytes="$("$real_sha256sum" "$file")"; before_paths="$(find "$root/config" -printf '%y %p\n' | sort)"
   case "$mode" in
     mktemp) printf '%s\n' '#!/usr/bin/env bash' 'real="'"$(command -v mktemp)"'"' 'if [ "$#" -eq 1 ] && [ "$1" = "'"$root/config/skill-once/.force.XXXXXX"'" ]; then exit 127; fi' 'exec "$real" "$@"' >"$root/bin/mktemp" ;;
-    jq) printf '%s\n' '#!/usr/bin/env bash' 'real="'"$(command -v jq)"'"' 'if [ "$#" -eq 8 ] && [ "$1" = -c ] && [ "$2" = --arg ] && [ "$5" = --arg ] && [ "$7" = select\(.skill != \$s or .agent != \$a\) ]; then exit 127; fi' 'exec "$real" "$@"' >"$root/bin/jq" ;;
+    jq) printf '%s\n' '#!/usr/bin/env bash' 'real="'"$(command -v jq)"'"' 'if [ "$#" -eq 9 ] && [ "$1" = -c ] && [ "$2" = --arg ] && [ "$3" = s ] && [ "$5" = --arg ] && [ "$6" = a ]; then exit 127; fi' 'exec "$real" "$@"' >"$root/bin/jq" ;;
     mv) printf '%s\n' '#!/usr/bin/env bash' 'real="'"$(command -v mv)"'"' 'if [ "$#" -eq 3 ] && [ "$1" = -f ] && [[ "$2" = *"/.force."* ]] && [ "$3" = "'"$file"'" ]; then exit 127; fi' 'exec "$real" "$@"' >"$root/bin/mv" ;;
   esac
   chmod +x "$root/bin/$mode"; set +e
-  out="$(printf '%s' "$(jq --arg s "$session" '.session_id=$s | .tool_input.args="--force" | .hook_event_name="PreToolUse"' <<<"$post")" | PATH="$root/bin:$PATH" HOME="$root/home" AGENT_CONFIG_DIR="$root/config" bash "$HOOK" 2>"$root/err")"; rc=$?; set -e
-  test "$rc" -eq 0; test -z "$out"; test ! -s "$root/err"; test "$("$real_sha256sum" "$file")" = "$before_bytes"; test "$(find "$root/config" -print | sort | grep -v '/\.force\.' || true)" = "$before_paths"; test -z "$(find "$root/config/skill-once" -maxdepth 1 \( -name '.session-*.lock' -o -name '.cleanup.lock' -o -name '.force.*' \) -print -quit)"
+  printf '%s' "$(jq --arg s "$session" '.session_id=$s | .tool_input.args="--force" | .hook_event_name="PreToolUse"' <<<"$post")" | PATH="$root/bin:$PATH" HOME="$root/home" AGENT_CONFIG_DIR="$root/config" bash "$HOOK" >"$root/out" 2>"$root/err"; rc=$?; set -e
+  test "$rc" -eq 0; test ! -s "$root/out"; test ! -s "$root/err"; test "$("$real_sha256sum" "$file")" = "$before_bytes"; test "$(find "$root/config" -printf '%y %p\n' | sort | grep -v '/\.force\.' || true)" = "$before_paths"; test -z "$(find "$root/config/skill-once" -maxdepth 1 \( -name '.session-*.lock' -o -name '.cleanup.lock' -o -name '.force.*' \) -printf '%y %p\n' -quit)"
 }
 run_force_failure_case 5 mktemp
 run_force_failure_case 6 jq
 run_force_failure_case 7 mv
 
 case8="$TMP/3c1-case8"; mkdir -p "$case8/home" "$case8/config/skill-once" "$case8/bin"
-case8_session=case8-session; case8_hash="$(printf '%s' "$case8_session" | "$real_sha256sum" | cut -c1-16)"; case8_file="$case8/config/skill-once/session-$case8_hash.jsonl"; printf '%s\n' "$(date +%s)" >"$case8/config/skill-once/.last-cleanup"; printf '%s\n' '{"skill":"prior","agent":"main","ts":1}' >"$case8_file"; before_bytes="$("$real_sha256sum" "$case8_file")"; real_rm="$(command -v rm)"
+case8_session=case8-session; case8_hash="$(printf '%s' "$case8_session" | "$real_sha256sum" | cut -c1-16)"; case8_file="$case8/config/skill-once/session-$case8_hash.jsonl"; printf '%s\n' "$(date +%s)" >"$case8/config/skill-once/.last-cleanup"; printf '%s\n' '{"skill":"prior","agent":"main","ts":1}' >"$case8_file"; before_bytes="$("$real_sha256sum" "$case8_file")"; before_paths="$(find "$case8/config" -printf '%y %p\n' | sort)"; real_rm="$(command -v rm)"
 printf '%s\n' '#!/usr/bin/env bash' 'real="'"$real_rm"'"' 'if [ "$#" -eq 2 ] && [ "$1" = -f ] && [ "$2" = "'"$case8_file"'" ]; then exit 127; fi' 'exec "$real" "$@"' >"$case8/bin/rm"; chmod +x "$case8/bin/rm"; set +e
-out="$(printf '%s' "$(jq --arg s "$case8_session" '{session_id:$s}' <<<"$post")" | PATH="$case8/bin:$PATH" HOME="$case8/home" AGENT_CONFIG_DIR="$case8/config" bash "$COMPACT" 2>"$case8/err")"; rc=$?; set -e
-test "$rc" -eq 0; test -z "$out"; test ! -s "$case8/err"; test "$("$real_sha256sum" "$case8_file")" = "$before_bytes"; test -z "$(find "$case8/config/skill-once" -maxdepth 1 \( -name '.session-*.lock' -o -name '.cleanup.lock' -o -name '.force.*' \) -print -quit)"
+printf '%s' "$(jq --arg s "$case8_session" '{session_id:$s}' <<<"$post")" | PATH="$case8/bin:$PATH" HOME="$case8/home" AGENT_CONFIG_DIR="$case8/config" bash "$COMPACT" >"$case8/out" 2>"$case8/err"; rc=$?; set -e
+test "$rc" -eq 0; test ! -s "$case8/out"; test ! -s "$case8/err"; test "$("$real_sha256sum" "$case8_file")" = "$before_bytes"; test "$(find "$case8/config" -printf '%y %p\n' | sort)" = "$before_paths"; test -z "$(find "$case8/config/skill-once" -maxdepth 1 \( -name '.session-*.lock' -o -name '.cleanup.lock' -o -name '.force.*' \) -printf '%y %p\n' -quit)"
 
 printf 'skill-once lifecycle: PASS\n'
