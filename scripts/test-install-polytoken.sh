@@ -27,6 +27,10 @@ pt_valid() { polytoken --config-dir "$1" config validate --user >/dev/null 2>&1;
 hasbakp() { ls "$1"/permissions.yaml.bak-* >/dev/null 2>&1; }
 hasbakc() { ls "$1"/config.yaml.bak-* >/dev/null 2>&1; }
 hasbakh() { ls "$1"/hooks.json.bak-* >/dev/null 2>&1; }
+legacy_skill() { jq -nc --arg d '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '{name:"skill-once",event:"pre_tool_use",matcher:"skill",handler:{bash:("bash \""+$d+"/hooks/adapter.sh\" skill-once/hook.sh skill")}}'; }
+legacy_reset() { jq -nc --arg d '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '{name:"skill-once-reset",event:"post_compaction",handler:{bash:("bash \""+$d+"/hooks/adapter.sh\" skill-once/compact.sh compact")}}'; }
+seed_hooks() { jq -s '.' "$@"; }
+backup_count() { find "$1" -maxdepth 1 -name 'hooks.json.bak-*' | wc -l | tr -d ' '; }
 
 # --- P1: fresh target creates the expected file set, omits Claude-only artifacts ---
 sc "P1 fresh target -> expected files, no Claude-only artifacts"
@@ -37,7 +41,6 @@ for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh; do
 done
 for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh \
          compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once \
-         compat/skill-once/hook.sh compat/skill-once/compact.sh \
          compat/hooks/no-remote-writes.sh; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
@@ -80,8 +83,8 @@ D="$(valid_base)"
 printf '%s\n' '[ {"name":"my-custom","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[0].name' "$D/hooks.json")" = "my-custom" ] && ok "custom hook order preserved (first)" || no "custom hook order preserved"
-# P3: one custom plus nine recommended
-ajq "$D/hooks.json" 'length == 10' "9 recommended + 1 custom"
+# P3: one custom plus seven recommended
+ajq "$D/hooks.json" 'length == 8' "7 recommended + 1 custom"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -127,9 +130,9 @@ printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_ex
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "true" ] \
   && ok "no-TTY preserved conflict handler" || no "no-TTY preserved conflict handler"
-# P6: bash-guard conflicts, leaving eight additive recommended hooks
-[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "8" ] \
-  && ok "no-TTY applied 8 additive hooks" || no "no-TTY applied additive hooks"
+# P6: bash-guard conflicts, leaving six additive recommended hooks
+[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "6" ] \
+  && ok "no-TTY applied 6 additive hooks" || no "no-TTY applied additive hooks"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
@@ -242,10 +245,68 @@ printf '%s\n' '[ {"name":"superpowers-session-start","event":"session_start","ha
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
 ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
-# P15: two existing plus nine recommended
-ajq "$D/hooks.json" 'length == 11' "2 existing + 9 recommended"
+# P15: two existing plus seven recommended
+ajq "$D/hooks.json" 'length == 9' "2 existing + 7 recommended"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
+rm -rf "$D"
+
+sc "P16 fresh install omits compatibility skill scripts"
+D="$(mktemp -d)"; run_pt "$D" /nonexistent-xyz 0 >/dev/null
+[ ! -e "$D/compat/skill-once/hook.sh" ] && ok "fresh hook script omitted" || no "fresh hook script omitted"
+[ ! -e "$D/compat/skill-once/compact.sh" ] && ok "fresh compact script omitted" || no "fresh compact script omitted"
+ajq "$D/hooks.json" 'length==7 and ([.[].name]|index("skill-once")==null) and ([.[].name]|index("skill-once-reset")==null)' "fresh hooks contain seven safe names"
+rm -rf "$D"
+
+sc "P17 exact legacy entries removed independently with one backup"
+D="$(valid_base)"; a="$(mktemp)"; b="$(mktemp)"; legacy_skill >"$a"; legacy_reset >"$b"; seed_hooks "$a" "$b" >"$D/hooks.json"
+mkdir -p "$D/compat/skill-once"; printf 'custom-hook-bytes\n' >"$D/compat/skill-once/hook.sh"; printf 'custom-compact-bytes\n' >"$D/compat/skill-once/compact.sh"
+h1="$(sha256sum "$D/compat/skill-once/hook.sh" "$D/compat/skill-once/compact.sh")"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ajq "$D/hooks.json" '([.[].name]|index("skill-once")==null) and ([.[].name]|index("skill-once-reset")==null)' "both exact legacy entries removed"
+[ "$(backup_count "$D")" = 1 ] && ok "accepted removals create one backup" || no "accepted removals create one backup"
+[ "$(sha256sum "$D/compat/skill-once/hook.sh" "$D/compat/skill-once/compact.sh")" = "$h1" ] && ok "legacy scripts byte-identical" || no "legacy scripts byte-identical"
+rm -rf "$D" "$a" "$b"
+
+sc "P18 absent, exact, and customized targets migrate independently"
+D="$(valid_base)"; a="$(mktemp)"; legacy_skill >"$a"; seed_hooks "$a" >"$D/hooks.json"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ajq "$D/hooks.json" '[.[].name]|index("skill-once")==null and index("skill-once-reset")==null' "one exact and one absent both end absent"
+rm -rf "$D" "$a"
+custom_reset='{"name":"skill-once-reset","event":"post_compaction","handler":{"bash":"echo CUSTOM-RESET"}}'
+D="$(valid_base)"; a="$(mktemp)"; b="$(mktemp)"; legacy_skill >"$a"; printf '%s\n' "$custom_reset" >"$b"; seed_hooks "$a" "$b" >"$D/hooks.json"; TTY="$(mktemp)"; printf 'n\n' >"$TTY"
+run_pt "$D" "$TTY" 0 >/dev/null
+ajq "$D/hooks.json" '[.[].name]|index("skill-once")==null and index("skill-once-reset")!=null' "exact target removed while customized target declined"
+[ "$(backup_count "$D")" = 1 ] && ok "independent accepted removal creates one backup" || no "independent accepted removal creates one backup"
+rm -rf "$D" "$a" "$b" "$TTY"
+
+sc "P19 customized removal decline, overwrite, and no-TTY warning"
+custom='{"name":"skill-once","event":"pre_tool_use","matcher":"skill","handler":{"bash":"echo CUSTOM-SKILL"}}'
+D="$(valid_base)"; printf '[%s]\n' "$custom" >"$D/hooks.json"; before="$(cat "$D/hooks.json")"; TTY="$(mktemp)"; printf 'n\n' >"$TTY"
+out="$(run_pt "$D" "$TTY" 0)"
+has "$out" 'remove customized hook skill-once? [y/N]' "interactive removal prompt exact"
+has "$out" 'CUSTOM-SKILL' "prompt prints full current JSON"
+[ "$(cat "$D/hooks.json")" = "$before" ] && ok "decline preserves customized hook" || no "decline preserves customized hook"
+[ "$(backup_count "$D")" = 0 ] && ok "decline creates no backup" || no "decline creates no backup"
+rm -rf "$D" "$TTY"
+D="$(valid_base)"; printf '[%s]\n' "$custom" >"$D/hooks.json"; run_pt "$D" /nonexistent-xyz 1 >/dev/null
+ajq "$D/hooks.json" '[.[].name]|index("skill-once")==null' "overwrite removes customized hook"
+[ "$(backup_count "$D")" = 1 ] && ok "overwrite removal creates one backup" || no "overwrite removal creates one backup"
+rm -rf "$D"
+D="$(valid_base)"; printf '[%s]\n' "$custom" >"$D/hooks.json"; out="$(run_pt "$D" /nonexistent-xyz 0)"
+has "$out" "customized hook skill-once still enables unsafe cross-agent skill deduplication; remove it from $D/hooks.json manually or rerun with --overwrite" "no-TTY warning exact"
+ajq "$D/hooks.json" '[.[].name]|index("skill-once")!=null' "no-TTY preserves customized hook"
+[ "$(backup_count "$D")" = 1 ] && ok "no-TTY backup for new hooks only" || no "no-TTY backup for new hooks only"
+rm -rf "$D"
+
+sc "P20 duplicate existing names abort before patch enumeration"
+D="$(valid_base)"; printf '[%s,%s]\n' "$custom" "$custom" >"$D/hooks.json"; before="$(cat "$D/hooks.json")"
+out="$(run_pt "$D" /nonexistent-xyz 0)"; rc=$?
+[ "$rc" -ne 0 ] && ok "duplicate names abort" || no "duplicate names abort"
+has "$out" "hooks.json contains duplicate names; existing file unchanged" "duplicate diagnostic"
+[ "$(cat "$D/hooks.json")" = "$before" ] && ok "duplicate file unchanged" || no "duplicate file unchanged"
+hasnt "$out" "remove customized hook" "abort precedes patch enumeration"
+[ "$(backup_count "$D")" = 0 ] && ok "duplicate abort creates no backup" || no "duplicate abort creates no backup"
 rm -rf "$D"
 
 echo

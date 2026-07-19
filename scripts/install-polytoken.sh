@@ -198,6 +198,13 @@ render_hooks() {
      "$PT_HOOKS"
 }
 
+render_legacy_skill_hooks() {
+  jq -nc --arg dir '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '[
+    {name:"skill-once",event:"pre_tool_use",matcher:"skill",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/hook.sh skill")}},
+    {name:"skill-once-reset",event:"post_compaction",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/compact.sh compact")}}
+  ]'
+}
+
 install_hooks() {
   local dst="$DEST/hooks.json" staged work
   staged="$dst.new-$TS"
@@ -219,22 +226,32 @@ install_hooks() {
     rm -rf "$work"; rm -f "$staged"
     die "hooks.json is not valid JSON; existing file unchanged"
   }
+  if ! jq -e 'type=="array" and (([.[].name]|length)==([.[].name]|unique|length))' "$work/ex.json" >/dev/null; then
+    rm -rf "$work"; rm -f "$staged"
+    die "hooks.json contains duplicate names; existing file unchanged"
+  fi
+  render_legacy_skill_hooks | jq -c -S . > "$work/legacy.json"
 
-  # Enumerate per-hook patches: {ckind:new|conflict, name, rec}.
-  # $e[0]=existing array, $r[0]=rendered recommended array.
+  # Enumerate per-hook patches: removals plus {ckind:new|conflict, name, rec}.
+  # $e[0]=existing array, $r[0]=rendered recommended array, $l[0]=legacy array.
   # shellcheck disable=SC2016
   local enum_filter='
-    $e[0] as $ex | $r[0] as $rec
-    | [ $rec[] | . as $entry
-        | ([ $ex[] | select(.name == $entry.name) ] | length) as $have
-        | ([ $ex[] | select(.name == $entry.name) ] | .[0]) as $yours
-        | ([ $ex[] | select(.name == $entry.name and . == $entry) ] | length) as $same
-        | if $have == 0 then {ckind:"new", name:$entry.name, rec:$entry}
-          elif $same == 1 then empty
-          else {ckind:"conflict", name:$entry.name, rec:$entry, your:$yours} end ]
-    | sort_by(.name) | .[]
+    $e[0] as $ex | $r[0] as $rec | $l[0] as $legacy
+    | ([ $legacy[] | . as $old
+         | ([ $ex[] | select(.name==$old.name) ][0] // null) as $your
+         | if $your==null then empty
+           elif $your==$old then {ckind:"remove",name:$old.name,managed:true,your:$your}
+           else {ckind:"remove",name:$old.name,managed:false,your:$your} end ]) as $removals
+    | ([ $rec[] | . as $entry
+         | ([ $ex[] | select(.name==$entry.name) ]|length) as $have
+         | ([ $ex[] | select(.name==$entry.name) ][0]) as $yours
+         | ([ $ex[] | select(.name==$entry.name and .==$entry) ]|length) as $same
+         | if $have==0 then {ckind:"new",name:$entry.name,rec:$entry}
+           elif $same==1 then empty
+           else {ckind:"conflict",name:$entry.name,rec:$entry,your:$yours} end ]) as $upserts
+    | ($removals+$upserts) | sort_by(.name,.ckind) | .[]
   '
-  jq -c -n --slurpfile e "$work/ex.json" --slurpfile r "$work/rec.json" "$enum_filter" > "$work/patches.ndjson"
+  jq -c -n --slurpfile e "$work/ex.json" --slurpfile r "$work/rec.json" --slurpfile l "$work/legacy.json" "$enum_filter" > "$work/patches.ndjson"
 
   conflicts=0
   if [ -s "$work/patches.ndjson" ]; then
@@ -254,11 +271,34 @@ install_hooks() {
     fi
 
     : > "$work/accepted.ndjson"
-    local a_new=0 a_conf=0 declined=0
+    local a_new=0 a_conf=0 a_remove=0 declined=0
     while IFS= read -r patch; do
       local ckind name pmsg
       ckind="$(jq -r '.ckind' <<<"$patch")"
       name="$(jq -r '.name' <<<"$patch")"
+      if [ "$ckind" = "remove" ]; then
+        local accept
+        if [ "$(jq -r '.managed' <<<"$patch")" = true ]; then
+          accept=0
+        else
+          printf '  - hook %s: %s\n' "$name" "$(jq -cS '.your' <<<"$patch")" >&2
+          if [ "$mode" = notty ]; then
+            echo "customized hook $name still enables unsafe cross-agent skill deduplication; remove it from $DEST/hooks.json manually or rerun with --overwrite" >&2
+            accept=1
+          elif prompt_yn "remove customized hook $name?" conflict; then
+            accept=0
+          else
+            accept=1
+          fi
+        fi
+        if [ "$accept" -eq 0 ]; then
+          printf '%s\n' "$patch" >> "$work/accepted.ndjson"
+          a_remove=$((a_remove + 1))
+        else
+          declined=$((declined + 1))
+        fi
+        continue
+      fi
       if [ "$ckind" = "conflict" ]; then
         {
           echo "  ~ hook $name"
@@ -276,7 +316,7 @@ install_hooks() {
         declined=$((declined + 1))
       fi
     done < "$work/patches.ndjson"
-    echo "  hooks: applied $((a_new + a_conf)) ($a_new new, $a_conf conflict), declined $declined" >&2
+    echo "  hooks: applied $((a_new + a_conf + a_remove)) ($a_new new, $a_conf conflict, $a_remove remove), declined $declined" >&2
   else
     : > "$work/accepted.ndjson"
   fi
@@ -294,8 +334,9 @@ install_hooks() {
   # shellcheck disable=SC2016
   local apply_filter='
     reduce .[1][] as $p (.[0];
-      if $p.ckind == "new" then . + [$p.rec]
-      else [ .[] | if .name == $p.name then $p.rec else . end ] end)
+      if $p.ckind=="remove" then [ .[] | select(.name!=$p.name) ]
+      elif $p.ckind=="new" then .+[$p.rec]
+      else [ .[] | if .name==$p.name then $p.rec else . end ] end)
   '
   jq -s '.' "$work/accepted.ndjson" > "$work/accepted-arr.json"
   jq -c -S -s "$apply_filter" "$work/ex.json" "$work/accepted-arr.json" > "$work/merged.json"
