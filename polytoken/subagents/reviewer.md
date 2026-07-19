@@ -2,7 +2,7 @@
 name: reviewer
 description: Review a code diff against its requirements and quality standards — returns a spec-compliance verdict and a quality verdict with severity-classified findings. Read-only with no write or shell tools. Handles task-scoped and whole-branch review.
 polytoken:
-  model: <polytoken-ref type="model" name="codex/gpt-5.6-sol(medium)"/>
+  model: codex/gpt-5.6-sol
   tools: [file_read, glob, grep]
   undeferred_tools: [file_read, glob, grep]
   allow_subagent_spawn: false

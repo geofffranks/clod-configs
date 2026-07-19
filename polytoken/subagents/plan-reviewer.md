@@ -2,7 +2,7 @@
 name: plan-reviewer
 description: Review an implementation plan against its spec and repository context, returning severity-classified findings.
 polytoken:
-  model: <polytoken-ref type="model" name="zai/glm-5.2(high)"/>
+  model: zai/glm-5.2
   tools: [file_read, glob, grep]
   undeferred_tools: [file_read, glob, grep]
   allow_subagent_spawn: false
