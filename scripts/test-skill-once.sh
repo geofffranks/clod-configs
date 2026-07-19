@@ -473,4 +473,21 @@ set +e; mal_out="$(run "$pre")"; mal_rc=$?; set -e
 test "$mal_rc" -eq 0; test -z "$mal_out"
 rm -f "$mal_file"
 
+# Session and cleanup lock ownership persists when rmdir fails; exit cleanup retries.
+rl_root="$TMP/3c2-rmdir-lock"; mkdir -p "$rl_root/config/skill-once"
+rl_state="$(cd "$(dirname "$HOOK")" && pwd)"
+HOME="$rl_root/home" AGENT_CONFIG_DIR="$rl_root/config" bash -c '
+  . "'"$rl_state"'/state.sh"
+  skill_once_init "rmdir-test"
+  skill_once_lock "rmdir-test"
+  : > "$SKILL_ONCE_SESSION_LOCK/obstruction"
+  skill_once_unlock
+  test "$SKILL_ONCE_SESSION_LOCK_OWNED" = "1"
+  rm -f "$SKILL_ONCE_SESSION_LOCK/obstruction"
+  skill_once_unlock
+  test "$SKILL_ONCE_SESSION_LOCK_OWNED" = "0"
+  test ! -d "$SKILL_ONCE_SESSION_LOCK"
+'
+test $? -eq 0
+
 printf 'skill-once lifecycle: PASS\n'

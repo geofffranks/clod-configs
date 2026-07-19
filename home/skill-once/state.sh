@@ -74,8 +74,7 @@ skill_once_lock() {
 }
 skill_once_unlock() {
   if [ "$SKILL_ONCE_SESSION_LOCK_OWNED" -eq 1 ]; then
-    rmdir "$SKILL_ONCE_SESSION_LOCK" 2>/dev/null || true
-    SKILL_ONCE_SESSION_LOCK_OWNED=0
+    rmdir "$SKILL_ONCE_SESSION_LOCK" 2>/dev/null && SKILL_ONCE_SESSION_LOCK_OWNED=0 || true
   fi
   if [ "$SKILL_ONCE_TRACE_ACTIVE" -eq 1 ]; then
     rm -f "$SKILL_ONCE_TRACE_DIR/$SKILL_ONCE_TRACE_OP_ID.acquired" 2>/dev/null || true
@@ -111,6 +110,6 @@ skill_once_cleanup_stale() {
       if [ -n "$tmp" ]; then printf '%s\n' "$now" >"$tmp" 2>/dev/null && mv -f "$tmp" "$SKILL_ONCE_CLEANUP_MARKER" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; }; fi
     fi
   fi
-  rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null || true; SKILL_ONCE_CLEANUP_LOCK_OWNED=0
+  rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null && SKILL_ONCE_CLEANUP_LOCK_OWNED=0 || true
 }
-skill_once_exit_cleanup() { [ -z "$SKILL_ONCE_TMP_FILE" ] || rm -f "$SKILL_ONCE_TMP_FILE" 2>/dev/null || true; if [ -n "$SKILL_ONCE_STALE_TARGET_LOCK" ]; then rmdir "$SKILL_ONCE_STALE_TARGET_LOCK" 2>/dev/null || true; SKILL_ONCE_STALE_TARGET_LOCK=; fi; skill_once_unlock; if [ "$SKILL_ONCE_CLEANUP_LOCK_OWNED" -eq 1 ]; then rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null || true; SKILL_ONCE_CLEANUP_LOCK_OWNED=0; fi; }
+skill_once_exit_cleanup() { [ -z "$SKILL_ONCE_TMP_FILE" ] || rm -f "$SKILL_ONCE_TMP_FILE" 2>/dev/null || true; if [ -n "$SKILL_ONCE_STALE_TARGET_LOCK" ]; then rmdir "$SKILL_ONCE_STALE_TARGET_LOCK" 2>/dev/null || true; SKILL_ONCE_STALE_TARGET_LOCK=; fi; skill_once_unlock; if [ "$SKILL_ONCE_CLEANUP_LOCK_OWNED" -eq 1 ]; then rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null && SKILL_ONCE_CLEANUP_LOCK_OWNED=0 || true; fi; }
