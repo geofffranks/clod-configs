@@ -82,7 +82,7 @@ Copies everything under `home/` into `CLAUDE_CONFIG_DIR`, then merges
 | `hooks/no-remote-writes.sh` | Blocks unsolicited `git push` / `gh` writes. |
 | `hooks/agent-state.sh` | Writes the working/idle badge the status line shows. |
 | `read-once/` | De-duplicates repeated file reads to save context. |
-| `skill-once/` | Hard-denies re-loading a skill body already loaded this session (per-agent, so subagents are never wrongly blocked); `--force` reloads. |
+| `skill-once/` | Checks successful loads at `PreToolUse` and records only successful `PostToolUse` deliveries; deduplication is per Claude agent, compaction resets it, and `--force` removes a prior entry before a successful reload records it again. |
 | `agent-join/` | Emits an `<orchestration-status>` block when a Claude Agent subagent joins, so the main session can correlate work by id. |
 | `statusline.sh` | Status line: cwd, git, agent, PR, model, context %, cost, rate limits. |
 | `settings.recommended.json` | `env` (models, thinking budget, autocompact), theme, statusline, and hook wiring. No permissions. |
@@ -99,10 +99,10 @@ with Polytoken-native equivalents.
 |---|---|---|
 | `config.yaml` | `polytoken/config.recommended.yaml` | `version: 2` + a `tui` block only (see below). |
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
-| `hooks.json` | `polytoken/hooks.json` | Eight native hooks, all routed through `hooks/adapter.sh`. |
+| `hooks.json` | `polytoken/hooks.json` | Seven native hooks. Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
-| `compat/` | `home/{bash-guard,branch-guard,git-safe,read-once,skill-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`, invoked via the adapter. |
+| `compat/` | `home/{bash-guard,branch-guard,git-safe,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
 
 #### Provider-neutral status configuration
 
@@ -147,7 +147,7 @@ custom scripts, so the Polytoken target does not install the Claude versions:
 
 #### Wrapped hook families (canonical logic, shared with Claude)
 
-The eight native hooks run the **same canonical policy logic** as the Claude
+The seven native hooks run the **same canonical policy logic** as the Claude
 hooks through a thin adapter (`hooks/adapter.sh`) that translates Polytoken's
 event input and decision output. They are installed as named entries merged
 into your `hooks.json`:
@@ -159,12 +159,11 @@ into your `hooks.json`:
 | `git-safe` | `pre_tool_use` (`shell_exec`) | `compat/git-safe/hook.sh` |
 | `no-remote-writes` | `pre_tool_use` (`shell_exec`) | `compat/hooks/no-remote-writes.sh` |
 | `read-once` | `pre_tool_use` (`file_read`) | `compat/read-once/hook.sh` |
-| `skill-once` | `pre_tool_use` (`skill`) | `compat/skill-once/hook.sh` |
 | `read-once-reset` | `post_compaction` | `compat/read-once/compact.sh` |
-| `skill-once-reset` | `post_compaction` | `compat/skill-once/compact.sh` |
 
-The two `post_compaction` hooks reset the read-once/skill-once caches so
-de-duplication state is cleared after compaction.
+Polytoken deliberately does not install skill-once or its compaction reset. Its tool-hook contract does not guarantee per-agent identity, so session-scoped deduplication could deny a skill based on another agent's context. Failing open allows repeated bodies but never strands an agent. Polytoken's native `skill` tool accepts only a name, so no `--force` syntax is claimed or supported.
+
+Fresh Polytoken installs do not copy `compat/skill-once`. Upgrades leave existing compatibility scripts untouched but remove exact legacy managed `skill-once` hook registrations; customized registrations require confirmation or `--overwrite`.
 
 #### Canonical shared skills
 
@@ -195,8 +194,7 @@ files.
   de-duplication nudge never reaches the model — it provides no context savings
   under Polytoken until you opt into hard enforcement. To get real de-dup,
   set `READ_ONCE_MODE=deny` in the read-once hook's environment (e.g. in your
-  shell profile or `hooks.json` handler). (`skill-once` is unaffected — it
-  denies by default.)
+  shell profile or `hooks.json` handler).
 - **rtk under Polytoken is rules-only.** rtk's savings only materialize when the
   model uses `rtk grep` (via `shell_exec`) rather than the built-in `grep`, and
   Polytoken cannot transparently rewrite commands the way Claude's
@@ -226,7 +224,7 @@ backup is created. Re-running is safe — idempotent installs report
 Per target, the merge targets are:
 
 - **Claude** — `settings.json` (generic keys plus per-event hook additions; your permissions block is never touched).
-- **Polytoken** — `config.yaml` (provider-neutral leaf values; providers/models preserved), `hooks.json` (merged by unique `name`: add missing names, preserve unrelated hooks and their order, treat a same-name entry with a different event/matcher/handler as a conflict, never install duplicate names), `permissions.yaml` (left untouched when it exists).
+- **Polytoken** — `config.yaml` (provider-neutral leaf values; providers/models preserved), `hooks.json` (merged by unique `name`: add missing names, preserve unrelated hooks and their order, treat a same-name entry with a different event/matcher/handler as a conflict, never install duplicate names; fresh installs do not copy `compat/skill-once`, while upgrades remove exact legacy managed `skill-once` registrations and preserve customized ones unless confirmed or `--overwrite` is supplied), `permissions.yaml` (left untouched when it exists).
 
 Every structured write is rendered to a temporary file, parsed and validated
 (including in-context `polytoken config validate --user` for the Polytoken
