@@ -36,11 +36,6 @@ case "$mapping" in
     canonical_tool=Read
     canonical_input=$(jq -c '{file_path:(.input.path // ""),offset:(.input.offset // null),limit:(.input.limit // null)} | with_entries(select(.value != null))' <<<"$input") || emit_error "malformed Polytoken input"
     ;;
-  skill)
-    hook_event=PreToolUse
-    canonical_tool=Skill
-    canonical_input=$(jq -c '{skill:(.input.name // ""),args:""}' <<<"$input") || emit_error "malformed Polytoken input"
-    ;;
   compact)
     hook_event=PostCompact
     canonical_tool=""

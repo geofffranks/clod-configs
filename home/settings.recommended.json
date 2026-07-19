@@ -98,6 +98,10 @@
             "command": "~/.claude/agent-join/hook.sh"
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [{"type":"command","command":"~/.claude/skill-once/hook.sh"}]
       }
     ],
     "SubagentStop": [

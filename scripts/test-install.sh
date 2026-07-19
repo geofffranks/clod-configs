@@ -108,7 +108,11 @@ out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.
 hasnt "$out" "OVERWRITE"                                "no overwrite warning on fresh install"
 ajq "$D/settings.json" '.theme == "dark"'              "theme from fragment present"
 ajq "$D/settings.json" '.hooks.PreToolUse | length == 7' "hooks from fragment present"
+ajq "$D/settings.json" '.hooks.PostToolUse | map(select(.matcher == "Skill") | .hooks[].command) | index("~/.claude/skill-once/hook.sh") != null' "skill-once PostToolUse registered"
 ajq "$D/settings.json" '.hooks.SubagentStop | map(.hooks[].command) | any(. == "~/.claude/agent-join/hook.sh")' "agent-join SubagentStop registered"
+test -f "$D/skill-once/state.sh" && ok "fresh install copies skill-once state helper" || no "fresh install copies skill-once state helper"
+grep -Fq '. "$SCRIPT_DIR/state.sh"' "$D/skill-once/hook.sh" && ok "installed hook sources sibling state helper" || no "installed hook sources sibling state helper"
+grep -Fq '. "$SCRIPT_DIR/state.sh"' "$D/skill-once/compact.sh" && ok "installed compact sources sibling state helper" || no "installed compact sources sibling state helper"
 ajq "$D/settings.json" '.hooks.Stop      | map(.hooks[].command) | any(. == "~/.claude/agent-join/hook.sh")' "agent-join Stop registered"
 cmp -s <(jq -S . "$FRAG") <(jq -S . "$D/settings.json") && ok "settings.json == fragment" || no "settings.json == fragment"
 hasbak "$D" && no "no backup on fresh install" || ok "no backup on fresh install"
@@ -285,6 +289,24 @@ D="$(mktemp -d)"
 out="$(CLAUDE_CONFIG_DIR="$D" "$REPO/install.sh" --target 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && ok "exit 2 on missing --target value (rc=$rc)" || no "exit 2 on missing --target value (rc=$rc)"
 has "$out" "usage"                              "printed usage on missing target value"
+rm -rf "$D"
+
+sc "S26 skill success hook fresh + legacy upgrade"
+D="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '[.hooks.PreToolUse[].hooks[].command] | map(select(.=="~/.claude/skill-once/hook.sh")) | length==1' "fresh pre hook exactly once"
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command] | map(select(.=="~/.claude/skill-once/hook.sh")) | length==1' "fresh post hook exactly once"
+rm -rf "$D"
+D="$(mktemp -d)"; jq 'del(.hooks.PostToolUse[] | select(.matcher=="Skill"))' "$FRAG" > "$D/settings.json"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command] | map(select(.=="~/.claude/skill-once/hook.sh")) | length==1' "legacy upgrade adds post hook"
+rm -rf "$D"
+
+sc "S27 skill post hook dedup + unrelated custom preservation"
+D="$(mktemp -d)"; jq --arg cmd "$HOME/.claude/skill-once/hook.sh" '(.hooks.PostToolUse[] | select(.matcher=="Skill").hooks[0].command)=$cmd | .hooks.PostToolUse += [{matcher:"Custom",hooks:[{type:"command",command:"~/my/post.sh"}]}]' "$FRAG" > "$D/settings.json"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command | select(test("skill-once/hook.sh$"))] | length==1' "expanded post command not duplicated"
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command] | index("~/my/post.sh") != null' "unrelated post hook preserved"
 rm -rf "$D"
 
 echo

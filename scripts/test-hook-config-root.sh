@@ -12,18 +12,17 @@ printf 'content\n' > "$TMP/input.txt"
 read_payload=$(jq -nc --arg p "$TMP/input.txt" '{tool_name:"Read",session_id:"root-test",tool_input:{file_path:$p}}')
 printf '%s' "$read_payload" | HOME="$TMP/home" AGENT_CONFIG_DIR="$TMP/config" bash "$ROOT/home/read-once/hook.sh" >/dev/null
 
-skill_payload='{"tool_name":"Skill","session_id":"root-test","tool_input":{"skill":"doc-writing","args":""}}'
-printf '%s' "$skill_payload" | HOME="$TMP/home" AGENT_CONFIG_DIR="$TMP/config" bash "$ROOT/home/skill-once/hook.sh" >/dev/null
+skill_pre_payload='{"hook_event_name":"PreToolUse","tool_name":"Skill","session_id":"root-test","tool_input":{"skill":"doc-writing","args":""}}'
+skill_post_payload='{"hook_event_name":"PostToolUse","tool_name":"Skill","session_id":"root-test","tool_input":{"skill":"doc-writing","args":""}}'
+printf '%s' "$skill_pre_payload" | HOME="$TMP/home" AGENT_CONFIG_DIR="$TMP/config" bash "$ROOT/home/skill-once/hook.sh" >/dev/null
+test -z "$(find "$TMP/config/skill-once" -name 'session-*.jsonl' -print -quit 2>/dev/null)"
+printf '%s' "$skill_post_payload" | HOME="$TMP/home" AGENT_CONFIG_DIR="$TMP/config" bash "$ROOT/home/skill-once/hook.sh" >/dev/null
 
-# Cache dirs appear ONLY under AGENT_CONFIG_DIR
+# Cache dirs and session files appear only under AGENT_CONFIG_DIR after actual writes.
 test -d "$TMP/config/read-once"
 test -d "$TMP/config/skill-once"
-# Nothing leaks into the HOME-based Claude config root
 test ! -e "$TMP/home/.claude/read-once"
 test ! -e "$TMP/home/.claude/skill-once"
-
-# --- Compact extension: same session, cache entry must be removed under $TMP/config ---
-# The hooks above created a session-*.jsonl for "root-test". Compact must clear it.
 test -n "$(find "$TMP/config/read-once" -name 'session-*.jsonl' 2>/dev/null)"
 test -n "$(find "$TMP/config/skill-once" -name 'session-*.jsonl' 2>/dev/null)"
 
@@ -34,5 +33,16 @@ printf '%s' "$compact_payload" | HOME="$TMP/home" AGENT_CONFIG_DIR="$TMP/config"
 # Session cache entries are now gone beneath AGENT_CONFIG_DIR
 test -z "$(find "$TMP/config/read-once" -name 'session-*.jsonl' 2>/dev/null)"
 test -z "$(find "$TMP/config/skill-once" -name 'session-*.jsonl' 2>/dev/null)"
+
+# Relative sibling sourcing works from an unrelated cwd and a path containing spaces.
+mkdir -p "$TMP/copied dir/skill-once" "$TMP/config-copy"
+cp "$ROOT/home/skill-once/"{hook.sh,compact.sh,state.sh} "$TMP/copied dir/skill-once/"
+(
+  cd /tmp
+  printf '%s' "$skill_post_payload" | HOME="$TMP/home" AGENT_CONFIG_DIR="$TMP/config-copy" bash "$TMP/copied dir/skill-once/hook.sh"
+  test -n "$(find "$TMP/config-copy/skill-once" -name 'session-*.jsonl' -print -quit)"
+  printf '%s' "$compact_payload" | HOME="$TMP/home" AGENT_CONFIG_DIR="$TMP/config-copy" bash "$TMP/copied dir/skill-once/compact.sh"
+  test -z "$(find "$TMP/config-copy/skill-once" -name 'session-*.jsonl' -print -quit)"
+)
 
 printf 'hook config root: PASS\n'

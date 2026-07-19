@@ -87,25 +87,15 @@ jq -e '.reason | contains("already in context")' <<<"$RUN_OUT" >/dev/null
 test -n "$(find "$TMP/config/read-once" -name 'session-*.jsonl' -print -quit)" || fail "read state missing under config root"
 test ! -e "$TMP/home/.claude/read-once" || fail "read state leaked to HOME"
 
-# Skill state: first allow, duplicate deny, state only below POLYTOKEN_CONFIG_DIR.
-run_adapter "$skill_payload" skill-once/hook.sh skill
-assert_outcome "$RUN_OUT" allow
-run_adapter "$skill_payload" skill-once/hook.sh skill
-assert_outcome "$RUN_OUT" deny
-jq -e '.reason | contains("already loaded")' <<<"$RUN_OUT" >/dev/null
-test -n "$(find "$TMP/config/skill-once" -name 'session-*.jsonl' -print -quit)" || fail "skill state missing under config root"
-test ! -e "$TMP/home/.claude/skill-once" || fail "skill state leaked to HOME"
+# Polytoken has no supported skill mapping: it must fail before touching canonical state.
+expect_error "$skill_payload" skill-once/hook.sh skill "unsupported mapping: skill"
+test ! -e "$TMP/config/skill-once" || fail "unsupported skill mapping created state"
 
-# Both compaction hooks clear the fallback session and return an event-specific allow.
+# Read compaction clears the fallback session and returns an event-specific allow.
 run_adapter "$compact_payload" read-once/compact.sh compact
 assert_outcome "$RUN_OUT" allow
 test -z "$(find "$TMP/config/read-once" -name 'session-*.jsonl' -print -quit)" || fail "read state survived compaction"
-run_adapter "$compact_payload" skill-once/compact.sh compact
-assert_outcome "$RUN_OUT" allow
-test -z "$(find "$TMP/config/skill-once" -name 'session-*.jsonl' -print -quit)" || fail "skill state survived compaction"
 run_adapter "$read_payload" read-once/hook.sh read READ_ONCE_MODE=deny
-assert_outcome "$RUN_OUT" allow
-run_adapter "$skill_payload" skill-once/hook.sh skill
 assert_outcome "$RUN_OUT" allow
 
 # Spy canonical hook verifies normalization, session fallback, dynamic IDs, identity, and event names.
@@ -120,9 +110,6 @@ payload=$(jq '.prompt_id="runtime-prompt-B" | .call_id="runtime-call-B" | .sessi
 run_adapter "$payload" hooks/capture.sh read POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
 assert_outcome "$RUN_OUT" allow
 jq -e --arg p "$TMP/read-target.txt" '.session_id == "stdin-session" and .tool_name == "Read" and .tool_input == {file_path:$p,offset:4,limit:9} and (has("agent_id") | not)' "$TMP/captured" >/dev/null
-run_adapter "$skill_payload" hooks/capture.sh skill POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
-assert_outcome "$RUN_OUT" allow
-jq -e '.tool_name == "Skill" and .tool_input == {skill:"using-superpowers",args:""}' "$TMP/captured" >/dev/null
 run_adapter "$compact_payload" hooks/capture.sh compact POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
 assert_outcome "$RUN_OUT" allow
 jq -e '.hook_event_name == "PostCompact" and .session_id == "fallback-session" and .tool_name == "" and .tool_input == {}' "$TMP/captured" >/dev/null

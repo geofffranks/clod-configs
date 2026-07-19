@@ -29,9 +29,14 @@ AGENTS="$ROOT/polytoken/AGENTS.md"
 
 # --- structural assertions (mirrors task-4-brief.md Step 1) ---
 
-# Exactly nine hook entries, every name unique.
-jq -e 'type == "array" and length == 9 and ([.[].name] | length == (unique | length))' \
-    "$HOOKS" >/dev/null || fail "hooks.json must be an array of 9 uniquely-named hooks"
+# Exactly seven safe hook entries, every name unique, with no skill mapping.
+expected='["bash-guard","branch-guard","container-awareness","git-safe","no-remote-writes","read-once","read-once-reset"]'
+jq -e --argjson expected "$expected" 'type=="array" and length==7 and ([.[].name]|sort)==$expected and ([.[].name]|length)==([.[].name]|unique|length)' \
+  "$HOOKS" >/dev/null || fail "hooks.json must contain exactly the seven safe unique hooks"
+jq -e 'all(.[]; .name!="skill-once" and .name!="skill-once-reset" and (.matcher // "")!="skill")' "$HOOKS" >/dev/null \
+  || fail "Polytoken hooks must omit skill-once registrations"
+! grep -q 'compat/skill-once' "$HOOKS" || fail "hooks.json must not reference compat/skill-once"
+! grep -Eq '^[[:space:]]*skill\)' "$ROOT/polytoken/hooks/adapter.sh" || fail "adapter must not map skill"
 
 # Every hook fires on a supported event and references a hooks/ script.
 jq -e 'all(.[]; (.event == "pre_tool_use" or .event == "post_compaction" or .event == "session_start") and (.handler.bash | contains("hooks/")))' \
@@ -63,10 +68,10 @@ grep -q 'executable: rtk' "$AGENTS" \
 #
 # The recommended config is provider-neutral: it carries only `version` and the
 # `tui` block, so it installs as an overlay onto a user config that already
-# defines providers and models. To exercise the real install path we start from
-# a copy of the live user config directory, then install the recommended
-# artifacts over it (the installer writes config.yaml, permissions.yaml,
-# hooks.json, and AGENTS.md, copying canonical scripts under compat/).
+# defines providers and models. To exercise the real install path we seed only
+# config.yaml from the live user config, then install the recommended artifacts
+# over it (the installer writes config.yaml, permissions.yaml, hooks.json, and
+# AGENTS.md, copying canonical scripts under compat/).
 
 USER_CFG="${POLYTOKEN_USER_CONFIG_DIR:-$HOME/.config/polytoken}"
 [ -f "$USER_CFG/config.yaml" ] \
@@ -75,8 +80,9 @@ USER_CFG="${POLYTOKEN_USER_CONFIG_DIR:-$HOME/.config/polytoken}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# Seed the isolated dir from the live user config so providers/models resolve.
-cp -R "$USER_CFG/." "$TMP/"
+# Seed only provider/model configuration. Build every tested artifact below in
+# an otherwise empty root so live compatibility files cannot collide with copies.
+cp "$USER_CFG/config.yaml" "$TMP/config.yaml"
 # Install the recommended config as a deep merge onto the existing config.yaml
 # (the installer preserves a user's providers/models and overlays recommended
 # keys), then drop the remaining artifacts as their installed names.
@@ -94,12 +100,11 @@ chmod +x "$TMP/hooks/adapter.sh"
 
 # Canonical scripts live under compat/ at the same relative paths the adapter is
 # given. Mirror the home/ layout: bash-guard/, branch-guard/, git-safe/,
-# read-once/, skill-once/, hooks/.
+# read-once/, hooks/.
 cp -R "$ROOT/home/bash-guard"   "$TMP/compat/bash-guard"
 cp -R "$ROOT/home/branch-guard" "$TMP/compat/branch-guard"
 cp -R "$ROOT/home/git-safe"     "$TMP/compat/git-safe"
 cp -R "$ROOT/home/read-once"    "$TMP/compat/read-once"
-cp -R "$ROOT/home/skill-once"   "$TMP/compat/skill-once"
 mkdir -p "$TMP/compat/hooks"
 cp "$ROOT/home/hooks/no-remote-writes.sh" "$TMP/compat/hooks/no-remote-writes.sh"
 
@@ -161,14 +166,7 @@ grep -q 'AGENTS.md'             "$RETRO" || fail "$RETRO must reference AGENTS.m
 grep -q 'Bash'                  "$GITWF" || fail "$GITWF must reference the Claude Bash tool"
 grep -q 'shell_exec'            "$GITWF" || fail "$GITWF must reference the Polytoken shell_exec tool"
 
-# --- README coverage assertions (Task 7) ---
-#
-# README.md must document the full installation mode: the exact commands users
-# run, the Polytoken destination override, the agent-join omission (Polytoken
-# uses native job/sidebar behavior instead), and the provider-neutral scope of
-# the recommended config. These grep -Fq checks pin the literal strings so a
-# prose rewrite cannot silently drop a documented capability.
-
+# --- README coverage assertions (existing documentation regression coverage) ---
 grep -Fq './install.sh --target polytoken' "$ROOT/README.md" \
   || fail "README must document './install.sh --target polytoken'"
 grep -Fq './install.sh --target all' "$ROOT/README.md" \
@@ -181,5 +179,11 @@ grep -Fq 'provider-neutral' "$ROOT/README.md" \
   || fail "README must state the config is provider-neutral"
 grep -Fq 'rtk guidance' "$ROOT/README.md" \
   || fail "README must document rtk for the polytoken target"
+
+# --- README coverage assertions (Task 4; expected RED until Task 6) ---
+grep -Fq 'seven native hooks' "$ROOT/README.md" || fail "README must state the seven-hook count"
+grep -Fq 'per-agent hook identity is unavailable' "$ROOT/README.md" || fail "README must explain Polytoken skill-once omission"
+grep -Fq 'does not copy `compat/skill-once`' "$ROOT/README.md" || fail "README must state fresh compatibility omission"
+grep -Fq 'records only successful `PostToolUse` deliveries' "$ROOT/README.md" || fail "README must state Claude success-only lifecycle"
 
 echo "OK: all polytoken artifact assertions passed"

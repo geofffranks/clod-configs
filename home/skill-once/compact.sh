@@ -1,41 +1,15 @@
 #!/bin/bash
-# skill-once: PostCompact hook — clears the session skill-load cache after a
-# context compaction. Compaction drops skill bodies from context, so after it
-# every skill must be reloadable. This resets the cache that hook.sh maintains.
-#
-# Install: Add to .claude/settings.json hooks.PostCompact
-# See also: hook.sh (the PreToolUse hook that tracks skill loads)
-
 set -euo pipefail
-
-INPUT=$(cat)
-
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
-if [ -z "$SESSION_ID" ]; then
-  exit 0
-fi
-
-CONFIG_DIR="${AGENT_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
-CACHE_DIR="$CONFIG_DIR/skill-once"
-
-if command -v sha256sum >/dev/null 2>&1; then
-  SESSION_HASH=$(echo -n "$SESSION_ID" | sha256sum | cut -c1-16)
-else
-  SESSION_HASH=$(echo -n "$SESSION_ID" | shasum -a 256 | cut -c1-16)
-fi
-
-CACHE_FILE="${CACHE_DIR}/session-${SESSION_HASH}.jsonl"
-STATS_FILE="${CACHE_DIR}/stats.jsonl"
-
-CLEARED=0
-if [ -f "$CACHE_FILE" ]; then
-  CLEARED=$(wc -l < "$CACHE_FILE" | tr -d ' ')
-  rm -f "$CACHE_FILE"
-fi
-
-NOW=$(date +%s)
-if [ "$CLEARED" -gt 0 ]; then
-  echo "{\"ts\":${NOW},\"session\":\"${SESSION_HASH}\",\"event\":\"compact\",\"cleared\":${CLEARED}}" >> "$STATS_FILE"
-fi
-
+command -v dirname >/dev/null 2>&1 || exit 0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" 2>/dev/null || exit 0
+# shellcheck source=state.sh
+. "$SCRIPT_DIR/state.sh" 2>/dev/null || exit 0
+trap skill_once_exit_cleanup EXIT
+for cmd in cat jq; do command -v "$cmd" >/dev/null 2>&1 || exit 0; done
+INPUT=$(cat 2>/dev/null) || exit 0
+SESSION_ID=$(jq -r 'if type=="object" and (.session_id|type)=="string" then .session_id else empty end' <<<"$INPUT" 2>/dev/null) || exit 0
+[ -n "$SESSION_ID" ] || exit 0
+skill_once_init "$SESSION_ID" || exit 0
+skill_once_lock "${SKILL_ONCE_TEST_OP_ID:-compact}" || exit 0
+skill_once_clear || exit 0
 exit 0
