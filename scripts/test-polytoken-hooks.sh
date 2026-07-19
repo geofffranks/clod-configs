@@ -87,13 +87,18 @@ jq -e '.reason | contains("already in context")' <<<"$RUN_OUT" >/dev/null
 test -n "$(find "$TMP/config/read-once" -name 'session-*.jsonl' -print -quit)" || fail "read state missing under config root"
 test ! -e "$TMP/home/.claude/read-once" || fail "read state leaked to HOME"
 
-# Skill state: first allow, duplicate deny, state only below POLYTOKEN_CONFIG_DIR.
-run_adapter "$skill_payload" skill-once/hook.sh skill
+# Skill lifecycle: PreToolUse allows, synthetic PostToolUse records success, then PreToolUse denies.
+skill_pre_payload=$(jq '.hook_event_name="PreToolUse"' <<<"$skill_payload")
+skill_post_payload=$(jq '.event="post_tool_use" | .hook_event_name="PostToolUse"' <<<"$skill_payload")
+run_adapter "$skill_pre_payload" skill-once/hook.sh skill
 assert_outcome "$RUN_OUT" allow
-run_adapter "$skill_payload" skill-once/hook.sh skill
-assert_outcome "$RUN_OUT" deny
-jq -e '.reason | contains("already loaded")' <<<"$RUN_OUT" >/dev/null
+test -z "$(find "$TMP/config/skill-once" -name 'session-*.jsonl' -print -quit)" || fail "skill state recorded before success"
+run_adapter "$skill_post_payload" skill-once/hook.sh skill
+assert_outcome "$RUN_OUT" allow
 test -n "$(find "$TMP/config/skill-once" -name 'session-*.jsonl' -print -quit)" || fail "skill state missing under config root"
+run_adapter "$skill_pre_payload" skill-once/hook.sh skill
+assert_outcome "$RUN_OUT" deny
+jq -e '.reason | contains("successfully loaded")' <<<"$RUN_OUT" >/dev/null
 test ! -e "$TMP/home/.claude/skill-once" || fail "skill state leaked to HOME"
 
 # Both compaction hooks clear the fallback session and return an event-specific allow.

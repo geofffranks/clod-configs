@@ -37,7 +37,7 @@ case "$mapping" in
     canonical_input=$(jq -c '{file_path:(.input.path // ""),offset:(.input.offset // null),limit:(.input.limit // null)} | with_entries(select(.value != null))' <<<"$input") || emit_error "malformed Polytoken input"
     ;;
   skill)
-    hook_event=PreToolUse
+    hook_event=$(jq -r 'if .event == "post_tool_use" then "PostToolUse" else "PreToolUse" end' <<<"$input") || emit_error "malformed Polytoken input"
     canonical_tool=Skill
     canonical_input=$(jq -c '{skill:(.input.name // ""),args:""}' <<<"$input") || emit_error "malformed Polytoken input"
     ;;
