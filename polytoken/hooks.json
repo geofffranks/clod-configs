@@ -40,25 +40,10 @@
     }
   },
   {
-    "name": "skill-once",
-    "event": "pre_tool_use",
-    "matcher": "skill",
-    "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" skill-once/hook.sh skill"
-    }
-  },
-  {
     "name": "read-once-reset",
     "event": "post_compaction",
     "handler": {
       "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" read-once/compact.sh compact"
-    }
-  },
-  {
-    "name": "skill-once-reset",
-    "event": "post_compaction",
-    "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" skill-once/compact.sh compact"
     }
   },
   {
