@@ -2,7 +2,7 @@
 name: plan-writer
 description: Draft a concrete implementation plan from an approved design spec and repository context; write only the requested plan artifact and report open questions.
 polytoken:
-  model: codex/gpt-5.6-sol
+  model: codex/gpt-5.6-luna
   fallback_models:
   - zai/glm-5.2
   - minime/google_gemma-4-26b-a4b-it
