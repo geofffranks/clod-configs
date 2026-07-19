@@ -12,13 +12,14 @@ SKILL_ONCE_TMP_FILE=
 SKILL_ONCE_TRACE_ACTIVE=0
 SKILL_ONCE_TRACE_OP_ID=
 SKILL_ONCE_TRACE_DIR=
+SKILL_ONCE_STALE_TARGET_LOCK=
 
 skill_once_test_fail_point() {
   local label=${1-}
   [ "$SKILL_ONCE_TRACE_ACTIVE" -eq 1 ] || return 1
   [ "${SKILL_ONCE_TEST_FAIL_POINT-}" = "$label" ] || return 1
   case "$label" in
-    append) return 0 ;;
+    append|cleanup-lock|cleanup-marker-write|stale-delete|target-unlock) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -29,7 +30,7 @@ skill_once_init() {
   SKILL_ONCE_CACHE_FILE=; SKILL_ONCE_SESSION_LOCK=; SKILL_ONCE_CLEANUP_LOCK=
   SKILL_ONCE_CLEANUP_MARKER=; SKILL_ONCE_SESSION_LOCK_OWNED=0
   SKILL_ONCE_CLEANUP_LOCK_OWNED=0; SKILL_ONCE_TMP_FILE=
-  SKILL_ONCE_TRACE_ACTIVE=0; SKILL_ONCE_TRACE_OP_ID=; SKILL_ONCE_TRACE_DIR=
+  SKILL_ONCE_TRACE_ACTIVE=0; SKILL_ONCE_TRACE_OP_ID=; SKILL_ONCE_TRACE_DIR=; SKILL_ONCE_STALE_TARGET_LOCK=
   [ -n "$session_id" ] || return 1
   for cmd in cat cut find grep jq mkdir mktemp mv rm rmdir seq sleep tail; do command -v "$cmd" >/dev/null 2>&1 || return 1; done
   if command -v sha256sum >/dev/null 2>&1; then
@@ -49,7 +50,7 @@ skill_once_init() {
 
 skill_once_trace_acquired() {
   local id=${1-} dir=${SKILL_ONCE_TEST_TRACE_DIR-}
-  if [ -d "$dir" ] && [ -n "${SKILL_ONCE_TEST_OP_ID-}" ] && [ "$id" = "$SKILL_ONCE_TEST_OP_ID" ] && [[ "$id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  if [ -d "$dir" ] && [ -n "${SKILL_ONCE_TEST_OP_ID-}" ] && [ "$id" = "$SKILL_ONCE_TEST_OP_ID" ] && [[ "$id" =~ ^[A-Za-z0-9._-]+$ ]] && { [ -z "${SKILL_ONCE_TEST_FAIL_POINT-}" ] || case "${SKILL_ONCE_TEST_FAIL_POINT-}" in append|cleanup-lock|cleanup-marker-write|stale-delete|target-unlock) true ;; *) false ;; esac; }; then
     SKILL_ONCE_TRACE_ACTIVE=1; SKILL_ONCE_TRACE_OP_ID=$id; SKILL_ONCE_TRACE_DIR=$dir
     : > "$dir/$id.acquired" 2>/dev/null || { SKILL_ONCE_TRACE_ACTIVE=0; return 0; }
     local i
@@ -93,17 +94,23 @@ skill_once_remove() {
 }
 skill_once_clear() { [ "$SKILL_ONCE_SESSION_LOCK_OWNED" -eq 1 ] || return 1; [ ! -e "$SKILL_ONCE_CACHE_FILE" ] || rm -f "$SKILL_ONCE_CACHE_FILE" 2>/dev/null; }
 skill_once_cleanup_stale() {
-  local now=${1-} last=0 f hash i
+  local now=${1-} last=0 f hash i tmp fail=0
   [ "$SKILL_ONCE_CLEANUP_LOCK_OWNED" -eq 0 ] || return 1
+  skill_once_test_fail_point cleanup-lock && return 1
   for i in $(seq 1 50); do if mkdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null; then SKILL_ONCE_CLEANUP_LOCK_OWNED=1; break; fi; [ "$i" -eq 50 ] || sleep 0.01; done
   [ "$SKILL_ONCE_CLEANUP_LOCK_OWNED" -eq 1 ] || return 1
   last=$(cat "$SKILL_ONCE_CLEANUP_MARKER" 2>/dev/null || echo 0); [[ "$last" =~ ^[0-9]+$ ]] || last=0
   if [ $((now-last)) -gt 3600 ]; then
     for f in "$SKILL_ONCE_CACHE_DIR"/session-*.jsonl; do [ -f "$f" ] || continue; [ "$(find "$f" -mtime +1 -print -quit 2>/dev/null)" ] || continue
-      hash=${f##*/session-}; hash=${hash%.jsonl}; mkdir "$SKILL_ONCE_CACHE_DIR/.session-$hash.lock" 2>/dev/null || continue; rm -f "$f" 2>/dev/null || { rmdir "$SKILL_ONCE_CACHE_DIR/.session-$hash.lock" 2>/dev/null || true; return 1; }; rmdir "$SKILL_ONCE_CACHE_DIR/.session-$hash.lock" 2>/dev/null || return 1
+      hash=${f##*/session-}; hash=${hash%.jsonl}; tmp="$SKILL_ONCE_CACHE_DIR/.session-$hash.lock"; mkdir "$tmp" 2>/dev/null || continue; SKILL_ONCE_STALE_TARGET_LOCK="$tmp"
+      if skill_once_test_fail_point stale-delete || ! rm -f "$f" 2>/dev/null; then rmdir "$tmp" 2>/dev/null || true; SKILL_ONCE_STALE_TARGET_LOCK=; continue; fi
+      if skill_once_test_fail_point target-unlock || ! rmdir "$tmp" 2>/dev/null; then fail=1; break; fi; SKILL_ONCE_STALE_TARGET_LOCK=
     done
-    printf '%s\n' "$now" > "$SKILL_ONCE_CLEANUP_MARKER" 2>/dev/null || return 1
+    if [ "$fail" -eq 0 ] && ! skill_once_test_fail_point cleanup-marker-write; then
+      tmp=$(mktemp "$SKILL_ONCE_CACHE_DIR/.cleanup.XXXXXX" 2>/dev/null || true)
+      if [ -n "$tmp" ]; then printf '%s\n' "$now" >"$tmp" 2>/dev/null && mv -f "$tmp" "$SKILL_ONCE_CLEANUP_MARKER" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; }; fi
+    fi
   fi
-  rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null || return 1; SKILL_ONCE_CLEANUP_LOCK_OWNED=0
+  rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null || true; SKILL_ONCE_CLEANUP_LOCK_OWNED=0
 }
-skill_once_exit_cleanup() { [ -z "$SKILL_ONCE_TMP_FILE" ] || rm -f "$SKILL_ONCE_TMP_FILE" 2>/dev/null || true; skill_once_unlock; if [ "$SKILL_ONCE_CLEANUP_LOCK_OWNED" -eq 1 ]; then rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null || true; SKILL_ONCE_CLEANUP_LOCK_OWNED=0; fi; }
+skill_once_exit_cleanup() { [ -z "$SKILL_ONCE_TMP_FILE" ] || rm -f "$SKILL_ONCE_TMP_FILE" 2>/dev/null || true; if [ -n "$SKILL_ONCE_STALE_TARGET_LOCK" ]; then rmdir "$SKILL_ONCE_STALE_TARGET_LOCK" 2>/dev/null || true; SKILL_ONCE_STALE_TARGET_LOCK=; fi; skill_once_unlock; if [ "$SKILL_ONCE_CLEANUP_LOCK_OWNED" -eq 1 ]; then rmdir "$SKILL_ONCE_CLEANUP_LOCK" 2>/dev/null || true; SKILL_ONCE_CLEANUP_LOCK_OWNED=0; fi; }
