@@ -291,6 +291,24 @@ out="$(CLAUDE_CONFIG_DIR="$D" "$REPO/install.sh" --target 2>&1)"; rc=$?
 has "$out" "usage"                              "printed usage on missing target value"
 rm -rf "$D"
 
+sc "S26 skill success hook fresh + legacy upgrade"
+D="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '[.hooks.PreToolUse[].hooks[].command] | map(select(.=="~/.claude/skill-once/hook.sh")) | length==1' "fresh pre hook exactly once"
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command] | map(select(.=="~/.claude/skill-once/hook.sh")) | length==1' "fresh post hook exactly once"
+rm -rf "$D"
+D="$(mktemp -d)"; jq 'del(.hooks.PostToolUse[] | select(.matcher=="Skill"))' "$FRAG" > "$D/settings.json"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command] | map(select(.=="~/.claude/skill-once/hook.sh")) | length==1' "legacy upgrade adds post hook"
+rm -rf "$D"
+
+sc "S27 skill post hook dedup + unrelated custom preservation"
+D="$(mktemp -d)"; jq --arg cmd "$HOME/.claude/skill-once/hook.sh" '(.hooks.PostToolUse[] | select(.matcher=="Skill").hooks[0].command)=$cmd | .hooks.PostToolUse += [{matcher:"Custom",hooks:[{type:"command",command:"~/my/post.sh"}]}]' "$FRAG" > "$D/settings.json"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/dev/null 2>&1
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command | select(test("skill-once/hook.sh$"))] | length==1' "expanded post command not duplicated"
+ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command] | index("~/my/post.sh") != null' "unrelated post hook preserved"
+rm -rf "$D"
+
 echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

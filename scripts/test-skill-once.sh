@@ -462,4 +462,15 @@ state_dir="$(cd "$(dirname "$HOOK")" && pwd)"
 HOME="$mismatch_root/home" AGENT_CONFIG_DIR="$mismatch_root/config" SKILL_ONCE_TEST_TRACE_DIR="$mismatch_root/trace" SKILL_ONCE_TEST_OP_ID=expected-id bash -c '. "$1/state.sh"; skill_once_init "test-session" && skill_once_lock "different-label" && skill_once_unlock' _ "$state_dir"
 test $? -eq 0; test -z "$(find "$mismatch_root/trace" -type f -print -quit)"
 
+# Corrupted cache state fails open: nonnumeric timestamp and malformed trailing JSON.
+mal_hash="$(printf '%s' "skill-once-session" | sha256sum | cut -c1-16)"
+mal_file="$CFG/skill-once/session-$mal_hash.jsonl"
+printf '%s\n' '{"skill":"example","agent":"agent-a","ts":"not-a-number"}' >"$mal_file"
+set +e; mal_out="$(run "$pre")"; mal_rc=$?; set -e
+test "$mal_rc" -eq 0; test -z "$mal_out"
+printf '%s\n' '{"skill":"example","agent":"agent-a","ts":1}' '{bad json' >"$mal_file"
+set +e; mal_out="$(run "$pre")"; mal_rc=$?; set -e
+test "$mal_rc" -eq 0; test -z "$mal_out"
+rm -f "$mal_file"
+
 printf 'skill-once lifecycle: PASS\n'

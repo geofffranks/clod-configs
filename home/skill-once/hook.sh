@@ -38,7 +38,9 @@ if grep -qiE '(^|[[:space:]])--?force([[:space:]]|$)' <<<"$ARGS"; then
   skill_once_remove "$SKILL" "$AGENT_KEY" || exit 0
   exit 0
 fi
-CACHED_TS=$(jq -r --arg s "$SKILL" --arg a "$AGENT_KEY" 'select(.skill == $s and .agent == $a) | .ts' "$SKILL_ONCE_CACHE_FILE" 2>/dev/null | tail -1 || true)
+jq_out="$(jq -r --arg s "$SKILL" --arg a "$AGENT_KEY" 'select(.skill == $s and .agent == $a) | .ts' "$SKILL_ONCE_CACHE_FILE" 2>/dev/null)" || jq_out=""
+CACHED_TS="$(tail -1 <<<"$jq_out" 2>/dev/null)" || CACHED_TS=""
+[[ "$CACHED_TS" =~ ^[0-9]+$ ]] || CACHED_TS=""
 if [ -n "$CACHED_TS" ] && [ $((NOW-CACHED_TS)) -lt "$TTL" ]; then
   MINUTES_AGO=$(((NOW-CACHED_TS)/60))
   REASON="skill-once: '${SKILL}' was successfully loaded in this agent context (${MINUTES_AGO}m ago). Its full body is already in your context above — scroll up and re-read it instead of reloading. If a context summary dropped the body, re-invoke with args containing --force."
