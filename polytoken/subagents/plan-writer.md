@@ -3,6 +3,8 @@ name: plan-writer
 description: Draft a concrete implementation plan from an approved design spec and repository context; write only the requested plan artifact and report open questions.
 polytoken:
   model: codex/gpt-5.6-sol
+  fallback_models:
+  - zai/glm-5.2
   tools: [file_read, file_write, file_edit_search_replace, glob, grep]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep]
   allow_subagent_spawn: false

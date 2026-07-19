@@ -3,6 +3,8 @@ name: plan-reviewer
 description: Review an implementation plan against its spec and repository context, returning severity-classified findings.
 polytoken:
   model: zai/glm-5.2
+  fallback_models:
+  - codex/gpt-5.6-sol
   tools: [file_read, glob, grep]
   undeferred_tools: [file_read, glob, grep]
   allow_subagent_spawn: false

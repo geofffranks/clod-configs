@@ -3,6 +3,8 @@ name: validator
 description: Execute a validation plan end-to-end — runs each validation item, captures command output as evidence, judges pass/fail, and reports an overall verdict. Does not fix issues; reports them.
 polytoken:
   model: zai/glm-5.2
+  fallback_models:
+  - codex/gpt-5.6-sol
   tools: [file_read, glob, grep, shell_exec, file_write]
   undeferred_tools: [file_read, glob, grep, shell_exec, file_write]
   allow_subagent_spawn: false

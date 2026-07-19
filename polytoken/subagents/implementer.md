@@ -3,6 +3,8 @@ name: implementer
 description: Implement a single plan task via TDD — writes code, runs focused then full tests, commits, self-reviews, and reports status. Dispatch one per task with its task-brief file path and report-file path.
 polytoken:
   model: codex/gpt-5.6-luna
+  fallback_models:
+  - zai/glm-5.2
   tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec]
   allow_subagent_spawn: false
