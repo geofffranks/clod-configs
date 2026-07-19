@@ -42,9 +42,10 @@ for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/h
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-for f in subagents/implementer.md subagents/reviewer.md subagents/triage.md subagents/validator.md; do
-  [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
-done
+expected_subagents="$(printf '%s\n' implementer.md plan-reviewer.md plan-writer.md researcher.md reviewer.md validator.md | sort)"
+actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
+[ "$actual_subagents" = "$expected_subagents" ] \
+  && ok "installed exactly the six shipped subagents" || no "installed exactly the six shipped subagents"
 [ -x "$D/hooks/adapter.sh" ] && ok "adapter executable" || no "adapter executable"
 for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -x "$D/$x" ] && ok "executable: $x" || no "executable: $x"
@@ -57,7 +58,9 @@ if [ -f "$D/hooks.json" ]; then
 else
   no "literal token rendered out of hooks.json (hooks.json missing)"
 fi
-grep -q "$D/hooks/adapter.sh" "$D/hooks.json" 2>/dev/null && ok "hooks reference absolute adapter path" || no "hooks reference absolute adapter path"
+portable='${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh'
+jq -e --arg p "$portable" '[.[] | select(.handler.bash | contains("adapter.sh"))] | length>0 and all(.[]; .handler.bash|contains($p))' "$D/hooks.json" >/dev/null \
+  && ok "hooks reference portable runtime adapter path" || no "hooks reference portable runtime adapter path"
 rm -rf "$D"
 
 # --- P2: config no-TTY -> additive applied, tui.theme conflict preserved ---
@@ -77,7 +80,8 @@ D="$(valid_base)"
 printf '%s\n' '[ {"name":"my-custom","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[0].name' "$D/hooks.json")" = "my-custom" ] && ok "custom hook order preserved (first)" || no "custom hook order preserved"
-ajq "$D/hooks.json" 'length == 9'                       "8 recommended + 1 custom"
+# P3: one custom plus nine recommended
+ajq "$D/hooks.json" 'length == 10' "9 recommended + 1 custom"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -123,8 +127,9 @@ printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_ex
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "true" ] \
   && ok "no-TTY preserved conflict handler" || no "no-TTY preserved conflict handler"
-[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "7" ] \
-  && ok "no-TTY applied 7 additive hooks" || no "no-TTY applied additive hooks"
+# P6: bash-guard conflicts, leaving eight additive recommended hooks
+[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "8" ] \
+  && ok "no-TTY applied 8 additive hooks" || no "no-TTY applied additive hooks"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
@@ -237,7 +242,8 @@ printf '%s\n' '[ {"name":"superpowers-session-start","event":"session_start","ha
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
 ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
-ajq "$D/hooks.json" 'length == 10'                       "2 existing + 8 recommended"
+# P15: two existing plus nine recommended
+ajq "$D/hooks.json" 'length == 11' "2 existing + 9 recommended"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"

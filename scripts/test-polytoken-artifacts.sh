@@ -63,10 +63,10 @@ grep -q 'executable: rtk' "$AGENTS" \
 #
 # The recommended config is provider-neutral: it carries only `version` and the
 # `tui` block, so it installs as an overlay onto a user config that already
-# defines providers and models. To exercise the real install path we start from
-# a copy of the live user config directory, then install the recommended
-# artifacts over it (the installer writes config.yaml, permissions.yaml,
-# hooks.json, and AGENTS.md, copying canonical scripts under compat/).
+# defines providers and models. To exercise the real install path we seed only
+# config.yaml from the live user config, then install the recommended artifacts
+# over it (the installer writes config.yaml, permissions.yaml, hooks.json, and
+# AGENTS.md, copying canonical scripts under compat/).
 
 USER_CFG="${POLYTOKEN_USER_CONFIG_DIR:-$HOME/.config/polytoken}"
 [ -f "$USER_CFG/config.yaml" ] \
@@ -75,8 +75,9 @@ USER_CFG="${POLYTOKEN_USER_CONFIG_DIR:-$HOME/.config/polytoken}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# Seed the isolated dir from the live user config so providers/models resolve.
-cp -R "$USER_CFG/." "$TMP/"
+# Seed only provider/model configuration. Build every tested artifact below in
+# an otherwise empty root so live compatibility files cannot collide with copies.
+cp "$USER_CFG/config.yaml" "$TMP/config.yaml"
 # Install the recommended config as a deep merge onto the existing config.yaml
 # (the installer preserves a user's providers/models and overlays recommended
 # keys), then drop the remaining artifacts as their installed names.
