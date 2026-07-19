@@ -5,6 +5,7 @@ polytoken:
   model: zai/glm-5.2
   fallback_models:
   - codex/gpt-5.6-sol
+  - minime/google_gemma-4-26b-a4b-it
   tools: [file_read, glob, grep, shell_exec, file_write]
   undeferred_tools: [file_read, glob, grep, shell_exec, file_write]
   allow_subagent_spawn: false
