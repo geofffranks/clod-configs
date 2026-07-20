@@ -15,6 +15,19 @@ tui:
 # committed — they live in your installed config.yaml, which the installer
 # preserves. After installing, remove the old `localhost_vision` entry by hand.
 mcp_servers:
+  # Host-only: absolute path to a Python script, so this entry does NOT work in
+  # the linux container. For container portability, put a `clod-subagent-mcp`
+  # wrapper on PATH and use that as a bare `command` instead.
+  clod-subagent:
+    args:
+      - /home/dev/workspace/clod-mcp/clod_subagent_mcp.py
+    command: python3
+    env:
+      # Long-lived OAuth token (from `claude setup-token`) so the spawned
+      # `claude` CLI authenticates headlessly. run.sh injects it from the
+      # host env file (~/.config/polytoken-container.env) or POLY_PASS_ENV.
+      CLAUDE_CODE_OAUTH_TOKEN: $CLAUDE_CODE_OAUTH_TOKEN
+    transport: stdio
   foundry:
     args: []
     command: foundry-mcp

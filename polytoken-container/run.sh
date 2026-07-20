@@ -3,7 +3,7 @@
 # polytoken container launcher.
 #   - mounts:  ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig,
 #              ~/.config/gh (ro), ~/.gitignore (ro), ~/.local/share/polytoken,
-#              ~/.codex, ~/go/pkg/mod
+#              ~/.codex, ~/go/pkg/mod, ~/.claude
 #   - launches polytoken in the repo under ~/workspace you run this from
 #     (or at the ~/workspace root if launched elsewhere)
 #   - passes ALL arguments through to polytoken
@@ -64,6 +64,9 @@ CODEX_MOUNT=0
 # Go module cache (shared, portable across darwin/linux) so the `go run` MCP
 # wrappers don't re-fetch deps on every container session.
 [[ -d "$HOME/go/pkg/mod" ]] && MOUNTS+=(-v "$HOME/go/pkg/mod:$DEV_HOME/go/pkg/mod")
+# claude CLI auth/config (rw: claude writes sessions, projects, statsig). The
+# build stamps DEV_UID = host uid, so bind-mount ownership lines up with no repair.
+[[ -d "$HOME/.claude" ]] && MOUNTS+=(-v "$HOME/.claude:$DEV_HOME/.claude")
 if [[ -n "${POLY_EXTRA_MOUNTS:-}" ]]; then
   # shellcheck disable=SC2206
   MOUNTS+=($POLY_EXTRA_MOUNTS)
@@ -80,7 +83,7 @@ ENV_FLAGS=""
 # GH_TOKEN: gh stores its OAuth token in the macOS Keychain (not in the
 # ~/.config/gh files we mount), so it can't cross the container boundary.
 # Pass it as an env var instead — gh prefers GH_TOKEN over the keychain.
-POLY_PASS_ENV_DEFAULT="ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY \
+POLY_PASS_ENV_DEFAULT="ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY GEMINI_API_KEY \
 GROQ_API_KEY DEEPSEEK_API_KEY MISTRAL_API_KEY ZAI_API_KEY OPENROUTER_API_KEY \
 BRAVE_SEARCH_API_KEY TAVILY_API_KEY EXA_API_KEY KAGI_API_KEY FOUNDRY_API_KEY \
 GH_TOKEN"

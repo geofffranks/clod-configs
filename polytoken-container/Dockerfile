@@ -3,7 +3,7 @@
 # polytoken-dev — isolated dev container for running Polytoken.
 #   brew   = tools (polytoken, gh, rtk, tk, jq, yq, perl, ripgrep, mise)
 #   mise   = language runtimes (python 3.13 + 3.11, node lts, go latest)
-# Mounts are applied by run.sh: ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig
+# Mounts are applied by run.sh: ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig, ~/.claude
 #
 FROM ubuntu:24.04
 
@@ -72,9 +72,12 @@ RUN printf '\nexport PATH="$HOME/bin:%s/shims:/home/linuxbrew/.linuxbrew/bin:/ho
 # ---- MCP servers ----
 # Wrappers (go run / node) are shared source files: copied into the image here
 # AND onto the host's ~/.local/bin by the installer (scripts/install-polytoken.sh)
-# — one source of truth. codex CLI is @openai/codex (npm).
+# — one source of truth. codex CLI is @openai/codex (npm); claude CLI is
+# @anthropic-ai/claude-code (npm — Homebrew only ships it as a macOS cask, which
+# Linuxbrew can't install). ~/.claude is bind-mounted at runtime by run.sh so the
+# container's claude reuses the host's auth/config.
 COPY --chmod=0755 mcp-wrappers/foundry-mcp mcp-wrappers/codex-imagegen-mcp mcp-wrappers/minime-vision /home/dev/.local/bin/
-RUN npm install -g @openai/codex
+RUN npm install -g @openai/codex @anthropic-ai/claude-code
 
 # Codex creates PATH aliases below this directory at startup. Keep the image
 # default writable; run.sh also repairs this path after the host ~/.codex
