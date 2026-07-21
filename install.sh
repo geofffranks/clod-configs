@@ -72,6 +72,49 @@ for f in statusline.sh bash-guard/hook.sh branch-guard/hook.sh git-safe/hook.sh 
   [ -f "$DEST/$f" ] && chmod +x "$DEST/$f"
 done
 
+# 2b. Migrate: remove deprecated hook entries that were superseded by skill-once/hook.sh.
+#     The installer only adds hooks (never removes), so installations that accumulated
+#     the old monolithic skill-once-hook.sh alongside the new package need an explicit
+#     cleanup pass.  This runs before the merge so the final result is already clean.
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  migrate_filter='
+    def cmdkey: gsub("^~"; $home) | gsub("\\$HOME"; $home);
+
+    # True if every command in this hook group is a deprecated script.
+    def is_deprecated:
+      [ .hooks[]?.command | cmdkey ] | length > 0 and all(
+        test("/.claude/hooks/skill-once-hook\\.sh$") or
+        test("/.claude/hooks/skill-once-compact\\.sh$")
+      );
+
+    # True if this PostCompact entry contains skill-once/compact.sh.
+    def has_skill_once_compact:
+      [ .hooks[]?.command | cmdkey ] | any(test("skill-once/compact\\.sh$"));
+
+    # True if this PostCompact entry has ONLY read-once/compact.sh (no skill-once).
+    def is_readonce_only:
+      [ .hooks[]?.command | cmdkey ] | length > 0 and all(test("read-once/compact\\.sh$"));
+
+    if .hooks then
+      .hooks.PreToolUse  = [ (.hooks.PreToolUse  // [])[] | select(is_deprecated | not) ]
+      | .hooks.PostCompact = (
+          (.hooks.PostCompact // []) as $pc
+          | if ($pc | any(has_skill_once_compact)) then
+              [ $pc[] | select((is_deprecated or is_readonce_only) | not) ]
+            else
+              [ $pc[] | select(is_deprecated | not) ]
+            end
+        )
+    else . end
+  '
+  migrated="$(jq -S --arg home "$HOME" "$migrate_filter" "$SETTINGS" 2>/dev/null)" || migrated=""
+  if [ -n "$migrated" ] && [ "$(jq -S . "$SETTINGS")" != "$migrated" ]; then
+    cp "$SETTINGS" "$SETTINGS.bak-$TS"
+    printf '%s\n' "$migrated" > "$SETTINGS"
+    echo "  migrated: removed deprecated skill-once hook entries (previous saved to settings.json.bak-$TS)"
+  fi
+fi
+
 # 3. Merge the settings fragment, one patch at a time. Each individual difference
 #    between your settings.json and the recommended merge is accepted or declined
 #    on its own (interactive [y/N]). Additive patches (new keys, new hooks) and
