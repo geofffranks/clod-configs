@@ -2,7 +2,7 @@
 name: validator
 description: Execute a validation plan end-to-end — runs each validation item, captures command output as evidence, judges pass/fail, and reports an overall verdict. Does not fix issues; reports them.
 polytoken:
-  model: zlm/glm-5.2
+  model: zai/glm-5.2
   fallback_models:
   - codex/gpt-5.6-luna
   - minime/google_gemma-4-26b-a4b-it
