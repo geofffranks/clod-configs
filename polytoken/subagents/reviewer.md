@@ -2,9 +2,9 @@
 name: reviewer
 description: Review a code diff against its requirements and quality standards — returns a spec-compliance verdict and a quality verdict with severity-classified findings. Read-only with no write or shell tools. Handles task-scoped and whole-branch review.
 polytoken:
-  model: zai/glm-5.2
+  model: zlm/glm-5.2
   fallback_models:
-  - codex/gpt-5.6-sol
+  - codex/gpt-5.6-luna
   - minime/google_gemma-4-26b-a4b-it
   tools: [file_read, glob, grep]
   undeferred_tools: [file_read, glob, grep]

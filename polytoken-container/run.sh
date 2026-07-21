@@ -132,6 +132,15 @@ docker run --rm --user 0 \
 
 echo "run.sh: launching polytoken in $CWD" >&2
 
+set +u
+if [[ "${1}" == "bash" ]]; then
+  cmd=bash
+  shift
+else
+  cmd=polytoken
+fi
+set -u
+
 # shellcheck disable=SC2086  (ENV_FLAGS intentionally word-split)
 docker run --rm -it --init \
   -e TERM="${TERM:-xterm-256color}" \
@@ -140,4 +149,4 @@ docker run --rm -it --init \
   "${MOUNTS[@]}" \
   -w "$CWD" \
   "$IMAGE:$TAG" \
-  polytoken "$@"
+  ${cmd} "$@"
