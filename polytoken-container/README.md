@@ -76,7 +76,8 @@ alias pt='bash "$HOME/workspace/claude-config/polytoken-container/run.sh"'
 The container launches in **Bypass+**: run.sh drops an ephemeral
 `.polytoken/config.yaml` (`default_permission_matcher: bypass_plus`) that
 overrides the host's global Autonomous, and removes it on exit — so the host
-keeps Autonomous.
+keeps Autonomous. If the repo already has a project config, run.sh temporarily
+moves it aside and restores it unchanged when the container exits.
 
 ## Safety model (layered)
 
