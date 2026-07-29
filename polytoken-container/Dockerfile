@@ -41,15 +41,15 @@ ENV HOMEBREW_NO_AUTO_UPDATE=1 \
 # non-zero exit breaks the && chain. Redirect to a regular file (never EPIPEs)
 # and surface it only on failure.
 RUN LOG=/tmp/brew.log; \
-    { brew tap polytoken/tap \
-      && brew tap wedow/tools \
-      && brew trust polytoken/tap \
+    { brew tap wedow/tools \
       && brew trust wedow/tools \
-      && brew install polytoken-unstable gh rtk ticket mise yq perl jq ripgrep \
+      && brew install gh rtk ticket mise yq perl jq ripgrep \
       && brew cleanup --prune=all; \
     } >> "$LOG" 2>&1 || { echo "=== brew step failed; tail of $LOG: ==="; tail -n 80 "$LOG"; exit 1; }; \
     (command -v tk >/dev/null 2>&1 || ln -s "$(brew --prefix)/bin/ticket" "$(brew --prefix)/bin/tk") \
     && rm -rf "${HOME}/.cache/Homebrew/"*
+
+RUN curl -fsS https://get.polytoken.dev | bash
 
 # ---- language runtimes via mise ----
 ENV MISE_DATA_DIR=/home/dev/.local/share/mise

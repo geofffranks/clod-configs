@@ -153,7 +153,7 @@ if [[ "${1}" == "bash" ]]; then
   cmd=bash
   shift
 else
-  cmd=polytoken
+  cmd=/home/dev/.local/bin/polytoken
 fi
 set -u
 
