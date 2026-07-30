@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # ---- base system packages (Homebrew + git need curl/git/procps/file/build tools) ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential ca-certificates curl file git locales procps sudo tmux \
+      build-essential ca-certificates curl file git locales procps sudo tmux time \
       unzip zip rsync dnsutils \
     && localedef -i en_US -f UTF-8 en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
