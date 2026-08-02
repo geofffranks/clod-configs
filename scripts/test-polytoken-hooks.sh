@@ -73,6 +73,19 @@ run_adapter "$payload" branch-guard/hook.sh shell BRANCH_GUARD_PROTECTED="$curre
 assert_outcome "$RUN_OUT" deny
 jq -e '.reason | contains("branch-guard")' <<<"$RUN_OUT" >/dev/null
 
+# Linked-worktree regression: the hook launcher stays in the main checkout,
+# while POLYTOKEN_CWD identifies a feature worktree. The feature branch must be
+# evaluated, not the launcher branch.
+WORKTREE_ROOT="$TMP/linked-worktree"
+TEST_BRANCH="test-branch-guard-worktree-$$"
+git -C "$ROOT" worktree add -q -b "$TEST_BRANCH" "$WORKTREE_ROOT" HEAD
+run_adapter "$payload" branch-guard/hook.sh shell \
+  POLYTOKEN_CWD="$WORKTREE_ROOT" \
+  BRANCH_GUARD_PROTECTED="$(git -C "$ROOT" branch --show-current)"
+assert_outcome "$RUN_OUT" allow
+git -C "$ROOT" worktree remove "$WORKTREE_ROOT" >/dev/null
+git -C "$ROOT" branch -d "$TEST_BRANCH" >/dev/null
+
 payload=$(jq '.input.command="git reset --hard HEAD"' <<<"$shell_payload")
 run_adapter "$payload" git-safe/hook.sh shell
 assert_outcome "$RUN_OUT" deny

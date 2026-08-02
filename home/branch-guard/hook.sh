@@ -39,6 +39,12 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
+# Polytoken supplies the effective repository/worktree directory through the
+# hook environment. Fall back to the process CWD for direct/manual invocation.
+# This matters for linked worktrees: the hook process may be launched from the
+# main checkout while the command itself targets another worktree.
+WORKDIR="${POLYTOKEN_CWD:-$PWD}"
+
 log() {
   if [ "${BRANCH_GUARD_LOG:-0}" = "1" ]; then
     echo "[branch-guard] $*" >&2
@@ -98,14 +104,14 @@ else
   fi
 fi
 
-# Get current branch
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+# Get current branch from the effective worktree, not the hook launcher CWD.
+CURRENT_BRANCH=$(git -C "$WORKDIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 if [ -z "$CURRENT_BRANCH" ]; then
-  log "SKIP: not in a git repo or detached HEAD"
+  log "SKIP: not in a git repo or detached HEAD (workdir: $WORKDIR)"
   exit 0
 fi
 
-log "Current branch: $CURRENT_BRANCH"
+log "Current branch: $CURRENT_BRANCH (workdir: $WORKDIR)"
 
 # Check if current branch is protected
 for protected in "${PROTECTED[@]}"; do

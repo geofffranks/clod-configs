@@ -67,6 +67,30 @@ repair.
 Run validation commands as given in the plan. If a command looks destructive or
 you are unsure it is safe, flag it and ask rather than running it blindly.
 
+## Shell execution constraints
+
+This harness requires shell commands to be issued one at a time:
+
+- Never send validation shell commands through a parallel wrapper.
+- Run each command as its own `shell_exec` call.
+- If the harness rejects a batched shell call, retry the same command individually.
+- Do not probe the environment with `env`, `printenv`, or broad environment dumps.
+- For worktree identity, use only narrow checks such as `git branch --show-current`,
+  `git rev-parse HEAD`, and `git status --short`.
+
+## Transient test failures
+
+When a validation command fails:
+
+1. Preserve the original command, exit code, and relevant output.
+2. Identify the exact failing test or package.
+3. Rerun the exact failing test once with caching disabled, when possible.
+4. Rerun the original validation command once.
+5. Report both outcomes and label the first result intermittent when the retry passes.
+
+Do not modify source or tests to make validation pass. A retry may clarify a
+transient failure, but it does not erase the original evidence.
+
 ## Report contract
 
 Write the full results to the report file:
