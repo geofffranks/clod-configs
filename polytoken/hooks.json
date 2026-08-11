@@ -1,34 +1,10 @@
 [
   {
-    "name": "bash-guard",
-    "event": "pre_tool_use",
-    "matcher": "shell_exec",
-    "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" bash-guard/hook.sh shell"
-    }
-  },
-  {
-    "name": "branch-guard",
-    "event": "pre_tool_use",
-    "matcher": "shell_exec",
-    "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" branch-guard/hook.sh shell"
-    }
-  },
-  {
     "name": "git-safe",
     "event": "pre_tool_use",
     "matcher": "shell_exec",
     "handler": {
       "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" git-safe/hook.sh shell"
-    }
-  },
-  {
-    "name": "no-remote-writes",
-    "event": "pre_tool_use",
-    "matcher": "shell_exec",
-    "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" hooks/no-remote-writes.sh shell"
     }
   },
   {

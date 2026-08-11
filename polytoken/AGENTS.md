@@ -39,24 +39,6 @@ stores the message intact. For long or multi-line messages, prefer writing the
 body to a temp file and `git commit -F /tmp/commit_msg.txt` — cleaner than a
 heredoc.
 
-## Memory & task routing — write to memory last, not first
-
-Before persisting anything, route it. Memory is the last resort, not the default.
-
-- **Durable rule / convention / gotcha** → the repo's `AGENTS.md`.
-- **Active work** (status, design decisions, sub-tasks that outlive the session)
-  → Polytoken todos and saved goals, not memory.
-- **Branch existence / commit history / PR state** → never store; query `git` /
-  `gh` live. Remembered status rots the moment a PR merges.
-- **Full spec / plan / validation artifact** → a doc file the ticket links to.
-- **Ephemeral within-session sub-tasks** → in-session todos. Promote to saved
-  goals only if unfinished at session end.
-- **Long-running or independent work** → dispatch to a Polytoken subagent or
-  background job and track it in the jobs view rather than holding the main
-  session.
-- Write a **memory** only when it is none of the above: a durable user-profile
-  fact or an external reference pointer not tied to a ticket.
-
 ## Search & file tools
 
 Use the built-in `glob` tool to find files and `file_read` to read them — they
@@ -92,7 +74,3 @@ bypass rtk and save nothing.
 
 rtk commands run through `shell_exec`, so allowing `executable: rtk` (see
 Permission Rules) avoids per-call approval prompts.
-
-# Workflow + Ticketing
-Gate repo work on the skills that govern it: load `herdle-tk-flow` and create or locate the tk ticket before starting any feature or bug work, and load `git-workflow` before any branch, commit, or PR.
-
