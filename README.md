@@ -99,7 +99,7 @@ with Polytoken-native equivalents.
 |---|---|---|
 | `config.yaml` | `polytoken/config.recommended.yaml` | `version: 2` + a `tui` block only (see below). |
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
-| `hooks.json` | `polytoken/hooks.json` | Seven native hooks. Skill-once is omitted because per-agent hook identity is unavailable. |
+| `hooks.json` | `polytoken/hooks.json` | Nine native hooks, including the metadata-only `large-read-guard`. Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
 | `compat/` | `home/{bash-guard,branch-guard,git-safe,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
@@ -181,6 +181,10 @@ installed global hook **by name** using Polytoken's native per-project hook
 negation mechanism (e.g. add a same-named entry that disables it in the
 project's own hook config). The global installer never edits project hook
 files.
+
+#### Large-read policy
+
+`large-read-guard` denies unbounded reads of regular `.diff`, `.patch`, and `.log` files larger than 50 KiB (51,201 bytes), and other regular files larger than 250 KiB (256,001 bytes). Reads with a positive `max_bytes`, or a non-negative `offset` plus positive `limit`, are bounded and allowed. The hook uses filesystem metadata only, follows one symlink to its target, and fails open for missing, unreadable, dangling, directory, special-file, or stat-race cases so the authoritative Read error remains visible. It is separate from `read-once`.
 
 #### Known limitations (Polytoken target)
 

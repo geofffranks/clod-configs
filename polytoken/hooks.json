@@ -48,6 +48,14 @@
     }
   },
   {
+    "name": "large-read-guard",
+    "event": "pre_tool_use",
+    "matcher": "file_read",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" large-read-guard/hook.sh read"
+    }
+  },
+  {
     "name": "read-once-reset",
     "event": "post_compaction",
     "handler": {

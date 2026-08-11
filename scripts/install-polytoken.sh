@@ -23,7 +23,7 @@ PT_AGENTS="$ROOT/polytoken/AGENTS.md"
 PT_ADAPTER="$ROOT/polytoken/hooks/adapter.sh"
 
 # Canonical scripts installed under compat/ (mirrors home/ layout).
-COMPAT_DIRS=(bash-guard branch-guard git-safe read-once grep-guard)
+COMPAT_DIRS=(bash-guard branch-guard git-safe read-once grep-guard large-read-guard)
 COMPAT_HOOKS=(hooks/no-remote-writes.sh)
 # Executable managed scripts, relative to DEST.
 EXEC_SCRIPTS=(
@@ -31,7 +31,7 @@ EXEC_SCRIPTS=(
   hooks/container-awareness.sh
   compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh
   compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once
-  compat/grep-guard/hook.sh
+  compat/grep-guard/hook.sh compat/large-read-guard/hook.sh
   compat/hooks/no-remote-writes.sh
 )
 

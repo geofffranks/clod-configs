@@ -34,7 +34,10 @@ case "$mapping" in
   read)
     hook_event=PreToolUse
     canonical_tool=Read
-    canonical_input=$(jq -c '{file_path:(.input.path // ""),offset:(.input.offset // null),limit:(.input.limit // null)} | with_entries(select(.value != null))' <<<"$input") || emit_error "malformed Polytoken input"
+    if ! jq -e '(.input | type == "object") and (.input.path | type == "string") and (if has("input") and (.input | has("offset")) then (.input.offset | type == "number" and floor == . and . >= 0) else true end) and (if has("input") and (.input | has("limit")) then (.input.limit | type == "number" and floor == . and . >= 1) else true end) and (if has("input") and (.input | has("max_bytes")) then (.input.max_bytes | type == "number" and floor == . and . >= 1) else true end)' >/dev/null 2>&1 <<<"$input"; then
+      emit_error "malformed Polytoken input"
+    fi
+    canonical_input=$(jq -c '{file_path:.input.path} + (if .input|has("offset") then {offset:.input.offset} else {} end) + (if .input|has("limit") then {limit:.input.limit} else {} end) + (if .input|has("max_bytes") then {max_bytes:.input.max_bytes} else {} end)' <<<"$input") || emit_error "malformed Polytoken input"
     ;;
   grep)
     hook_event=PreToolUse
