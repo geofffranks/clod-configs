@@ -52,7 +52,6 @@ Execute the task in these phases, in order: Orient → RED/GREEN → Verify → 
 ### Orient
 
 Read the task brief first. Start with the named files and their direct dependencies. Before any out-of-scope read, state one unresolved question and perform one targeted lookup. After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT` rather than guessing.
-After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT`.
 
 Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact. If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims. Use RTK only for broader plain-text searches and supported test or build commands, never for ordinary targeted reads.
 

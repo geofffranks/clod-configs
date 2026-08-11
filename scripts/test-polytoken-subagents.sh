@@ -17,39 +17,29 @@ declare -A expected_tools=(
   [reviewer]='[file_read, glob, grep]'
   [validator]='[file_read, glob, grep, shell_exec, file_write]'
   [researcher]='[file_read, grep, glob, web_search, web_fetch]'
-  [plan-reviewer]='[file_read, glob, grep]'
-  [plan-writer]='[file_read, file_write, file_edit_search_replace, glob, grep]'
 )
 declare -A expected_undeferred=(
   [implementer]='[file_read, file_write, file_edit_search_replace, glob, grep, shell_exec]'
   [reviewer]='[file_read, glob, grep]'
   [validator]='[file_read, glob, grep, shell_exec, file_write]'
   [researcher]='[grep, glob, web_search, web_fetch]'
-  [plan-reviewer]='[file_read, glob, grep]'
-  [plan-writer]='[file_read, file_write, file_edit_search_replace, glob, grep]'
 )
 declare -A expected_required=(
   [implementer]='[status, summary]'
   [reviewer]='[verdict, summary]'
   [validator]='[verdict, summary]'
   [researcher]='[summary, files, sources]'
-  [plan-reviewer]='[verdict, summary, report_file]'
-  [plan-writer]='[status, summary, plan_file, files_considered, open_questions]'
 )
 declare -A expected_enum_fields=(
   [implementer]='status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT'
   [reviewer]='verdict=approved,needs_fixes spec_compliance=compliant,issues_found'
   [validator]='verdict=pass,fail,partial'
-  [plan-reviewer]='verdict=approved,needs_fixes'
-  [plan-writer]='status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT'
 )
 declare -A expected_properties=(
   [implementer]='commits concerns report_file status summary test_summary'
   [reviewer]='report_file spec_compliance summary verdict'
   [validator]='report_file summary verdict'
   [researcher]='files sources summary'
-  [plan-reviewer]='report_file summary verdict'
-  [plan-writer]='files_considered open_questions plan_file status summary'
 )
 
 assert_contract() {
@@ -89,13 +79,18 @@ validate_persona_contracts() {
 
   assert_contract persona_implementer_orient_red_green_verify_report "$implementer" \
     'Orient → RED/GREEN → Verify → Report'
+  assert_contract persona_implementer_path_dispatch "$implementer" \
+    'The dispatch supplies paths to the manifest, task brief, and report file.'
   assert_contract persona_implementer_targeted_exploration_then_needs_context "$implementer" \
     'Start with the named files and their direct dependencies.' \
     'Before any out-of-scope read, state one unresolved question and perform one targeted lookup.' \
-    'After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT`.'
+    'After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT` rather than guessing.'
   assert_contract persona_implementer_self_reviews_changed_hunks_only "$implementer" \
     'Self-review only the files and hunks you changed.' \
     'Never read the reviewer package.'
+  assert_contract persona_reviewer_path_dispatch "$reviewer" \
+    'The dispatch supplies paths to the review index, task brief, diff shards, and' \
+    'report file.'
   assert_contract persona_reviewer_has_four_exact_modes "$reviewer" \
     'The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integration`, or `final-incremental-rereview`.'
   [[ "$(grep -oE '`(initial-task|incremental-rereview|final-integration|final-incremental-rereview)`' "$reviewer" | sort -u | wc -l)" == 4 ]] || { echo 'persona_reviewer_has_four_exact_modes: expected exactly four unique mode names' >&2; CONTRACT_FAILURES=1; }
@@ -119,7 +114,7 @@ validate_persona_contracts() {
     'Read the entire repository before starting' \
     'Self-review the reviewer package'
   assert_absent persona_negative_stale_or_contradictory_wording "$reviewer" \
-    'task-scoped or whole-branch' \
+    'Review the entire repository before starting' \
     'Read the diff file once' \
     'do not re-derive it'
   return "$CONTRACT_FAILURES"
