@@ -60,7 +60,7 @@ assert_outcome "$RUN_OUT" allow
 payload=$(jq '.input.command="git push"' <<<"$shell_payload")
 run_adapter "$payload" hooks/no-remote-writes.sh shell
 assert_outcome "$RUN_OUT" deny
-jq -e '.reason | contains("git push")' <<<"$RUN_OUT" >/dev/null
+jq -e '. == {outcome:"deny",reason:"git push is blocked. Ask the user to push."}' <<<"$RUN_OUT" >/dev/null || fail "denial was not exact or input was rewritten: $RUN_OUT"
 
 payload=$(jq '.input.command="rm -rf /"' <<<"$shell_payload")
 run_adapter "$payload" bash-guard/hook.sh shell
@@ -240,7 +240,7 @@ for bad_input in \
 done
 
 # Normative top-level scanner boundaries and malformed patterns.
-for pattern in 'a|b|c|d|e' '(a|b)|c' 'a\|b|c' '[a|b]|c'; do
+for pattern in 'a|b|c|d|e' '(a|b)|c' 'a\|b|c' 'a\|b|c|d|e|f' '[a|b]|c'; do
   payload=$(jq --arg p "$pattern" '.input.pattern=$p | .input.max_results=20' <<<"$grep_payload")
   run_adapter "$payload" grep-guard/hook.sh grep
   assert_outcome "$RUN_OUT" allow
