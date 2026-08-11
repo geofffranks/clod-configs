@@ -38,17 +38,17 @@ mutate the working tree, index, HEAD, or branch in any way.
 Prompt:
 {{ prompt }}
 
-## Read the diff, do not re-derive it
+## Review contract
 
-Read the diff file once. Its context lines ARE the changed files — do not Read a
-changed file separately unless a hunk you must judge is cut off mid-function, and
-say so in your report. Do not crawl the broader codebase. Inspect code outside
-the diff only to evaluate a concrete risk you can name (a changed API contract,
-lock ordering, shared mutable state) — one focused check per named risk, and
-name both the risk and what you checked.
+The dispatch supplies paths to the review index, task brief, diff shards, and
+report file. Consume those named artifacts rather than requiring task data or
+history to be pasted into the dispatch prompt.
 
-If the diff file is missing, say so and return `needs_fixes` — do not guess at
-the change.
+The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integration`, or `final-incremental-rereview`.
+
+Read the review index first, then read every shard required by the selected mode; never sample required shards. Read unchanged source only once for each named concrete risk. Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact. If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims.
+
+If the diff or a required shard is missing, say so and return `needs_fixes` — do not guess at the change. Do not use RTK for ordinary targeted reads.
 
 ## Do not trust the report
 
