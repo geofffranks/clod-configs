@@ -13,7 +13,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ---- base system packages (Homebrew + git need curl/git/procps/file/build tools) ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential ca-certificates curl file git locales procps sudo tmux time \
-      unzip zip rsync dnsutils poppler-utils mupdf-tools qpdf libegl1 libdouble-conversion3 \
+      unzip zip rsync dnsutils poppler-utils mupdf-tools qpdf libegl1 libdouble-conversion3 libxkbcommon0 libxkbcommon-x11-0 libxcb-xinerama0 libxcb-cursor0 libgl1 libegl1 libopengl0 \
+      libdbus-1-3 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libsm6 libice6\
     && localedef -i en_US -f UTF-8 en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
