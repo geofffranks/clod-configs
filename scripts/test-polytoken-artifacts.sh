@@ -32,7 +32,7 @@ AGENTS="$ROOT/polytoken/AGENTS.md"
 # Exactly eight safe hook entries, every name unique, with no skill mapping.
 expected='["bash-guard","branch-guard","container-awareness","git-safe","grep-guard","no-remote-writes","read-once","read-once-reset"]'
 jq -e --argjson expected "$expected" 'type=="array" and length==8 and ([.[].name]|sort)==$expected and ([.[].name]|length)==([.[].name]|unique|length)' \
-  "$HOOKS" >/dev/null || fail "hooks.json must contain exactly the seven safe unique hooks"
+  "$HOOKS" >/dev/null || fail "hooks.json must contain exactly the eight safe unique hooks"
 jq -e 'all(.[]; .name!="skill-once" and .name!="skill-once-reset" and (.matcher // "")!="skill")' "$HOOKS" >/dev/null \
   || fail "Polytoken hooks must omit skill-once registrations"
 ! grep -q 'compat/skill-once' "$HOOKS" || fail "hooks.json must not reference compat/skill-once"

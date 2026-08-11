@@ -197,16 +197,38 @@ run_adapter "$compact_payload" hooks/compact-output.sh compact POLYTOKEN_CANONIC
 assert_outcome "$RUN_OUT" error
 jq -e '.message | contains("unexpected canonical output")' <<<"$RUN_OUT" >/dev/null
 
-# C2 RED: grep guard and adapter mapping are not yet present. These assertions pin
-# the exact canonical payload, schema rejection, and deterministic guard policy.
+# C2: exact Grep canonical payload, schema rejection, and deterministic guard policy.
 grep_payload=$(jq -nc '{event:"pre_tool_use",matcher_subject:"Grep",tool_name:"Grep",prompt_id:"p",call_id:"c",input:{pattern:"a|b",path:["."],include:"*.sh",context_lines:0,max_results:20,respect_ignore_files:true,include_hidden:false,unknown:"discard"}}')
 run_adapter "$grep_payload" grep-guard/hook.sh grep
 assert_outcome "$RUN_OUT" allow
 jq -e '.input // empty' <<<"$RUN_OUT" >/dev/null 2>&1 && fail "adapter leaked input" || true
 
+# The adapter emits the exact canonical Grep contract: tool name, array and
+# string paths, preserved false/zero optionals, omitted absent optionals, and
+# discarded unknown fields.
+run_adapter "$grep_payload" hooks/capture.sh grep POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
+assert_outcome "$RUN_OUT" allow
+jq -e '.hook_event_name == "PreToolUse" and .session_id == "fallback-session" and .tool_name == "Grep" and .tool_input == {pattern:"a|b",path:["."],include:"*.sh",context_lines:0,max_results:20,respect_ignore_files:true,include_hidden:false} and (has("unknown") | not)' "$TMP/captured" >/dev/null
+string_grep_payload=$(jq '.input.path="." | del(.input.include) | .input.context_lines=0 | .input.respect_ignore_files=false | .input.include_hidden=false | .input.unknown="discard"' <<<"$grep_payload")
+run_adapter "$string_grep_payload" hooks/capture.sh grep POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
+assert_outcome "$RUN_OUT" allow
+jq -e '.hook_event_name == "PreToolUse" and .session_id == "fallback-session" and .tool_name == "Grep" and .tool_input == {pattern:"a|b",path:".",context_lines:0,max_results:20,respect_ignore_files:false,include_hidden:false} and (has("agent_id") | not) and (has("subagent_id") | not) and (has("include") | not) and (has("unknown") | not)' "$TMP/captured" >/dev/null
+
 run_adapter '{"input":{"pattern":"x","path":".","max_results":21}}' grep-guard/hook.sh grep
 assert_outcome "$RUN_OUT" deny
-jq -e '.reason | contains("max_results") and contains("rtk grep")' <<<"$RUN_OUT" >/dev/null
+jq -e '.reason | contains("max_results") and contains("rtk grep") and contains("Input was not rewritten")' <<<"$RUN_OUT" >/dev/null
+
+# Missing max_results is malformed at the adapter boundary, while the
+# canonical guard itself deterministically denies without rewriting input.
+missing_max='{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Grep","tool_input":{"pattern":"x","path":"."}}'
+set +e
+canonical_missing=$(printf '%s' "$missing_max" | bash "$ROOT/home/grep-guard/hook.sh")
+canonical_missing_rc=$?
+set -e
+test "$canonical_missing_rc" -eq 0 || fail "canonical missing-max invocation exited $canonical_missing_rc"
+assert_one_json "$canonical_missing"
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("max_results") and contains("Input was not rewritten"))' <<<"$canonical_missing" >/dev/null
+expect_error '{"input":{"pattern":"x","path":"."}}' grep-guard/hook.sh grep "malformed Polytoken input"
 
 for bad_input in \
   '{"pattern":"x","path":".","context_lines":-1,"max_results":1}' \
@@ -218,7 +240,7 @@ for bad_input in \
 done
 
 # Normative top-level scanner boundaries and malformed patterns.
-for pattern in 'a|b|c|d|e' '(a|b)|c' 'a\\|b|c' '[a|b]|c'; do
+for pattern in 'a|b|c|d|e' '(a|b)|c' 'a\|b|c' '[a|b]|c'; do
   payload=$(jq --arg p "$pattern" '.input.pattern=$p | .input.max_results=20' <<<"$grep_payload")
   run_adapter "$payload" grep-guard/hook.sh grep
   assert_outcome "$RUN_OUT" allow
