@@ -197,4 +197,37 @@ run_adapter "$compact_payload" hooks/compact-output.sh compact POLYTOKEN_CANONIC
 assert_outcome "$RUN_OUT" error
 jq -e '.message | contains("unexpected canonical output")' <<<"$RUN_OUT" >/dev/null
 
+# C2 RED: grep guard and adapter mapping are not yet present. These assertions pin
+# the exact canonical payload, schema rejection, and deterministic guard policy.
+grep_payload=$(jq -nc '{event:"pre_tool_use",matcher_subject:"Grep",tool_name:"Grep",prompt_id:"p",call_id:"c",input:{pattern:"a|b",path:["."],include:"*.sh",context_lines:0,max_results:20,respect_ignore_files:true,include_hidden:false,unknown:"discard"}}')
+run_adapter "$grep_payload" grep-guard/hook.sh grep
+assert_outcome "$RUN_OUT" allow
+jq -e '.input // empty' <<<"$RUN_OUT" >/dev/null 2>&1 && fail "adapter leaked input" || true
+
+run_adapter '{"input":{"pattern":"x","path":".","max_results":21}}' grep-guard/hook.sh grep
+assert_outcome "$RUN_OUT" deny
+jq -e '.reason | contains("max_results") and contains("rtk grep")' <<<"$RUN_OUT" >/dev/null
+
+for bad_input in \
+  '{"pattern":"x","path":".","context_lines":-1,"max_results":1}' \
+  '{"pattern":7,"path":".","max_results":1}' \
+  '{"pattern":"x","path":{},"max_results":1}' \
+  '{"pattern":"x","path":".","max_results":1,"include":false}'; do
+  bad=$(jq -nc --argjson i "$bad_input" '{event:"pre_tool_use",matcher_subject:"Grep",tool_name:"Grep",input:$i}')
+  expect_error "$bad" grep-guard/hook.sh grep "malformed Polytoken input"
+done
+
+# Normative top-level scanner boundaries and malformed patterns.
+for pattern in 'a|b|c|d|e' '(a|b)|c' 'a\\|b|c' '[a|b]|c'; do
+  payload=$(jq --arg p "$pattern" '.input.pattern=$p | .input.max_results=20' <<<"$grep_payload")
+  run_adapter "$payload" grep-guard/hook.sh grep
+  assert_outcome "$RUN_OUT" allow
+ done
+for pattern in 'a|b|c|d|e|f' '(a|b|c' '[a|b'; do
+  payload=$(jq --arg p "$pattern" '.input.pattern=$p | .input.max_results=20' <<<"$grep_payload")
+  run_adapter "$payload" grep-guard/hook.sh grep
+  assert_outcome "$RUN_OUT" deny
+  jq -e '.reason | contains("grep-guard")' <<<"$RUN_OUT" >/dev/null
+ done
+
 printf 'polytoken hook adapter: PASS\n'

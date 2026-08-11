@@ -1,5 +1,13 @@
 [
   {
+    "name": "grep-guard",
+    "event": "pre_tool_use",
+    "matcher": "Grep",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" grep-guard/hook.sh grep"
+    }
+  },
+  {
     "name": "bash-guard",
     "event": "pre_tool_use",
     "matcher": "shell_exec",

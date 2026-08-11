@@ -41,16 +41,16 @@ for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh; do
 done
 for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh \
          compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once \
-         compat/hooks/no-remote-writes.sh; do
+         compat/grep-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
 expected_subagents="$(printf '%s\n' implementer.md plan-reviewer.md plan-writer.md researcher.md reviewer.md validator.md | sort)"
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "installed exactly the six shipped subagents" || no "installed exactly the six shipped subagents"
+  && ok "installed exactly the shipped subagents" || no "installed exactly the shipped subagents"
 [ -x "$D/hooks/adapter.sh" ] && ok "adapter executable" || no "adapter executable"
-for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/hooks/no-remote-writes.sh; do
+for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/grep-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -x "$D/$x" ] && ok "executable: $x" || no "executable: $x"
 done
 for f in statusline.sh hooks/agent-state.sh agent-join agent-join/hook.sh; do
@@ -83,8 +83,8 @@ D="$(valid_base)"
 printf '%s\n' '[ {"name":"my-custom","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[0].name' "$D/hooks.json")" = "my-custom" ] && ok "custom hook order preserved (first)" || no "custom hook order preserved"
-# P3: one custom plus seven recommended
-ajq "$D/hooks.json" 'length == 8' "7 recommended + 1 custom"
+# P3: one custom plus eight recommended
+ajq "$D/hooks.json" 'length == 9' "8 recommended + 1 custom"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -130,9 +130,9 @@ printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_ex
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "true" ] \
   && ok "no-TTY preserved conflict handler" || no "no-TTY preserved conflict handler"
-# P6: bash-guard conflicts, leaving six additive recommended hooks
-[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "6" ] \
-  && ok "no-TTY applied 6 additive hooks" || no "no-TTY applied additive hooks"
+# P6: bash-guard conflicts, leaving seven additive recommended hooks
+[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "7" ] \
+  && ok "no-TTY applied 7 additive hooks" || no "no-TTY applied additive hooks"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
@@ -245,8 +245,8 @@ printf '%s\n' '[ {"name":"superpowers-session-start","event":"session_start","ha
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
 ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
-# P15: two existing plus seven recommended
-ajq "$D/hooks.json" 'length == 9' "2 existing + 7 recommended"
+# P15: two existing plus eight recommended
+ajq "$D/hooks.json" 'length == 10' "2 existing + 8 recommended"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -255,7 +255,7 @@ sc "P16 fresh install omits compatibility skill scripts"
 D="$(mktemp -d)"; run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ ! -e "$D/compat/skill-once/hook.sh" ] && ok "fresh hook script omitted" || no "fresh hook script omitted"
 [ ! -e "$D/compat/skill-once/compact.sh" ] && ok "fresh compact script omitted" || no "fresh compact script omitted"
-ajq "$D/hooks.json" 'length==7 and ([.[].name]|index("skill-once")==null) and ([.[].name]|index("skill-once-reset")==null)' "fresh hooks contain seven safe names"
+ajq "$D/hooks.json" 'length==8 and ([.[].name]|index("skill-once")==null) and ([.[].name]|index("skill-once-reset")==null)' "fresh hooks contain eight safe names"
 rm -rf "$D"
 
 sc "P17 exact legacy entries removed independently with one backup"
