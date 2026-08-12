@@ -46,4 +46,6 @@ jq -e '
   and .matcher_subject == "post_compaction"
 ' "$FIX/post-compaction.json" >/dev/null
 
+# C2 RED: canonical grep fixture contract.
+jq -e '.input.pattern == "a|b" and .input.path == ["."] and .input.max_results == 20' "$FIX/pre-tool-grep.json" >/dev/null
 printf 'polytoken contract fixtures: PASS\n'

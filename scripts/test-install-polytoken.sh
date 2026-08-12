@@ -41,18 +41,33 @@ for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh; do
 done
 for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh \
          compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once \
-         compat/hooks/no-remote-writes.sh; do
+         compat/grep-guard/hook.sh compat/large-read-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-expected_subagents="$(printf '%s\n' implementer.md plan-reviewer.md plan-writer.md researcher.md reviewer.md validator.md | sort)"
+expected_subagents="$(printf '%s\n' implementer.md researcher.md reviewer.md validator.md | sort)"
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "installed exactly the six shipped subagents" || no "installed exactly the six shipped subagents"
+  && ok "installed exactly the shipped subagents" || no "installed exactly the shipped subagents"
 [ -x "$D/hooks/adapter.sh" ] && ok "adapter executable" || no "adapter executable"
-for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/hooks/no-remote-writes.sh; do
+for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/grep-guard/hook.sh compat/large-read-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -x "$D/$x" ] && ok "executable: $x" || no "executable: $x"
 done
+cmp -s "$REPO/home/large-read-guard/hook.sh" "$D/compat/large-read-guard/hook.sh" \
+  && ok "installed large-read guard matches source" || no "installed large-read guard matches source"
+[ "$(sha256sum "$REPO/home/large-read-guard/hook.sh" | awk '{print $1}')" = "$(sha256sum "$D/compat/large-read-guard/hook.sh" | awk '{print $1}')" ] \
+  && ok "installed large-read guard checksum matches source" || no "installed large-read guard checksum matches source"
+large_payload=$(jq -nc --arg p "$D/compat/large-read-guard/hook.sh" '{tool_name:"Read",tool_input:{file_path:$p,max_bytes:1}}')
+large_out=$(printf '%s' "$large_payload" | POLYTOKEN_CWD="$D" bash "$D/compat/large-read-guard/hook.sh")
+[ -z "$large_out" ] && ok "installed large-read guard allows bounded read" || no "installed large-read guard behavior"
+large_file="$D/compat/large-read-guard/oversized.diff"; python3 - "$large_file" <<'PY'
+import sys
+open(sys.argv[1], 'wb').write(b'x' * 51201)
+PY
+large_payload=$(jq -nc --arg p "$large_file" '{tool_name:"Read",tool_input:{file_path:$p}}')
+large_out=$(printf '%s' "$large_payload" | POLYTOKEN_CWD="$D" bash "$D/compat/large-read-guard/hook.sh")
+jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$large_out" >/dev/null \
+  && ok "installed large-read guard denies oversized unbounded read" || no "installed large-read guard denial behavior"
 for f in statusline.sh hooks/agent-state.sh agent-join agent-join/hook.sh; do
   [ ! -e "$D/$f" ] && ok "omitted: $f" || no "omitted: $f"
 done
@@ -83,8 +98,8 @@ D="$(valid_base)"
 printf '%s\n' '[ {"name":"my-custom","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[0].name' "$D/hooks.json")" = "my-custom" ] && ok "custom hook order preserved (first)" || no "custom hook order preserved"
-# P3: one custom plus seven recommended
-ajq "$D/hooks.json" 'length == 8' "7 recommended + 1 custom"
+# P3: one custom plus nine recommended
+ajq "$D/hooks.json" 'length == 10' "9 recommended + 1 custom"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -130,9 +145,9 @@ printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_ex
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "true" ] \
   && ok "no-TTY preserved conflict handler" || no "no-TTY preserved conflict handler"
-# P6: bash-guard conflicts, leaving six additive recommended hooks
-[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "6" ] \
-  && ok "no-TTY applied 6 additive hooks" || no "no-TTY applied additive hooks"
+# P6: bash-guard conflicts, leaving eight additive recommended hooks
+[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "8" ] \
+  && ok "no-TTY applied 8 additive hooks" || no "no-TTY applied additive hooks"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
@@ -245,8 +260,8 @@ printf '%s\n' '[ {"name":"superpowers-session-start","event":"session_start","ha
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
 ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
-# P15: two existing plus seven recommended
-ajq "$D/hooks.json" 'length == 9' "2 existing + 7 recommended"
+# P15: two existing plus nine recommended
+ajq "$D/hooks.json" 'length == 11' "2 existing + 9 recommended"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -255,7 +270,7 @@ sc "P16 fresh install omits compatibility skill scripts"
 D="$(mktemp -d)"; run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ ! -e "$D/compat/skill-once/hook.sh" ] && ok "fresh hook script omitted" || no "fresh hook script omitted"
 [ ! -e "$D/compat/skill-once/compact.sh" ] && ok "fresh compact script omitted" || no "fresh compact script omitted"
-ajq "$D/hooks.json" 'length==7 and ([.[].name]|index("skill-once")==null) and ([.[].name]|index("skill-once-reset")==null)' "fresh hooks contain seven safe names"
+ajq "$D/hooks.json" 'length==9 and ([.[].name]|index("skill-once")==null) and ([.[].name]|index("skill-once-reset")==null)' "fresh hooks contain nine safe names"
 rm -rf "$D"
 
 sc "P17 exact legacy entries removed independently with one backup"

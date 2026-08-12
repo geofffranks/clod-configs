@@ -1,5 +1,13 @@
 [
   {
+    "name": "grep-guard",
+    "event": "pre_tool_use",
+    "matcher": "Grep",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" grep-guard/hook.sh grep"
+    }
+  },
+  {
     "name": "git-safe",
     "event": "pre_tool_use",
     "matcher": "shell_exec",
@@ -13,6 +21,14 @@
     "matcher": "file_read",
     "handler": {
       "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" read-once/hook.sh read"
+    }
+  },
+  {
+    "name": "large-read-guard",
+    "event": "pre_tool_use",
+    "matcher": "file_read",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" large-read-guard/hook.sh read"
     }
   },
   {

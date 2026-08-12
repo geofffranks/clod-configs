@@ -5,14 +5,12 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 command -v yq >/dev/null || { echo "yq is required" >&2; exit 1; }
 
-files=(implementer reviewer validator researcher plan-reviewer plan-writer)
+files=(implementer reviewer validator researcher)
 declare -A expected_model=(
-  [implementer]='<polytoken-ref type="model" name="codex/gpt-5.6-luna(medium)"/>'
-  [reviewer]='<polytoken-ref type="model" name="codex/gpt-5.6-sol(medium)"/>'
-  [validator]='<polytoken-ref type="model" name="zai/glm-5.2(high)"/>'
-  [researcher]='<polytoken-ref type="model" name="codex/gpt-5.6-sol(medium)"/>'
-  [plan-reviewer]='<polytoken-ref type="model" name="zai/glm-5.2(high)"/>'
-  [plan-writer]='<polytoken-ref type="model" name="codex/gpt-5.6-luna(medium)"/>'
+  [implementer]='codex/gpt-5.6-luna'
+  [reviewer]='zai/glm-5.2'
+  [validator]='zai/glm-5.2'
+  [researcher]='minime/google_gemma-4-26b-a4b-it'
 )
 declare -A expected_tools=(
   [implementer]='[file_read, file_write, file_edit_search_replace, glob, grep, shell_exec]'
@@ -53,6 +51,88 @@ declare -A expected_properties=(
   [plan-reviewer]='report_file summary verdict'
   [plan-writer]='files_considered open_questions plan_file status summary'
 )
+
+assert_contract() {
+  label="$1"
+  path="$2"
+  shift 2
+  passed=true
+  for required_text in "$@"; do
+    if ! grep -Fq -- "$required_text" "$path"; then
+      echo "$label: missing contract: $required_text" >&2
+      CONTRACT_FAILURES=1
+      passed=false
+    fi
+  done
+  [[ "$passed" == false ]] || echo "$label"
+}
+
+assert_absent() {
+  label="$1"
+  path="$2"
+  shift 2
+  passed=true
+  for stale_text in "$@"; do
+    if grep -Fq -- "$stale_text" "$path"; then
+      echo "$label: stale or contradictory wording: $stale_text" >&2
+      CONTRACT_FAILURES=1
+      passed=false
+    fi
+  done
+  [[ "$passed" == false ]] || echo "$label"
+}
+
+validate_persona_contracts() {
+  implementer=polytoken/subagents/implementer.md
+  reviewer=polytoken/subagents/reviewer.md
+  CONTRACT_FAILURES=0
+
+  assert_contract persona_implementer_orient_red_green_verify_report "$implementer" \
+    'Orient → RED/GREEN → Verify → Report'
+  assert_contract persona_implementer_targeted_exploration_then_needs_context "$implementer" \
+    'Start with the named files and their direct dependencies.' \
+    'Before any out-of-scope read, state one unresolved question and perform one targeted lookup.' \
+    'After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT`.'
+  assert_contract persona_implementer_self_reviews_changed_hunks_only "$implementer" \
+    'Self-review only the files and hunks you changed.' \
+    'Never read the reviewer package.'
+  assert_contract persona_reviewer_has_four_exact_modes "$reviewer" \
+    'The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integration`, or `final-incremental-rereview`.'
+  [[ "$(grep -oE '`(initial-task|incremental-rereview|final-integration|final-incremental-rereview)`' "$reviewer" | sort -u | wc -l)" == 4 ]] || { echo 'persona_reviewer_has_four_exact_modes: expected exactly four unique mode names' >&2; CONTRACT_FAILURES=1; }
+  assert_contract persona_reviewer_reads_index_and_all_mode_required_shards "$reviewer" \
+    'Read the review index first, then read every shard required by the selected mode; never sample required shards.'
+  assert_contract persona_reviewer_limits_unchanged_source_to_named_risk "$reviewer" \
+    'Read unchanged source only once for each named concrete risk.'
+  assert_contract persona_bounded_grep_and_ranged_read "$implementer" \
+    'Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact.'
+  assert_contract persona_bounded_grep_and_ranged_read "$reviewer" \
+    'Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact.'
+  assert_contract persona_recovers_from_oversized_result "$implementer" \
+    'If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims.'
+  assert_contract persona_recovers_from_oversized_result "$reviewer" \
+    'If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims.'
+  assert_contract persona_reports_concise_test_evidence "$implementer" \
+    'For test evidence, report the command, status, counts or summary, warnings, and only the relevant failure excerpt; put raw output in a named path.'
+  assert_contract persona_uses_rtk_only_for_broad_text_and_supported_commands "$implementer" \
+    'Use RTK only for broader plain-text searches and supported test or build commands, never for ordinary targeted reads.'
+  assert_absent persona_negative_stale_or_contradictory_wording "$implementer" \
+    'Read the entire repository before starting' \
+    'Self-review the reviewer package'
+  assert_absent persona_negative_stale_or_contradictory_wording "$reviewer" \
+    'task-scoped or whole-branch' \
+    'Read the diff file once' \
+    'do not re-derive it'
+  return "$CONTRACT_FAILURES"
+}
+
+validate_implementer_model_contract() {
+  frontmatter=$(mktemp)
+  trap 'rm -f "$frontmatter"' RETURN
+  sed -n '2,/^---$/p' polytoken/subagents/implementer.md | sed '$d' > "$frontmatter"
+  model=$(yq -r '.polytoken.model' "$frontmatter")
+  [[ "$model" == 'codex/gpt-5.6-luna' ]] || { echo "focused_canonical_implementer_model_representation: expected raw provider/model source representation, got $model" >&2; return 1; }
+  echo focused_canonical_implementer_model_representation
+}
 
 count_model_nodes() {
   FRONTMATTER="$1" python3 - <<'PY'
@@ -121,11 +201,7 @@ validate_persona() {
   [[ "$MODEL_NODES" == 1 ]] || { echo "$persona: expected exactly one structural polytoken.model node, got $MODEL_NODES" >&2; return 1; }
   model=$(yq -r '.polytoken.model' "$frontmatter")
   [[ "$model" == "${expected_model[$persona]}" ]] || { echo "$persona: unexpected model: $model" >&2; exit 1; }
-  MODEL="$model" python3 - <<'PY'
-import os, re
-pattern = r'<polytoken-ref type="model" name="[a-z0-9._-]+/[a-z0-9._-]+(?:\([a-z0-9._-]+\))?"/>'
-assert re.fullmatch(pattern, os.environ["MODEL"]), os.environ["MODEL"]
-PY
+  [[ "$model" =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] || { echo "$persona: model must use canonical raw provider/model source representation" >&2; exit 1; }
   tools=$(yq -o=json -I=0 '.polytoken.tools' "$frontmatter")
   undeferred=$(yq -o=json -I=0 '.polytoken.undeferred_tools' "$frontmatter")
   expected_tools_json=$(printf '%s\n' "${expected_tools[$persona]}" | yq -o=json -I=0 '.')
@@ -174,6 +250,17 @@ PY
   echo "$persona contract verified"
 }
 
+if [[ "${1:-}" == --model-contract ]]; then
+  validate_implementer_model_contract
+  validate_persona implementer polytoken/subagents/implementer.md
+  exit 0
+fi
+
+if [[ "${1:-}" == --persona-contracts ]]; then
+  validate_persona_contracts
+  exit 0
+fi
+
 if [[ "${1:-}" == --mutation-tests ]]; then
   fixture_dir=$(mktemp -d)
   trap 'rm -rf "$fixture_dir"' EXIT
@@ -206,11 +293,13 @@ if [[ "${1:-}" == --mutation-tests ]]; then
   exit 0
 fi
 
+validate_implementer_model_contract
+validate_persona_contracts
 for persona in "${files[@]}"; do
   validate_persona "$persona" "polytoken/subagents/$persona.md"
 done
 found=$(printf '%s\n' polytoken/subagents/*.md | sed 's#polytoken/subagents/##;s#\.md$##' | sort)
 expected=$(printf '%s\n' "${files[@]}" | sort)
 [[ "$found" == "$expected" ]] || { echo "persona allowlist mismatch" >&2; exit 1; }
-echo "six model assignments verified"
+echo "four model assignments verified"
 echo "all persona contract assertions passed"

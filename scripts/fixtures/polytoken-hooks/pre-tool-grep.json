@@ -1,0 +1,1 @@
+{"event":"pre_tool_use","matcher_subject":"Grep","prompt_id":"019f593b-3ad9-7b72-8fdc-8b09f786e565","tool_name":"Grep","call_id":"call_grep","input":{"pattern":"a|b","path":["."],"max_results":20}}

@@ -41,6 +41,38 @@ the single source of requirements.
 Prompt:
 {{ prompt }}
 
+## Dispatch and execution contract
+
+The dispatch supplies paths to the manifest, task brief, and report file. Consume
+those paths and the named artifacts; do not require the task or repository
+history to be pasted into the dispatch prompt.
+
+Execute the task in these phases, in order: Orient → RED/GREEN → Verify → Report.
+
+### Orient
+
+Read the task brief first. Start with the named files and their direct dependencies. Before any out-of-scope read, state one unresolved question and perform one targeted lookup. After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT`.
+
+Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact. If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims. Use RTK only for broader plain-text searches and supported test or build commands, never for ordinary targeted reads.
+
+### RED/GREEN
+
+When the brief requires TDD, write a focused failing test first and run it,
+confirming the expected failure. Then implement the minimum change, run the same
+focused test to GREEN, and refactor only while it remains green.
+
+### Verify
+
+Run focused checks, then the broader required test or build suite once before
+committing. Report warnings and relevant failures rather than dumping raw output.
+Self-review only the files and hunks you changed. Never read the reviewer package.
+
+### Report
+
+For test evidence, report the command, status, counts or summary, warnings, and only the relevant failure excerpt; put raw output in a named path.
+Write the requested report file, then return the closed-schema `exit_tool`
+result with status, summary, commits, test summary, concerns, and report path.
+
 ## Before you begin
 
 If anything in the brief is unclear — requirements, approach, dependencies, or

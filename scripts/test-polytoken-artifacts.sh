@@ -29,10 +29,10 @@ AGENTS="$ROOT/polytoken/AGENTS.md"
 
 # --- structural assertions (mirrors task-4-brief.md Step 1) ---
 
-# Exactly seven safe hook entries, every name unique, with no skill mapping.
-expected='["bash-guard","branch-guard","container-awareness","git-safe","no-remote-writes","read-once","read-once-reset"]'
-jq -e --argjson expected "$expected" 'type=="array" and length==7 and ([.[].name]|sort)==$expected and ([.[].name]|length)==([.[].name]|unique|length)' \
-  "$HOOKS" >/dev/null || fail "hooks.json must contain exactly the seven safe unique hooks"
+# Exactly nine safe hook entries, every name unique, with no skill mapping.
+expected='["bash-guard","branch-guard","container-awareness","git-safe","grep-guard","large-read-guard","no-remote-writes","read-once","read-once-reset"]'
+jq -e --argjson expected "$expected" 'type=="array" and length==9 and ([.[].name]|sort)==$expected and ([.[].name]|length)==([.[].name]|unique|length)' \
+  "$HOOKS" >/dev/null || fail "hooks.json must contain exactly the nine safe unique hooks"
 jq -e 'all(.[]; .name!="skill-once" and .name!="skill-once-reset" and (.matcher // "")!="skill")' "$HOOKS" >/dev/null \
   || fail "Polytoken hooks must omit skill-once registrations"
 ! grep -q 'compat/skill-once' "$HOOKS" || fail "hooks.json must not reference compat/skill-once"
@@ -100,11 +100,17 @@ chmod +x "$TMP/hooks/adapter.sh"
 
 # Canonical scripts live under compat/ at the same relative paths the adapter is
 # given. Mirror the home/ layout: bash-guard/, branch-guard/, git-safe/,
-# read-once/, hooks/.
+# read-once/, grep-guard/, hooks/.
 cp -R "$ROOT/home/bash-guard"   "$TMP/compat/bash-guard"
 cp -R "$ROOT/home/branch-guard" "$TMP/compat/branch-guard"
 cp -R "$ROOT/home/git-safe"     "$TMP/compat/git-safe"
 cp -R "$ROOT/home/read-once"    "$TMP/compat/read-once"
+cp -R "$ROOT/home/grep-guard"   "$TMP/compat/grep-guard"
+cp -R "$ROOT/home/large-read-guard" "$TMP/compat/large-read-guard"
+cmp -s "$ROOT/home/large-read-guard/hook.sh" "$TMP/compat/large-read-guard/hook.sh" \
+  || fail "installed fixture large-read guard differs from source"
+[ "$(sha256sum "$ROOT/home/large-read-guard/hook.sh" | awk '{print $1}')" = "$(sha256sum "$TMP/compat/large-read-guard/hook.sh" | awk '{print $1}')" ] \
+  || fail "installed fixture large-read guard checksum differs from source"
 mkdir -p "$TMP/compat/hooks"
 cp "$ROOT/home/hooks/no-remote-writes.sh" "$TMP/compat/hooks/no-remote-writes.sh"
 
