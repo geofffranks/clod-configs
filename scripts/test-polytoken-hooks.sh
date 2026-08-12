@@ -283,7 +283,12 @@ ln -s "$LARGE_READ_TMP/project/small.log" "$LARGE_READ_TMP/project/one.log"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/one.log")" = allow ] || fail "C3 one-hop symlink"
 ln -s "$LARGE_READ_TMP/project/one.log" "$LARGE_READ_TMP/project/two.log"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/two.log")" = allow ] || fail "C3 nested symlink fail-open"
-[ "$(large_read_decision "$LARGE_READ_TMP/project/../big.diff")" = allow ] || fail "C3 containment"
+python3 - "$LARGE_READ_TMP/big.diff" 51201 <<'PY'
+import sys
+open(sys.argv[1], 'wb').write(b'x' * int(sys.argv[2]))
+PY
+[ "$(large_read_decision "../big.diff")" = allow ] || fail "C3 containment traversal"
+[ -s "$LARGE_READ_TMP/big.diff" ] || fail "C3 containment fixture missing"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"max_bytes":1}')" = allow ] || fail "C3 max_bytes bound"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":0,"limit":1}')" = allow ] || fail "C3 offset/limit bound"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"max_bytes":0}')" = allow ] || fail "C3 malformed max_bytes"
@@ -309,11 +314,17 @@ if [ "$(id -u)" -ne 0 ]; then
   [ "$(large_read_decision "$LARGE_READ_TMP/project/unreadable.diff")" = allow ] || fail "C3 unreadable fail-open"
   chmod 600 "$LARGE_READ_TMP/project/unreadable.diff"
 fi
-# Exercise a real metadata race by replacing the file while the hook stats it.
+# Force a metadata race by replacing the file between the hook's two snapshots.
 cp "$LARGE_READ_TMP/project/big.diff" "$LARGE_READ_TMP/project/race.diff"
-(for _ in $(seq 1 20); do cp "$LARGE_READ_TMP/project/big.diff" "$LARGE_READ_TMP/project/race.diff"; done) &
-race_err=$(large_read_run "$LARGE_READ_TMP/project/race.diff" 2>&1 >/dev/null)
-wait || true
-[ -z "$race_err" ] || [ "$race_err" = "large-read-guard: metadata changed; allowing read" ] || fail "C3 race diagnostic: $race_err"
+race_stat="$LARGE_READ_TMP/race-stat"; mkdir -p "$race_stat"
+printf '%s\n' 0 > "$race_stat/count"
+cp "$LARGE_READ_TMP/project/big.diff" "$race_stat/replacement"
+printf '%s\n' '#!/usr/bin/env bash' 'set -eu' 'count=$(cat "$RACE_STAT_DIR/count")' 'printf "%s\n" $((count + 1)) > "$RACE_STAT_DIR/count"' 'result=$(/usr/bin/stat "$@")' 'if [ "$count" -eq 0 ]; then mv "$RACE_STAT_DIR/replacement" "$RACE_TARGET"; fi' 'printf "%s\n" "$result"' > "$race_stat/stat"
+chmod +x "$race_stat/stat"
+# The first stat reports the original inode, then the wrapper atomically swaps in a distinct inode.
+race_out=$(RACE_STAT_DIR="$race_stat" RACE_TARGET="$LARGE_READ_TMP/project/race.diff" PATH="$race_stat:$PATH" large_read_run "$LARGE_READ_TMP/project/race.diff" 2>"$race_stat/stderr")
+race_err=$(cat "$race_stat/stderr")
+[ -z "$race_out" ] || fail "C3 race emitted stdout: $race_out"
+[ "$race_err" = "large-read-guard: metadata changed; allowing read" ] || fail "C3 race diagnostic: $race_err"
 
 printf 'polytoken hook adapter: PASS\n'
