@@ -205,10 +205,10 @@ files.
   `rtk-rewrite.sh` does (`pre_tool_use` allows/denies only). The built-in `grep`
   tool remains available for structured searches (multiple roots, `include`,
   `context_lines`).
-- **Subagent hook probes are controller-only in this environment.** Direct
-  implementer and reviewer subagent probes did not expose ordinary pre-tool
-  hooks inside the spawned subagent sessions, so this package makes no claim
-  that those hooks execute there. The implementer/reviewer prompt contracts
+- **Subagent hook probes are unavailable in this environment.** The installed
+  controller rejected both implementer and reviewer probes before session
+  creation because those facets were unregistered, so ordinary subagent hook
+  execution could not be tested. The implementer/reviewer prompt contracts
   retain the bounded-search and ranged-read protections as the supported guard.
 
 ## Merge behavior
