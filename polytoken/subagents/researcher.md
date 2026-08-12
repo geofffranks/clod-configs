@@ -46,5 +46,19 @@ read or otherwise directly examined (and be empty when there are none). The
 `sources` array must list the external sources consulted (and be empty when
 there are none).
 
+## Context discipline — keep your context lean
+
+Every tool result stays in your context for the rest of this run. A single
+large result (50K+ chars) costs that much on every subsequent turn. Keep
+results small.
+
+- **Always set `max_results` on grep.** Use 20 or less. Never run an unbounded
+  grep — a single broad search can dump 200K+ chars into context.
+- **Use one pattern at a time.** Do not chain many alternations
+  (`foo|bar|baz|...`) — each match multiplies the result size. Search for
+  one thing, find it, then search for the next.
+- **Use `offset` and `limit` with `file_read`** for any file over ~500 lines.
+  Never read a large file in full when you need a specific function or section.
+
 Prompt:
 {{ prompt }}

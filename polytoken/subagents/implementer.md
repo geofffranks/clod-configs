@@ -92,6 +92,29 @@ While iterating, run the focused test for what you are changing; run the full
 suite once before committing, not after every edit. If you encounter something
 unexpected while working, ask questions rather than guessing.
 
+## Context discipline — keep your context lean
+
+Every tool result stays in your context for the rest of this run and is
+re-read on every subsequent turn. A single large result (50K+ tokens) costs
+that much on every turn for the rest of the run. Keep results small.
+
+- **Always set `max_results` on grep.** Use 20 or less. Never run an unbounded
+  grep — a single broad search can dump 200K+ chars into context.
+- **Prefer `rtk grep` via `shell_exec`** over the built-in `grep` tool for
+  content searches. RTK compresses output before it reaches you. Use the
+  built-in `grep` only when you need its structured features (multiple roots,
+  `include` filter, `context_lines`).
+- **Use one pattern at a time.** Do not chain many alternations
+  (`foo|bar|baz|qux|...`) — each match multiplies the result size. Search for
+  one thing, find it, then search for the next.
+- **Use `offset` and `limit` with `file_read`** for any file over ~500 lines.
+  Never read a large file in full when you need a specific function or section.
+- **Never read `.diff` files or generated output in full.** Read the specific
+  hunks or lines you need. These files can be 50K+ chars and are pure overhead
+  once you've seen the relevant part.
+- **Use `head`, `tail`, or `grep` in `shell_exec`** to extract only the
+  relevant portion of command output (test runs, build logs, etc.).
+
 ## TDD
 
 When the task requires TDD, follow RED-GREEN-REFACTOR:

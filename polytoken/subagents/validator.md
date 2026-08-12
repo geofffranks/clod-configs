@@ -67,6 +67,19 @@ repair.
 Run validation commands as given in the plan. If a command looks destructive or
 you are unsure it is safe, flag it and ask rather than running it blindly.
 
+## Context discipline — keep your context lean
+
+Every tool result stays in your context for the rest of this run. A single
+large result (50K+ chars) costs that much on every subsequent turn. Keep
+results small.
+
+- **Always set `max_results` on grep.** Use 20 or less. Never run an unbounded
+  grep.
+- **Use `head`, `tail`, or `grep` in `shell_exec`** to extract only the
+  relevant portion of command output (test runs, build logs, etc.). Full suite
+  output can be enormous — capture only the pass/fail summary and any failures.
+- **Use `offset` and `limit` with `file_read`** for any file over ~500 lines.
+
 ## Shell execution constraints
 
 This harness requires shell commands to be issued one at a time:
