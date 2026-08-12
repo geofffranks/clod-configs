@@ -106,6 +106,11 @@ cp -R "$ROOT/home/branch-guard" "$TMP/compat/branch-guard"
 cp -R "$ROOT/home/git-safe"     "$TMP/compat/git-safe"
 cp -R "$ROOT/home/read-once"    "$TMP/compat/read-once"
 cp -R "$ROOT/home/grep-guard"   "$TMP/compat/grep-guard"
+cp -R "$ROOT/home/large-read-guard" "$TMP/compat/large-read-guard"
+cmp -s "$ROOT/home/large-read-guard/hook.sh" "$TMP/compat/large-read-guard/hook.sh" \
+  || fail "installed fixture large-read guard differs from source"
+[ "$(sha256sum "$ROOT/home/large-read-guard/hook.sh" | awk '{print $1}')" = "$(sha256sum "$TMP/compat/large-read-guard/hook.sh" | awk '{print $1}')" ] \
+  || fail "installed fixture large-read guard checksum differs from source"
 mkdir -p "$TMP/compat/hooks"
 cp "$ROOT/home/hooks/no-remote-writes.sh" "$TMP/compat/hooks/no-remote-writes.sh"
 

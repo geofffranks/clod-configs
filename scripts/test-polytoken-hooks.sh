@@ -122,7 +122,11 @@ jq -e '.hook_event_name == "PreToolUse" and .session_id == "fallback-session" an
 payload=$(jq '.prompt_id="runtime-prompt-B" | .call_id="runtime-call-B" | .session_id="stdin-session" | .input.offset=4 | .input.limit=9' <<<"$read_payload")
 run_adapter "$payload" hooks/capture.sh read POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
 assert_outcome "$RUN_OUT" allow
-jq -e --arg p "$TMP/read-target.txt" '.session_id == "stdin-session" and .tool_name == "Read" and .tool_input == {file_path:$p,offset:4,limit:9} and (has("agent_id") | not)' "$TMP/captured" >/dev/null
+jq -e --arg p "$TMP/read-target.txt" '.session_id == "stdin-session" and .tool_name == "Read" and .tool_input == {file_path:$p,offset:4,limit:9,max_bytes:32000} and (has("agent_id") | not)' "$TMP/captured" >/dev/null || fail "read adapter capture mismatch: $(cat "$TMP/captured")"
+payload=$(jq '.input.max_bytes=17 | del(.input.offset,.input.limit)' <<<"$read_payload")
+run_adapter "$payload" hooks/capture.sh read POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
+assert_outcome "$RUN_OUT" allow
+jq -e --arg p "$TMP/read-target.txt" '.tool_input == {file_path:$p,max_bytes:17}' "$TMP/captured" >/dev/null
 run_adapter "$compact_payload" hooks/capture.sh compact POLYTOKEN_CANONICAL_ROOT="$TMP/canonical" CAPTURE="$TMP/captured"
 assert_outcome "$RUN_OUT" allow
 jq -e '.hook_event_name == "PostCompact" and .session_id == "fallback-session" and .tool_name == "" and .tool_input == {}' "$TMP/captured" >/dev/null
@@ -251,5 +255,65 @@ for pattern in 'a|b|c|d|e|f' '(a|b|c' '[a|b'; do
   assert_outcome "$RUN_OUT" deny
   jq -e '.reason | contains("grep-guard")' <<<"$RUN_OUT" >/dev/null
  done
+
+# C3 focused large-read metadata policy coverage.
+LARGE_READ_HOOK="$ROOT/home/large-read-guard/hook.sh"
+LARGE_READ_TMP="$TMP/large-read"; mkdir -p "$LARGE_READ_TMP/project"
+python3 - "$LARGE_READ_TMP/project/big.diff" 51200 <<'PY'
+import sys
+open(sys.argv[1], 'wb').write(b'x' * int(sys.argv[2]))
+PY
+large_read_run() {
+  local path=$1 extra='{}'
+  [ "$#" -gt 1 ] && extra=$2
+  jq -nc --arg p "$path" --argjson e "$extra" '{tool_name:"Read",tool_input:({file_path:$p} + $e)}' |
+    POLYTOKEN_CWD="$LARGE_READ_TMP/project" bash "$LARGE_READ_HOOK"
+}
+large_read_decision() { local out; if [ "$#" -gt 1 ]; then out=$(large_read_run "$1" "$2"); else out=$(large_read_run "$1"); fi; if [ -n "$out" ]; then jq -r '.hookSpecificOutput.permissionDecision // "allow"' <<<"$out"; else printf 'allow\n'; fi; }
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff")" = allow ] || fail "C3 51200 boundary"
+python3 - "$LARGE_READ_TMP/project/big.diff" 51201 <<'PY'
+import sys
+open(sys.argv[1], 'wb').write(b'x' * int(sys.argv[2]))
+PY
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff")" = deny ] || fail "C3 51201 boundary"
+cp "$LARGE_READ_TMP/project/big.diff" "$LARGE_READ_TMP/project/BIG.DIFF"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/BIG.DIFF")" = deny ] || fail "C3 case-insensitive suffix"
+printf x > "$LARGE_READ_TMP/project/small.log"
+ln -s "$LARGE_READ_TMP/project/small.log" "$LARGE_READ_TMP/project/one.log"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/one.log")" = allow ] || fail "C3 one-hop symlink"
+ln -s "$LARGE_READ_TMP/project/one.log" "$LARGE_READ_TMP/project/two.log"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/two.log")" = allow ] || fail "C3 nested symlink fail-open"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/../big.diff")" = allow ] || fail "C3 containment"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"max_bytes":1}')" = allow ] || fail "C3 max_bytes bound"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":0,"limit":1}')" = allow ] || fail "C3 offset/limit bound"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"max_bytes":0}')" = allow ] || fail "C3 malformed max_bytes"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":-1,"limit":1}')" = allow ] || fail "C3 malformed offset"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":0}')" = allow ] || fail "C3 malformed incomplete bounds"
+printf x > "$LARGE_READ_TMP/project/bounds.txt"
+python3 - "$LARGE_READ_TMP/project/bounds.txt" 256000 <<'PY'
+import sys
+open(sys.argv[1], 'wb').write(b'x' * int(sys.argv[2]))
+PY
+[ "$(large_read_decision "$LARGE_READ_TMP/project/bounds.txt")" = allow ] || fail "C3 256000 boundary"
+python3 - "$LARGE_READ_TMP/project/bounds.txt" 256001 <<'PY'
+import sys
+open(sys.argv[1], 'wb').write(b'x' * int(sys.argv[2]))
+PY
+[ "$(large_read_decision "$LARGE_READ_TMP/project/bounds.txt")" = deny ] || fail "C3 256001 boundary"
+mkdir "$LARGE_READ_TMP/project/directory"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/directory")" = allow ] || fail "C3 directory fail-open"
+mkfifo "$LARGE_READ_TMP/project/special"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/special")" = allow ] || fail "C3 special fail-open"
+if [ "$(id -u)" -ne 0 ]; then
+  printf x > "$LARGE_READ_TMP/project/unreadable.diff"; chmod 000 "$LARGE_READ_TMP/project/unreadable.diff"
+  [ "$(large_read_decision "$LARGE_READ_TMP/project/unreadable.diff")" = allow ] || fail "C3 unreadable fail-open"
+  chmod 600 "$LARGE_READ_TMP/project/unreadable.diff"
+fi
+# Exercise a real metadata race by replacing the file while the hook stats it.
+cp "$LARGE_READ_TMP/project/big.diff" "$LARGE_READ_TMP/project/race.diff"
+(for _ in $(seq 1 20); do cp "$LARGE_READ_TMP/project/big.diff" "$LARGE_READ_TMP/project/race.diff"; done) &
+race_err=$(large_read_run "$LARGE_READ_TMP/project/race.diff" 2>&1 >/dev/null)
+wait || true
+[ -z "$race_err" ] || [ "$race_err" = "large-read-guard: metadata changed; allowing read" ] || fail "C3 race diagnostic: $race_err"
 
 printf 'polytoken hook adapter: PASS\n'

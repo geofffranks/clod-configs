@@ -53,6 +53,21 @@ actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf
 for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/grep-guard/hook.sh compat/large-read-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -x "$D/$x" ] && ok "executable: $x" || no "executable: $x"
 done
+cmp -s "$REPO/home/large-read-guard/hook.sh" "$D/compat/large-read-guard/hook.sh" \
+  && ok "installed large-read guard matches source" || no "installed large-read guard matches source"
+[ "$(sha256sum "$REPO/home/large-read-guard/hook.sh" | awk '{print $1}')" = "$(sha256sum "$D/compat/large-read-guard/hook.sh" | awk '{print $1}')" ] \
+  && ok "installed large-read guard checksum matches source" || no "installed large-read guard checksum matches source"
+large_payload=$(jq -nc --arg p "$D/compat/large-read-guard/hook.sh" '{tool_name:"Read",tool_input:{file_path:$p,max_bytes:1}}')
+large_out=$(printf '%s' "$large_payload" | POLYTOKEN_CWD="$D" bash "$D/compat/large-read-guard/hook.sh")
+[ -z "$large_out" ] && ok "installed large-read guard allows bounded read" || no "installed large-read guard behavior"
+large_file="$D/compat/large-read-guard/oversized.diff"; python3 - "$large_file" <<'PY'
+import sys
+open(sys.argv[1], 'wb').write(b'x' * 51201)
+PY
+large_payload=$(jq -nc --arg p "$large_file" '{tool_name:"Read",tool_input:{file_path:$p}}')
+large_out=$(printf '%s' "$large_payload" | POLYTOKEN_CWD="$D" bash "$D/compat/large-read-guard/hook.sh")
+jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$large_out" >/dev/null \
+  && ok "installed large-read guard denies oversized unbounded read" || no "installed large-read guard denial behavior"
 for f in statusline.sh hooks/agent-state.sh agent-join agent-join/hook.sh; do
   [ ! -e "$D/$f" ] && ok "omitted: $f" || no "omitted: $f"
 done
