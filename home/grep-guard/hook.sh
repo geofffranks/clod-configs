@@ -3,8 +3,8 @@ set -euo pipefail
 input=$(cat)
 deny() { jq -cn --arg r "grep-guard: $1 Input was not rewritten." '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'; exit 0; }
 if ! jq -e 'type == "object" and .tool_name == "Grep" and (.tool_input | type == "object") and (.tool_input.pattern | type == "string") and ((.tool_input.path | type == "string") or (.tool_input.path | type == "array" and all(.[]; type == "string")))' >/dev/null 2>&1 <<<"$input"; then exit 0; fi
-if ! jq -e '.tool_input | has("max_results") and (.max_results | type == "number" and floor == .)' >/dev/null 2>&1 <<<"$input"; then
-  deny "max_results is required; use a corrected bounded Grep call (for example, max_results: 20). For broad plain-text discovery, use rtk grep."
+if ! jq -e '.tool_input | has("max_results") and (.max_results | type == "number" and floor == . and . >= 1 and . <= 20)' >/dev/null 2>&1 <<<"$input"; then
+  deny "max_results must be an integer from 1 through 20; use a corrected bounded Grep call (for example, max_results: 20). For broad plain-text discovery, use rtk grep."
 fi
 pattern=$(jq -r '.tool_input.pattern' <<<"$input")
 max_results=$(jq -r '.tool_input.max_results' <<<"$input")

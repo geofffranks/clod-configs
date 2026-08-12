@@ -102,7 +102,7 @@ with Polytoken-native equivalents.
 | `hooks.json` | `polytoken/hooks.json` | Nine native hooks, including the metadata-only `large-read-guard`. Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
-| `compat/` | `home/{bash-guard,branch-guard,git-safe,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
+| `compat/` | `home/{bash-guard,branch-guard,git-safe,grep-guard,large-read-guard,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
 
 #### Provider-neutral status configuration
 
@@ -205,6 +205,11 @@ files.
   `rtk-rewrite.sh` does (`pre_tool_use` allows/denies only). The built-in `grep`
   tool remains available for structured searches (multiple roots, `include`,
   `context_lines`).
+- **Subagent hook probes are controller-only in this environment.** Direct
+  implementer and reviewer subagent probes did not expose ordinary pre-tool
+  hooks inside the spawned subagent sessions, so this package makes no claim
+  that those hooks execute there. The implementer/reviewer prompt contracts
+  retain the bounded-search and ranged-read protections as the supported guard.
 
 ## Merge behavior
 

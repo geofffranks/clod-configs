@@ -45,7 +45,7 @@ for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/h
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-expected_subagents="$(printf '%s\n' implementer.md plan-reviewer.md plan-writer.md researcher.md reviewer.md validator.md | sort)"
+expected_subagents="$(printf '%s\n' implementer.md researcher.md reviewer.md validator.md | sort)"
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
   && ok "installed exactly the shipped subagents" || no "installed exactly the shipped subagents"

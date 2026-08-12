@@ -221,6 +221,11 @@ jq -e '.hook_event_name == "PreToolUse" and .session_id == "fallback-session" an
 run_adapter '{"input":{"pattern":"x","path":".","max_results":21}}' grep-guard/hook.sh grep
 assert_outcome "$RUN_OUT" deny
 jq -e '.reason | contains("max_results") and contains("rtk grep") and contains("Input was not rewritten")' <<<"$RUN_OUT" >/dev/null
+for invalid_max in 0 -1; do
+  canonical_invalid=$(jq -nc --argjson max "$invalid_max" '{hook_event_name:"PreToolUse",session_id:"s",tool_name:"Grep",tool_input:{pattern:"x",path:".",max_results:$max}}' | bash "$ROOT/home/grep-guard/hook.sh")
+  assert_one_json "$canonical_invalid"
+  jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("max_results") and contains("Input was not rewritten"))' <<<"$canonical_invalid" >/dev/null || fail "canonical lower bound for max_results=$invalid_max"
+done
 
 # Missing max_results is malformed at the adapter boundary, while the
 # canonical guard itself deterministically denies without rewriting input.
@@ -283,6 +288,29 @@ ln -s "$LARGE_READ_TMP/project/small.log" "$LARGE_READ_TMP/project/one.log"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/one.log")" = allow ] || fail "C3 one-hop symlink"
 ln -s "$LARGE_READ_TMP/project/one.log" "$LARGE_READ_TMP/project/two.log"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/two.log")" = allow ] || fail "C3 nested symlink fail-open"
+# Darwin/BSD portability: supported utilities must work without GNU `--` operands.
+portable_bin="$LARGE_READ_TMP/portable-bin"; mkdir -p "$portable_bin"
+cat >"$portable_bin/stat" <<'SH'
+#!/usr/bin/env bash
+set -e
+[ "${1:-}" != -- ] || exit 2
+exec /usr/bin/stat "$@"
+SH
+cat >"$portable_bin/readlink" <<'SH'
+#!/usr/bin/env bash
+set -e
+[ "${1:-}" != -- ] || exit 2
+exec /usr/bin/readlink "$@"
+SH
+cat >"$portable_bin/dirname" <<'SH'
+#!/usr/bin/env bash
+set -e
+[ "${1:-}" != -- ] || exit 2
+exec /usr/bin/dirname "$@"
+SH
+chmod +x "$portable_bin"/*
+[ "$(OSTYPE=darwin23 PATH="$portable_bin:$PATH" large_read_decision "$LARGE_READ_TMP/project/one.log")" = allow ] || fail "C3 Darwin one-hop symlink portability"
+[ "$(OSTYPE=darwin23 PATH="$portable_bin:$PATH" large_read_decision "$LARGE_READ_TMP/project/two.log")" = allow ] || fail "C3 Darwin nested symlink fail-open"
 python3 - "$LARGE_READ_TMP/big.diff" 51201 <<'PY'
 import sys
 open(sys.argv[1], 'wb').write(b'x' * int(sys.argv[2]))

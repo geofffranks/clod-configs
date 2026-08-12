@@ -23,18 +23,18 @@ fi
 # Resolve exactly one link. The target itself must not be another link.
 target=$path
 if [ -L "$path" ]; then
-  link=$(readlink -- "$path" 2>/dev/null) || exit 0
+  link=$(readlink "$path" 2>/dev/null) || exit 0
   case "$link" in
     /*) target=$link ;;
-    *) target="$(dirname -- "$path")/$link" ;;
+    *) target="$(dirname "$path")/$link" ;;
   esac
   [ -L "$target" ] && exit 0
 fi
 [ -r "$target" ] || exit 0
 if [[ "$OSTYPE" == darwin* ]]; then
-  snapshot() { stat -f '%HT|%z|%d|%i|%m' -- "$1" 2>/dev/null; }
+  snapshot() { stat -f '%HT|%z|%d|%i|%m' "$1" 2>/dev/null; }
 else
-  snapshot() { stat -c '%F|%s|%d|%i|%Y' -- "$1" 2>/dev/null; }
+  snapshot() { stat -c '%F|%s|%d|%i|%Y' "$1" 2>/dev/null; }
 fi
 before=$(snapshot "$target") || exit 0
 kind=${before%%|*}
