@@ -95,8 +95,8 @@ unexpected while working, ask questions rather than guessing.
 ## Context discipline — keep your context lean
 
 Every tool result stays in your context for the rest of this run and is
-re-read on every subsequent turn. A single large result (50K+ tokens) costs
-that much on every turn for the rest of the run. Keep results small.
+re-read on every subsequent turn. A single large result (approximately 50 KiB)
+costs that much on every turn for the rest of the run. Keep results small.
 
 - **Always set `max_results` on grep.** Use 20 or less. Never run an unbounded
   grep — a single broad search can dump 200K+ chars into context.

@@ -319,9 +319,9 @@ PY
 [ -s "$LARGE_READ_TMP/big.diff" ] || fail "C3 containment fixture missing"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"max_bytes":1}')" = allow ] || fail "C3 max_bytes bound"
 [ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":0,"limit":1}')" = allow ] || fail "C3 offset/limit bound"
-[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"max_bytes":0}')" = allow ] || fail "C3 malformed max_bytes"
-[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":-1,"limit":1}')" = allow ] || fail "C3 malformed offset"
-[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":0}')" = allow ] || fail "C3 malformed incomplete bounds"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"max_bytes":0}')" = deny ] || fail "C3 zero max_bytes does not exempt large file"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":-1,"limit":1}')" = deny ] || fail "C3 negative offset does not exempt large file"
+[ "$(large_read_decision "$LARGE_READ_TMP/project/big.diff" '{"offset":0}')" = deny ] || fail "C3 incomplete bounds do not exempt large file"
 printf x > "$LARGE_READ_TMP/project/bounds.txt"
 python3 - "$LARGE_READ_TMP/project/bounds.txt" 256000 <<'PY'
 import sys

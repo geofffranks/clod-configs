@@ -46,6 +46,22 @@ history to be pasted into the dispatch prompt.
 
 The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integration`, or `final-incremental-rereview`.
 
+**`initial-task`:** review every changed hunk against the task brief and global constraints.
+
+**`incremental-rereview`:** review unresolved prior Critical/Important findings and every changed hunk since the previously reviewed head. Do not reread the already reviewed original task diff.
+
+**`final-integration`:** use fresh context to inspect the indexed net branch change. Focus on cross-task contracts and systemic risks, not task-local detail:
+- incompatible assumptions between tasks;
+- cross-task API or data-flow errors;
+- concurrency, persistence, security, and lifecycle interactions;
+- cumulative complexity invisible in a single task;
+- unresolved Minor findings that become important in aggregate;
+- requirements that could not be attributed to one task.
+
+Do not repeat task-local checks without naming a cross-task risk.
+
+**`final-incremental-rereview`:** review final-review findings and the changed hunks since the previously reviewed head after branch-level fixes.
+
 Read the review index first, then read every shard required by the selected mode; never sample required shards. Read unchanged source only once for each named concrete risk. Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact. If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims.
 
 If the diff or a required shard is missing, say so and return `needs_fixes` — do not guess at the change. Do not use RTK for ordinary targeted reads.

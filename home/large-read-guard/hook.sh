@@ -5,7 +5,6 @@ command -v jq >/dev/null 2>&1 || exit 0
 jq -e 'type == "object" and .tool_name == "Read" and (.tool_input | type == "object") and (.tool_input.file_path | type == "string")' >/dev/null 2>&1 <<<"$input" || exit 0
 path=$(jq -r '.tool_input.file_path' <<<"$input")
 if jq -e '(.tool_input | has("max_bytes") and (.max_bytes | type == "number" and floor == . and . > 0)) or (.tool_input | has("offset") and has("limit") and (.offset | type == "number" and floor == . and . >= 0) and (.limit | type == "number" and floor == . and . > 0))' >/dev/null 2>&1 <<<"$input"; then exit 0; fi
-if jq -e '(.tool_input | has("offset") or has("limit") or has("max_bytes"))' >/dev/null 2>&1 <<<"$input"; then exit 0; fi
 base=${POLYTOKEN_CWD:-${PWD:-.}}
 if [[ "$path" != /* ]]; then
   command -v python3 >/dev/null 2>&1 || exit 0
