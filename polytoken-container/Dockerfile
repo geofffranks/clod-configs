@@ -5,7 +5,7 @@
 #   mise   = language runtimes (python 3.13 + 3.11, node lts, go latest)
 # Mounts are applied by run.sh: ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig, ~/.claude
 #
-FROM ubuntu:24.04
+FROM ubuntu:24.04 AS base
 
 ARG DEV_UID=1000
 ENV DEBIAN_FRONTEND=noninteractive
@@ -56,8 +56,8 @@ RUN curl -fsS https://get.polytoken.dev | bash
 ENV MISE_DATA_DIR=/home/dev/.local/share/mise
 # Same broken-pipe hardening as the brew step above.
 RUN LOG=/tmp/mise.log; \
-    { mise install python@3.13 python@3.11 node@lts go@latest \
-      && mise use -g python@3.13 node@lts go@latest \
+    { mise install python@3.13 python@3.11 node@lts go@1.26.5 \
+      && mise use -g python@3.13 node@lts go@1.26.5 \
       && mise reshim; \
     } >> "$LOG" 2>&1 || { echo "=== mise step failed; tail of $LOG: ==="; tail -n 80 "$LOG"; exit 1; }
 
@@ -65,6 +65,17 @@ RUN LOG=/tmp/mise.log; \
 # shell_exec spawns. mise *shims* read .tool-versions / mise.toml per directory,
 # so the right python/node/go resolves without shell activation.
 ENV PATH="/home/dev/.local/bin:/home/dev/bin:${MISE_DATA_DIR}/shims:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+
+# Build from the local sibling checkout supplied by build.sh, then copy only the
+# executable into the final image so the source is not retained in final layers.
+FROM base AS quota-builder
+COPY --from=quota . /tmp/polytoken-quota
+RUN cd /tmp/polytoken-quota \
+    && go build -buildvcs=false -trimpath -o /home/dev/.local/bin/polytoken-quota ./cmd/polytoken-quota \
+    && chmod 0755 /home/dev/.local/bin/polytoken-quota
+
+FROM base
+COPY --from=quota-builder /home/dev/.local/bin/polytoken-quota /home/dev/.local/bin/polytoken-quota
 
 # interactive shells: keep ~/bin + brew + shims on PATH (ENV PATH is inherited,
 # but make it explicit in case a profile resets PATH)

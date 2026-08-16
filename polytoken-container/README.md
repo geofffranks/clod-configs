@@ -13,7 +13,8 @@ Mac. Brew provides the tools; `mise` provides the language runtimes.
 | mise | brew | latest |
 | python | mise | 3.13 (default) + 3.11 |
 | node | mise | lts |
-| go | mise | latest |
+| go | mise | 1.26.5 |
+| polytoken-quota | local sibling checkout (`../polytoken-quota`) | current checkout |
 | codex CLI | npm (`@openai/codex`) | latest |
 
 MCP servers are not in the image — they live behind the ratatoskr gateway on
@@ -21,9 +22,28 @@ the Mac (see [MCP servers](#mcp-servers)).
 
 ## 1. Build
 
+The build uses the current local checkout of the sibling `polytoken-quota`
+repository at `../polytoken-quota` (relative to this repository). That checkout
+must contain `go.mod` and `cmd/polytoken-quota`. Override the source location with
+`POLYTOKEN_QUOTA_DIR` when needed:
+
 ```bash
-cd polytoken-container && ./build.sh     # docker build, DEV_UID=$(id -u)
+cd polytoken-container && ./build.sh
+# POLYTOKEN_QUOTA_DIR=/path/to/polytoken-quota ./build.sh
 ```
+
+The script passes the quota repository as a narrow Docker BuildKit named context,
+then the image compiles and installs `polytoken-quota` at
+`/home/dev/.local/bin/polytoken-quota`. It is therefore available directly on
+`PATH` in container sessions and reflects the local checkout, including
+unpublished changes. The image uses Go 1.26.5, matching the quota module's
+required toolchain, and requires a Docker installation with BuildKit named-context
+support. `build.sh` enables BuildKit for the build.
+
+This change installs the executable only. The quota utility's policy/state under
+`~/.polytoken-quota` is not mounted or persisted by the container launcher; add a
+host mount and configure `POLYTOKEN_QUOTA_HOME` separately if persistent quota
+operation is needed.
 
 MCP servers are **not** in the image: they are fronted by the ratatoskr
 gateway running on the Mac (see [MCP servers](#mcp-servers)), so container

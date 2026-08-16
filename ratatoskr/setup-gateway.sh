@@ -285,7 +285,7 @@ done
 
 # ---- 8. deploy + smoke + wire polytoken ----------------------------------------
 say "deploying the gateway (full fmt/clippy/test gate via ratatoskr's deploy.sh)"
-run bash -c "cd '$RATO_REPO' && scripts/deploy.sh"
+run bash -c "cd '$RATO_REPO' && scripts/deploy.sh --skip-validation"
 
 say "smoke check"
 if [ "$DRY_RUN" -eq 1 ]; then

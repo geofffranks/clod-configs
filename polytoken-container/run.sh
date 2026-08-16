@@ -57,8 +57,11 @@ MOUNTS=(
 # which makes it appear root-owned (700) and unwritable to the dev user. A fresh
 # dedicated dir avoids that. Created here so it is owned by you, not root.
 HOST_PTDAT="$HOME/.local/share/polytoken-dev"
+HOST_PTQDAT="$HOME/.local/polytoken-quota"
 mkdir -p "$HOST_PTDAT"
+mkdir -p "$HOST_PTQDAT"
 MOUNTS+=(-v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken")
+MOUNTS+=(-v "$HOST_PTQDAT:$DEV_HOME/.local/polytoken-quota")
 # codex CLI auth/config for the polytoken codex provider (rw: codex writes
 # sessions). Codex creates executable aliases under ~/.codex/tmp/arg0. A prior
 # root-run container may have left that subdirectory root-owned, so repair it below.

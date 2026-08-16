@@ -115,5 +115,75 @@ else
   ok "run.sh/build.sh free of stale wrapper references"
 fi
 
+echo "==> image includes the local polytoken-quota checkout"
+quota_tmp="$(mktemp -d)"
+quota_capture="$quota_tmp/docker-args"
+quota_fake="$quota_tmp/docker"
+mkdir -p "$quota_tmp/quota/cmd/polytoken-quota"
+printf 'module example/polytoken-quota\ngo 1.26.5\n' > "$quota_tmp/quota/go.mod"
+cat > "$quota_fake" <<'DOCKER'
+#!/usr/bin/env bash
+printf 'BUILDKIT=%s\nARGS=%s\n' "$DOCKER_BUILDKIT" "$*" > "$DOCKER_CAPTURE"
+DOCKER
+chmod +x "$quota_fake"
+if DOCKER_CAPTURE="$quota_capture" POLYTOKEN_QUOTA_DIR="$quota_tmp/quota" DOCKER_BIN="$quota_fake" \
+    "$ROOT/polytoken-container/build.sh" >/dev/null 2>&1 \
+    && grep -q -- '^BUILDKIT=1$' "$quota_capture" \
+    && grep -q -- '--build-context quota=' "$quota_capture" \
+    && grep -q -- "$quota_tmp/quota" "$quota_capture"; then
+  ok "build.sh passes absolute quota context with BuildKit"
+else
+  no "build.sh passes absolute quota context with BuildKit"
+fi
+quota_missing_capture="$quota_tmp/missing-docker-args"
+if DOCKER_CAPTURE="$quota_missing_capture" POLYTOKEN_QUOTA_DIR="$quota_tmp/missing" DOCKER_BIN="$quota_fake" \
+    "$ROOT/polytoken-container/build.sh" >/dev/null 2>&1; then
+  no "build.sh rejects missing quota checkout"
+elif [ -e "$quota_missing_capture" ]; then
+  no "build.sh rejects missing quota checkout before Docker"
+else
+  ok "build.sh rejects missing quota checkout before Docker"
+fi
+rm -rf "$quota_tmp"
+if grep -q -- '--build-context quota=' "$ROOT/polytoken-container/build.sh"; then
+  ok "build.sh supplies quota named context"
+else
+  no "build.sh supplies quota named context"
+fi
+if grep -q -- 'POLYTOKEN_QUOTA_DIR' "$ROOT/polytoken-container/build.sh" \
+    && grep -q -- 'pwd' "$ROOT/polytoken-container/build.sh"; then
+  ok "build.sh supports absolute quota source override"
+else
+  no "build.sh supports absolute quota source override"
+fi
+if grep -q -- 'go@1.26.5' "$ROOT/polytoken-container/Dockerfile" \
+    && grep -q -- '1.26.5' "$ROOT/polytoken-container/README.md"; then
+  ok "image pins the quota-required Go version"
+else
+  no "image pins the quota-required Go version"
+fi
+if grep -q -- 'COPY --from=quota' "$ROOT/polytoken-container/Dockerfile"; then
+  ok "Dockerfile copies quota named context"
+else
+  no "Dockerfile copies quota named context"
+fi
+if grep -q -- 'go build' "$ROOT/polytoken-container/Dockerfile" \
+    && grep -q -- './cmd/polytoken-quota' "$ROOT/polytoken-container/Dockerfile"; then
+  ok "Dockerfile builds quota command"
+else
+  no "Dockerfile builds quota command"
+fi
+if grep -q -- '/home/dev/.local/bin/polytoken-quota' "$ROOT/polytoken-container/Dockerfile"; then
+  ok "Dockerfile installs quota binary on PATH"
+else
+  no "Dockerfile installs quota binary on PATH"
+fi
+
+if grep -q -- 'polytoken-quota' "$ROOT/polytoken-container/README.md"; then
+  ok "README documents quota binary"
+else
+  no "README documents quota binary"
+fi
+
 echo "==> $pass passed, $fail failed"
 (( fail == 0 ))
