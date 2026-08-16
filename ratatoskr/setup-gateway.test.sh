@@ -155,6 +155,12 @@ jq -e '.mcpClients.homeassistant.url == "http://192.168.2.247:8086/mcp"' "$CFG" 
   && ok "homeassistant http upstream" || no "homeassistant http upstream"
 jq -e '.executeDeadlineMs == 660000 and .mcpClients["codex-imagegen"].supervision.callTimeoutMs == 600000' "$CFG" >/dev/null \
   && ok "deadlines and imagegen timeout budget" || no "deadlines and imagegen timeout budget"
+jq -e --arg p "$SBX/workspace/appium-mcp/capabilities.json" '.mcpClients.appium.env.CAPABILITIES_CONFIG == $p' "$CFG" >/dev/null \
+  && ok "appium CAPABILITIES_CONFIG wired under HOME" || no "appium CAPABILITIES_CONFIG wired under HOME"
+jq -e '.mcpClients.appium.env.APPIUM_MCP_ON_CLIENT_DISCONNECT == "skip"' "$CFG" >/dev/null \
+  && ok "appium sessions survive gateway reconnects" || no "appium sessions survive gateway reconnects"
+jq -e '.mcpClients.appium.supervision.callTimeoutMs == 600000' "$CFG" >/dev/null \
+  && ok "appium call timeout leaves room for WDA install" || no "appium call timeout leaves room for WDA install"
 PLIST="$SBX/Library/LaunchAgents/local.ratatoskr.plist"
 [ -f "$PLIST" ] && ok "plist installed" || no "plist installed"
 grep -q "/Users/YOU" "$PLIST" && no "plist /Users/YOU substituted" || ok "plist /Users/YOU substituted"

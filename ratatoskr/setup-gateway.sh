@@ -182,8 +182,16 @@ generate_config() {
           type: "stdio",
           command: "node",
           args: [($home + "/workspace/appium-mcp/dist/index.js")],
+          env: {
+            CAPABILITIES_CONFIG: ($home + "/workspace/appium-mcp/capabilities.json"),
+            # Gateway clients reconnect (client reloads, gateway restarts);
+            # delete_all (the default) would wipe owned Appium sessions on
+            # every transient disconnect.
+            APPIUM_MCP_ON_CLIENT_DISCONNECT: "skip"
+          },
           hint: "Appium mobile automation: iOS/Android sessions, gestures, app management",
-          supervision: { callTimeoutMs: 120000 }
+          # First iOS session can build/install WebDriverAgent; 120s was too tight.
+          supervision: { callTimeoutMs: 600000 }
         },
         homeassistant: {
           type: "http",
