@@ -70,14 +70,15 @@ ENV PATH="/home/dev/.local/bin:/home/dev/bin:${MISE_DATA_DIR}/shims:/home/linuxb
 # but make it explicit in case a profile resets PATH)
 RUN printf '\nexport PATH="$HOME/bin:%s/shims:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"\n' "$MISE_DATA_DIR" >> ~/.bashrc
 
-# ---- MCP servers ----
-# Wrappers (go run / node) are shared source files: copied into the image here
-# AND onto the host's ~/.local/bin by the installer (scripts/install-polytoken.sh)
-# — one source of truth. codex CLI is @openai/codex (npm); claude CLI is
-# @anthropic-ai/claude-code (npm — Homebrew only ships it as a macOS cask, which
-# Linuxbrew can't install). ~/.claude is bind-mounted at runtime by run.sh so the
-# container's claude reuses the host's auth/config.
-COPY --chmod=0755 mcp-wrappers/foundry-mcp mcp-wrappers/codex-imagegen-mcp mcp-wrappers/minime-vision /home/dev/.local/bin/
+# ---- CLI tools ----
+# MCP servers are no longer baked or wrapped here: all MCP traffic goes through
+# the ratatoskr gateway running on the macOS host (see ../ratatoskr/), reached
+# from containers over HTTP at http://host.docker.internal:8910/mcp. The CLIs
+# below stay because the harness itself uses them: codex CLI is @openai/codex
+# (npm, provider auth); claude CLI is @anthropic-ai/claude-code (npm — Homebrew
+# only ships it as a macOS cask, which Linuxbrew can't install). ~/.claude is
+# bind-mounted at runtime by run.sh so the container's claude reuses the host's
+# auth/config.
 RUN npm install -g @openai/codex @anthropic-ai/claude-code
 
 # Codex creates PATH aliases below this directory at startup. Keep the image

@@ -480,23 +480,13 @@ install_permissions() {
 }
 
 # =========================================================================
-# ---- host-side MCP launchers (~/.local/bin) ----
-# Host counterpart to the container's baked wrappers: bare command names that
-# `go run` / node the MCP servers from ~/workspace, so source edits apply with
-# no rebuild. Idempotent via copy_managed_file; warns if ~/.local/bin not on PATH.
-install_mcp_wrappers() {
-  local srcdir="$ROOT/polytoken-container/mcp-wrappers" bindir="$HOME/.local/bin"
-  [ -d "$srcdir" ] || { echo "  (MCP wrappers source not found: $srcdir)"; return 0; }
-  mkdir -p "$bindir"
-  local w
-  for w in foundry-mcp codex-imagegen-mcp minime-vision; do
-    copy_managed_file "$srcdir/$w" "$bindir/$w"
-    [ -f "$bindir/$w" ] && chmod +x "$bindir/$w"
-  done
-  # Ensure ~/.local/bin is on PATH for future shells (append to ~/.bashrc once).
+# ---- ~/.local/bin on PATH ----
+# rato (the MCP gateway, installed by ~/workspace/ratatoskr/scripts/deploy.sh)
+# lives in ~/.local/bin; make sure future shells can find it. Idempotent.
+ensure_local_bin_on_path() {
   local rc="$HOME/.bashrc" line='export PATH="$HOME/.local/bin:$PATH"'
   if ! grep -qF '.local/bin' "$rc" 2>/dev/null; then
-    printf '\n# Added by claude-config polytoken installer (MCP wrappers live in ~/.local/bin)\n%s\n' "$line" >> "$rc"
+    printf '\n# Added by claude-config polytoken installer (rato gateway lives in ~/.local/bin)\n%s\n' "$line" >> "$rc"
     echo "  added:     PATH export -> $rc"
   fi
 }
@@ -543,6 +533,6 @@ done
 install_permissions
 install_hooks
 install_config
-install_mcp_wrappers
+ensure_local_bin_on_path
 
 echo "Done."

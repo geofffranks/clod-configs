@@ -98,5 +98,22 @@ run_case "existing project config" 1
 run_case "failed container with existing project config" 1 1
 run_case "signaled container with existing project config" 1 0 1
 
+echo "==> image/repo carry no MCP wrapper layer"
+if grep -q "mcp-wrappers" "$ROOT/polytoken-container/Dockerfile"; then
+  no "Dockerfile free of mcp-wrappers"
+else
+  ok "Dockerfile free of mcp-wrappers"
+fi
+if [ -d "$ROOT/polytoken-container/mcp-wrappers" ]; then
+  no "mcp-wrappers directory absent"
+else
+  ok "mcp-wrappers directory absent"
+fi
+if grep -qiE 'MCP wrappers?|go run' "$ROOT/polytoken-container/run.sh" "$ROOT/polytoken-container/build.sh"; then
+  no "run.sh/build.sh free of stale wrapper references"
+else
+  ok "run.sh/build.sh free of stale wrapper references"
+fi
+
 echo "==> $pass passed, $fail failed"
 (( fail == 0 ))

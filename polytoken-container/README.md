@@ -1,9 +1,8 @@
 # polytoken-dev container
 
 An isolated Linux dev container for running **Polytoken** in **Bypass+** mode, with
-native MCP servers and your repos/config mounted in. Brew provides the tools;
-`mise` provides the language runtimes; the Go MCP servers run from source via
-`go run` (no rebuild when you edit them).
+your repos/config mounted in and MCP access via the ratatoskr gateway on the
+Mac. Brew provides the tools; `mise` provides the language runtimes.
 
 ## What's inside
 
@@ -16,8 +15,9 @@ native MCP servers and your repos/config mounted in. Brew provides the tools;
 | node | mise | lts |
 | go | mise | latest |
 | codex CLI | npm (`@openai/codex`) | latest |
-| foundry-mcp, codex-imagegen-mcp | `go run` wrappers (source in ~/workspace) | live |
-| minime-vision | node wrapper (lm-studio-mcp-server) | live |
+
+MCP servers are not in the image — they live behind the ratatoskr gateway on
+the Mac (see [MCP servers](#mcp-servers)).
 
 ## 1. Build
 
@@ -25,9 +25,9 @@ native MCP servers and your repos/config mounted in. Brew provides the tools;
 cd polytoken-container && ./build.sh     # docker build, DEV_UID=$(id -u)
 ```
 
-MCP servers are **not** compiled into the image — they run from source via
-`go run`/node wrappers, so editing their repos takes effect on next launch with
-no rebuild.
+MCP servers are **not** in the image: they are fronted by the ratatoskr
+gateway running on the Mac (see [MCP servers](#mcp-servers)), so container
+sessions get them over HTTP with nothing baked here.
 
 ## 2. Configure (host, once)
 
@@ -38,23 +38,24 @@ cp .env.example ~/.config/polytoken-container.env && $EDITOR $_
 run.sh also forwards provider tokens already exported in your shell
 (`ANTHROPIC_API_KEY`, `ZAI_API_KEY`, `FOUNDRY_API_KEY`, … — see `POLY_PASS_ENV`).
 
-### Polytoken config + permissions + MCP wrappers (via the claude-config installer)
+### Polytoken config + permissions (via the claude-config installer)
 ```bash
 ./install.sh --target polytoken --overwrite
 ```
 Installs into `~/.config/polytoken`:
 - the **permissions baseline** (deny `git push` / `rm -rf` / gh write verbs),
-- portable **mcp_servers** (bare commands),
+- the **ratatoskr gateway** `mcp_servers` entry (see "MCP servers" below),
 - the **container-awareness** session_start hook,
-- and the **host MCP wrappers** at `~/.local/bin` (and appends `~/.local/bin` to
-  `~/.bashrc`; if your shell is zsh, add it to `~/.zshrc` too).
+- and ensures `~/.local/bin` is on `~/.bashrc`'s PATH (where the `rato` gateway
+  binary installs; if your shell is zsh, add it to `~/.zshrc` too).
 
 Then set the host to **Autonomous** in a session (`/permissions`) — the container
 forces Bypass+ itself (see below).
 
-> After installing, delete the old `localhost_vision:` block from
-> `~/.config/polytoken/config.yaml` (the installer adds `minime_vision` but can't
-> remove the old name).
+If your `~/.config/polytoken/config.yaml` still carries manual-era
+`mcp_servers` entries (e.g. an old `localhost_vision` block), delete them —
+every MCP arrives through the gateway now, and stray stdio entries would just
+fail to spawn.
 
 ### Per-repo runtimes (recommended)
 ```bash
@@ -114,14 +115,21 @@ Extra mounts: `POLY_EXTRA_MOUNTS='-v /x:/home/dev/x'`.
 
 ## MCP servers
 
-Bare commands (PATH-resolved) so the same config works on host (darwin) and
-container (linux):
-- `foundry-mcp` → `go run` from `~/workspace/foundry-mcp-tools` (relay `192.168.2.247:3010`).
-- `codex-imagegen-mcp` → `go run` from `~/workspace/codex-imagegen-mcp` (wraps the `codex` CLI; needs `~/.codex` auth).
-- `minime-vision` → `node ~/workspace/lm-studio-mcp-server/server.js` (LM Studio at `192.168.2.247:1234`).
+All MCP servers are fronted by the **ratatoskr gateway**, which runs natively on
+the Mac (launchd agent `local.ratatoskr`, loopback `:8910`). Polytoken — host
+and container sessions alike — talks to it over HTTP:
 
-A Go server's first start per session takes a few seconds (compile); the shared
-`~/go/pkg/mod` avoids re-fetching deps.
+```
+http://host.docker.internal:8910/mcp
+```
+
+`host.docker.internal` resolves to loopback on the Mac via the `/etc/hosts`
+alias that `claude-config/ratatoskr/setup-gateway.sh` installs, and to the VM
+bridge inside this container — one literal URL for both contexts. The gateway
+spawns the Mac-installed MCP binaries directly (`go install`-ed foundry-mcp and
+codex-imagegen-mcp; node for minime_vision's lm-studio-mcp-server and for
+appium-mcp) and fronts the remote homeassistant MCP. Nothing MCP-related is
+baked into the image or spawned per-session anymore.
 
 ## Troubleshooting
 
@@ -129,15 +137,17 @@ A Go server's first start per session takes a few seconds (compile); the shared
 - **Bind-mount files root-owned / permission denied:** rebuild with `DEV_UID=$(id -u)` (build.sh does this).
 - **`tk` not found:** the `ticket` formula is symlinked to `tk` at build.
 - **Container logs:** `~/.local/share/polytoken-dev/logs/` (daemon) and `.../sessions/<id>/log.jsonl`.
-- **An MCP server won't start:** check `~/.local/share/polytoken-dev/sessions/<id>/__mcp_*.log`.
-- **Host MCP commands not found:** ensure `~/.local/bin` is on PATH (installer appends to `~/.bashrc`; if zsh, add to `~/.zshrc`).
+- **MCP tools missing / an upstream unhealthy:** the gateway owns them now —
+  call its `list-servers` meta-tool for per-upstream health, and check
+  `~/Library/Logs/ratatoskr.log` on the Mac.
+- **`rato` not found:** ensure `~/.local/bin` is on PATH (installer appends to `~/.bashrc`; if zsh, add to `~/.zshrc`).
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | Image (brew + mise + codex + MCP wrapper copy) |
+| `Dockerfile` | Image (brew + mise + codex/claude CLIs) |
 | `build.sh` | `docker build` with matching host uid |
 | `run.sh` | Launcher: mounts, cwd resolution, Bypass+ override, arg passthrough, env forwarding |
-| `mcp-wrappers/` | Shared MCP launcher scripts (used by the image and installed to the host) |
+| `../ratatoskr/` | Gateway setup: `setup-gateway.sh` deploys the Mac-side MCP gateway and wires polytoken to it |
 | `.env.example` | API-key template for `--env-file` |

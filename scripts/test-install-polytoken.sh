@@ -324,6 +324,47 @@ hasnt "$out" "remove customized hook" "abort precedes patch enumeration"
 [ "$(backup_count "$D")" = 0 ] && ok "duplicate abort creates no backup" || no "duplicate abort creates no backup"
 rm -rf "$D"
 
+sc "P21 ratatoskr gateway entry -> fresh lands, additive merge preserves"
+D="$(mktemp -d)"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ayq "$D/config.yaml" '.mcp_servers.ratatoskr.transport == "http"' "fresh install: ratatoskr transport http"
+ayq "$D/config.yaml" '.mcp_servers.ratatoskr.url == "http://host.docker.internal:8910/mcp"' "fresh install: ratatoskr url"
+rm -rf "$D"
+D="$(valid_base)"
+yq -i '.mcp_servers = {"other-server": {"transport": "stdio", "command": "true"}}' "$D/config.yaml"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ayq "$D/config.yaml" '.mcp_servers.ratatoskr.transport == "http"' "additive merge: ratatoskr entry added"
+ayq "$D/config.yaml" '.mcp_servers["other-server"].command == "true"' "additive merge: existing mcp_servers preserved"
+ayq "$D/config.yaml" '.mcp_servers | length == 2' "additive merge: exactly two servers"
+pt_valid "$D" && ok "config validate passes (ratatoskr entry)" || no "config validate passes (ratatoskr entry)"
+rm -rf "$D"
+
+sc "P22 installer: no MCP wrappers, ~/.local/bin PATH still ensured"
+D="$(valid_base)"
+FAKEHOME="$(mktemp -d)"
+P22LOG="$FAKEHOME/installer-output.log"
+HOME="$FAKEHOME" POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz \
+  bash "$INSTALL_PT" 0 >"$P22LOG" 2>&1
+for w in foundry-mcp codex-imagegen-mcp minime-vision; do
+  if [ -e "$FAKEHOME/.local/bin/$w" ]; then
+    no "wrapper not installed: $w"
+    echo "----- installer output (P22 failure) -----" >&2
+    tail -20 "$P22LOG" >&2
+    echo "-----------------------------------------" >&2
+  else
+    ok "wrapper not installed: $w"
+  fi
+done
+if grep -q '.local/bin' "$FAKEHOME/.bashrc" 2>/dev/null; then
+  ok "~/.local/bin PATH export appended"
+else
+  no "~/.local/bin PATH export appended"
+  echo "----- installer output (P22 failure) -----" >&2
+  tail -20 "$P22LOG" >&2
+  echo "-----------------------------------------" >&2
+fi
+rm -rf "$D" "$FAKEHOME"
+
 echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
