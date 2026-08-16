@@ -97,17 +97,43 @@ with Polytoken-native equivalents.
 
 | Piece | Source | Notes |
 |---|---|---|
-| `config.yaml` | `polytoken/config.recommended.yaml` | `version: 2` + a `tui` block only (see below). |
+| `config.yaml` | `polytoken/config.recommended.yaml` | `version: 3` + the single `mcp_servers.ratatoskr` gateway entry (see below). |
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
 | `hooks.json` | `polytoken/hooks.json` | Nine native hooks, including the metadata-only `large-read-guard`. Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
 | `compat/` | `home/{bash-guard,branch-guard,git-safe,grep-guard,large-read-guard,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
 
+#### MCP: everything behind the ratatoskr gateway
+
+The only MCP entry the recommendation carries is the ratatoskr gateway:
+
+```yaml
+mcp_servers:
+  ratatoskr:
+    transport: http
+    url: http://host.docker.internal:8910/mcp
+```
+
+The gateway runs natively on the Mac as a launchd agent and fronts every MCP
+server (codex-imagegen, foundry, minime_vision, appium, homeassistant). One
+literal URL serves both contexts because `host.docker.internal` resolves to
+loopback on the Mac (an `/etc/hosts` alias) and to the VM bridge inside the dev
+containers. Deploy or refresh it with this repo's
+`ratatoskr/setup-gateway.sh`; that script also wires this entry into your live
+`~/.config/polytoken/config.yaml` — only after the gateway is verified
+listening, so no session ever points at a dead URL. Per-project MCP
+declarations are deliberately gone (DnD and ha-configs had theirs removed):
+everything arrives through the gateway. Note the same ordering applies to the
+installer: if you run `install.sh --target polytoken` before the gateway is
+deployed, sessions will report the `ratatoskr` MCP unreachable until
+`setup-gateway.sh` has run on the Mac.
+
 #### Provider-neutral status configuration
 
 The recommended `config.yaml` is **provider-neutral**: it carries only
-`version: 2` and a `tui` block. It deliberately omits all model pins, model
+`version: 3` and the `mcp_servers.ratatoskr` gateway entry. It deliberately
+omits all model pins, model
 defaults, and compaction/thinking settings that the Claude settings fragment
 carries (`ANTHROPIC_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`,
 `ANTHROPIC_DEFAULT_*_MODEL`, `MAX_THINKING_TOKENS`,
@@ -115,11 +141,12 @@ carries (`ANTHROPIC_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`,
 models in your user config; the recommendation installs as an overlay and never
 overwrites them.
 
-The `tui` block selects a dark theme and a native status line built from
+The optional `tui` block (not part of the recommendation — add it yourself if
+you want it) selects a dark theme and a native status line built from
 Polytoken's own modules:
 
 ```yaml
-version: 2
+version: 3
 tui:
   theme: dark
   status-line:

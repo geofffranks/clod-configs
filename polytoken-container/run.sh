@@ -59,13 +59,14 @@ MOUNTS=(
 HOST_PTDAT="$HOME/.local/share/polytoken-dev"
 mkdir -p "$HOST_PTDAT"
 MOUNTS+=(-v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken")
-# codex CLI auth/config for codex-imagegen-mcp (rw: codex writes sessions/images).
-# Codex creates executable aliases under ~/.codex/tmp/arg0. A prior root-run
-# container may have left that subdirectory root-owned, so repair it below.
+# codex CLI auth/config for the polytoken codex provider (rw: codex writes
+# sessions). Codex creates executable aliases under ~/.codex/tmp/arg0. A prior
+# root-run container may have left that subdirectory root-owned, so repair it below.
 CODEX_MOUNT=0
 [[ -d "$HOME/.codex" ]] && { MOUNTS+=(-v "$HOME/.codex:$DEV_HOME/.codex"); CODEX_MOUNT=1; }
-# Go module cache (shared, portable across darwin/linux) so the `go run` MCP
-# wrappers don't re-fetch deps on every container session.
+# Go module cache (shared, portable across darwin/linux) for Go development and
+# `go install` of workspace tools (e.g. the MCP servers the ratatoskr gateway
+# spawns on the Mac).
 [[ -d "$HOME/go/pkg/mod" ]] && MOUNTS+=(-v "$HOME/go/pkg/mod:$DEV_HOME/go/pkg/mod")
 # claude CLI auth/config (rw: claude writes sessions, projects, statsig). The
 # build stamps DEV_UID = host uid, so bind-mount ownership lines up with no repair.
