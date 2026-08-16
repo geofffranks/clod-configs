@@ -4,6 +4,9 @@
 #   - mounts:  ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig,
 #              ~/.config/gh (ro), ~/.gitignore (ro), ~/.local/share/polytoken,
 #              ~/.codex, ~/go/pkg/mod, ~/.claude
+#   - masks container-local node_modules for selected repos via named volumes
+#     (see POLY_NODE_MODULES_MASK below) so the linux container and the macOS
+#     host each keep their own npm install at the same path
 #   - launches polytoken in the repo under ~/workspace you run this from
 #     (or at the ~/workspace root if launched elsewhere)
 #   - passes ALL arguments through to polytoken
@@ -67,6 +70,17 @@ CODEX_MOUNT=0
 # claude CLI auth/config (rw: claude writes sessions, projects, statsig). The
 # build stamps DEV_UID = host uid, so bind-mount ownership lines up with no repair.
 [[ -d "$HOME/.claude" ]] && MOUNTS+=(-v "$HOME/.claude:$DEV_HOME/.claude")
+# Mask per-repo node_modules with container-local named volumes. npm's
+# platform-specific native bindings (linux in here, darwin on the Mac) cannot
+# share one directory; each side gets its own install at the same path, and
+# named volumes persist across --rm launches. Replace the repo list with:
+#   POLY_NODE_MODULES_MASK="repoA repoB/sub"
+# (repo paths relative to ~/workspace, up to two components deep).
+POLY_NODE_MODULES_MASK_DEFAULT="track-data-collection track-data-collection/mobile appium-mcp"
+for rel in ${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}; do
+  vol="polytoken-nm-$(printf '%s' "$rel" | tr '/' '-')"
+  MOUNTS+=(-v "$vol:$DEV_HOME/workspace/$rel/node_modules")
+done
 if [[ -n "${POLY_EXTRA_MOUNTS:-}" ]]; then
   # shellcheck disable=SC2206
   MOUNTS+=($POLY_EXTRA_MOUNTS)
@@ -84,7 +98,7 @@ ENV_FLAGS=""
 # ~/.config/gh files we mount), so it can't cross the container boundary.
 # Pass it as an env var instead — gh prefers GH_TOKEN over the keychain.
 POLY_PASS_ENV_DEFAULT="ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY GEMINI_API_KEY \
-GROQ_API_KEY DEEPSEEK_API_KEY MISTRAL_API_KEY ZAI_API_KEY OPENROUTER_API_KEY \
+GROQ_API_KEY DEEPSEEK_API_KEY MISTRAL_API_KEY NEURALWATT_API_KEY ZAI_API_KEY OPENROUTER_API_KEY \
 BRAVE_SEARCH_API_KEY TAVILY_API_KEY EXA_API_KEY KAGI_API_KEY FOUNDRY_API_KEY \
 GH_TOKEN"
 for v in $POLY_PASS_ENV_DEFAULT ${POLY_PASS_ENV:-}; do
@@ -145,6 +159,20 @@ docker run --rm --user 0 \
   -v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken" \
   "$IMAGE:$TAG" \
   sh -c 'mkdir -p /home/dev/.local/share/polytoken && chmod 700 /home/dev/.local/share/polytoken && chown -R dev:dev /home/dev/.local/share/polytoken'
+
+# chown the masked node_modules volumes so the dev user can npm-install into
+# them (docker creates missing volume mountpoints as root). The repair
+# container mounts ONLY the volumes, so find touches exactly the masked paths.
+if [[ -n "${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}" ]]; then
+  NM_REPAIR=()
+  for rel in ${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}; do
+    vol="polytoken-nm-$(printf '%s' "$rel" | tr '/' '-')"
+    NM_REPAIR+=(-v "$vol:$DEV_HOME/workspace/$rel/node_modules")
+  done
+  echo "run.sh: repairing masked node_modules volume ownership" >&2
+  docker run --rm --user 0 "${NM_REPAIR[@]}" "$IMAGE:$TAG" \
+    sh -c 'find /home/dev/workspace -maxdepth 3 -type d -name node_modules -exec chown -R dev:dev {} +'
+fi
 
 echo "run.sh: launching polytoken in $CWD" >&2
 
