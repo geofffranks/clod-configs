@@ -8,7 +8,7 @@ Mac. Brew provides the tools; `mise` provides the language runtimes.
 
 | Tool | Source | Version |
 |---|---|---|
-| polytoken | `brew tap polytoken/tap` | `polytoken-unstable` |
+| polytoken | `https://get.polytoken.dev` installer | current installer channel |
 | gh, rtk, tk (ticket), jq, yq, ripgrep, perl | brew | latest |
 | mise | brew | latest |
 | python | mise | 3.13 (default) + 3.11 |
@@ -16,9 +16,86 @@ Mac. Brew provides the tools; `mise` provides the language runtimes.
 | go | mise | 1.26.5 |
 | polytoken-quota | local sibling checkout (`../polytoken-quota`) | current checkout |
 | codex CLI | npm (`@openai/codex`) | latest |
+| language servers | image package managers + pinned native artifacts | see the LSP matrix below |
 
 MCP servers are not in the image — they live behind the ratatoskr gateway on
 the Mac (see [MCP servers](#mcp-servers)).
+
+## Language-server support
+
+The image installs the LSPs justified by the repositories mounted into the
+container. The shared Polytoken mappings live in the parent repository's
+`polytoken/config.recommended.yaml` and are installed into the live
+`~/.config/polytoken/config.yaml` by `scripts/install-polytoken.sh`. The
+container's `.polytoken/config.yaml` remains an ephemeral Bypass+ permission
+override and does not own the global LSP configuration.
+
+| Language/file family | Server | Notes |
+|---|---|---|
+| TypeScript/JavaScript/TSX | `typescript-language-server` | Primary web-language server |
+| Python | `pyright-langserver` | Primary typed-Python server |
+| Lua | `lua-language-server` | First-party DCS plugin support |
+| C/C++ | `clangd` | Includes PlatformIO/ESP32 source |
+| Go | `gopls` | General workspace support |
+| Rust | `rust-analyzer` | Rust standard-library sources installed |
+| Swift | `sourcekit-lsp` | Linux SwiftPM support only; no Apple SDK/Xcode support |
+| Kotlin | `kotlin-lsp` | Official Kotlin server; Alpha; Android SDK/device/build support not validated |
+| YAML | `yaml-language-server` | Home Assistant/configuration files |
+| Markdown | `marksman` | Documentation support |
+| Bash | `bash-language-server` | Shell scripts |
+| JSON | `vscode-json-language-server` | Extracted VS Code server for JSON/JSONC |
+| CSS | `vscode-css-language-server` | Extracted VS Code server for CSS/SCSS/LESS |
+| HTML | `vscode-html-language-server` | Extracted VS Code server for HTML |
+| ESLint | `vscode-eslint-language-server` | Diagnostics-only auxiliary server |
+| Dockerfiles | `docker-langserver` | `Dockerfile*` files |
+| Emmet | `emmet-language-server` | Auxiliary HTML/CSS/JSX/TSX completion |
+| Perl | none in the selected catalog | Perl remains an installed CLI/runtime tool only |
+
+Gradle/Groovy, Android XML, and general XML are syntax/configuration-only in
+this image; Kotlin LSP does not claim Gradle or XML language intelligence. The
+requested `ha-rocu-cloud` repository path was not present; the inventory used
+`ha-roku-cloud`.
+
+The machine-readable server and routing contract is `lsp-servers.yaml`.
+Available local checks are:
+
+```bash
+scripts/test-lsp-support.sh manifest
+scripts/test-lsp-support.sh artifacts
+scripts/test-lsp-support.sh routing
+scripts/test-lsp-support.sh config
+scripts/test-lsp-support.sh protocol
+scripts/test-lsp-support.sh native
+scripts/test-lsp-support.sh docs
+scripts/test-lsp-support.sh build-contract
+```
+
+After building an image, verify its executables with:
+
+```bash
+scripts/test-lsp-support.sh executables --image polytoken-dev:latest --engine docker
+scripts/test-lsp-support.sh protocol --image polytoken-dev:latest --engine docker
+scripts/test-lsp-support.sh native --image polytoken-dev:latest --engine docker
+polytoken --config-dir ~/.config/polytoken config validate --user
+polytoken lsp check
+```
+
+The `protocol` and `native` checks require a built image plus a Docker-compatible
+engine; they validate runtime prerequisites inside that image. The full image
+build requires a sibling `polytoken-quota` checkout and a Docker-compatible
+engine with BuildKit named-context support:
+
+```bash
+POLYTOKEN_QUOTA_DIR=../polytoken-quota DOCKER_BIN=podman ./build.sh
+# or: POLYTOKEN_QUOTA_DIR=../polytoken-quota DOCKER_BIN=docker ./build.sh
+```
+
+Swift and Kotlin executable checks establish Linux language-server support,
+not iOS/macOS or Android project build capability. The Swift server must use
+the same Linux Swift toolchain as the SwiftPM project; Apple SDK/framework
+resolution, signing, and simulators remain host-side concerns. The official
+Kotlin server is Alpha and Android SDK/device/build behavior is outside this
+image's validation scope.
 
 ## 1. Build
 

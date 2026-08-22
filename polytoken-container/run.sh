@@ -152,20 +152,20 @@ YAML
 # as dev. The image's USER cannot fix ownership after ~/.codex is mounted.
 if [[ "$CODEX_MOUNT" == 1 ]]; then
   echo "run.sh: repairing Codex alias directory ownership" >&2
-  docker run --rm --user 0 \
+  podman run --rm --user 0 \
     -v "$HOME/.codex:$DEV_HOME/.codex" \
     "$IMAGE:$TAG" \
     sh -c 'mkdir -p /home/dev/.codex/tmp/arg0 && chmod 700 /home/dev/.codex/tmp/arg0 && chown -R dev:dev /home/dev/.codex/tmp/arg0'
 fi
 
 echo "run.sh: repairing Codex alias directory ownership" >&2
-docker run --rm --user 0 \
+podman run --rm --user 0 \
   -v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken" \
   "$IMAGE:$TAG" \
   sh -c 'mkdir -p /home/dev/.local/share/polytoken && chmod 700 /home/dev/.local/share/polytoken && chown -R dev:dev /home/dev/.local/share/polytoken'
 
 # chown the masked node_modules volumes so the dev user can npm-install into
-# them (docker creates missing volume mountpoints as root). The repair
+# them (podman creates missing volume mountpoints as root). The repair
 # container mounts ONLY the volumes, so find touches exactly the masked paths.
 if [[ -n "${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}" ]]; then
   NM_REPAIR=()
@@ -174,7 +174,7 @@ if [[ -n "${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}" ]]; then
     NM_REPAIR+=(-v "$vol:$DEV_HOME/workspace/$rel/node_modules")
   done
   echo "run.sh: repairing masked node_modules volume ownership" >&2
-  docker run --rm --user 0 "${NM_REPAIR[@]}" "$IMAGE:$TAG" \
+  podman run --rm --user 0 "${NM_REPAIR[@]}" "$IMAGE:$TAG" \
     sh -c 'find /home/dev/workspace -maxdepth 3 -type d -name node_modules -exec chown -R dev:dev {} +'
 fi
 
@@ -190,7 +190,7 @@ fi
 set -u
 
 # shellcheck disable=SC2086  (ENV_FLAGS intentionally word-split)
-docker run --rm -it --init \
+podman run --rm -it --init \
   -e TERM="${TERM:-xterm-256color}" \
   -e COLORTERM=truecolor \
   $ENV_FLAGS \

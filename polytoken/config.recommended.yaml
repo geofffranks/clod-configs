@@ -9,3 +9,112 @@ mcp_servers:
   ratatoskr:
     transport: http
     url: http://host.docker.internal:8910/mcp
+
+daemon:
+  lsp:
+    enabled: true
+    servers:
+      typescript-language-server:
+        command: typescript-language-server
+        args: [--stdio]
+        language_id: typescript
+        file_types: [.ts, .tsx, .js, .jsx, .mjs, .cjs]
+        root_markers: [package.json, tsconfig.json]
+      pyright-langserver:
+        command: pyright-langserver
+        args: [--stdio]
+        language_id: python
+        file_types: [.py, .pyi]
+        root_markers: [pyproject.toml, setup.cfg, mypy.ini, .git]
+      lua-language-server:
+        command: lua-language-server
+        args: []
+        language_id: lua
+        file_types: [.lua]
+        root_markers: [.git]
+      clangd:
+        command: clangd
+        args: [--background-index]
+        language_id: c
+        file_types: [.c, .h, .cc, .cpp, .cxx, .hpp]
+        root_markers: [compile_commands.json, platformio.ini, .git]
+      gopls:
+        command: gopls
+        args: [serve]
+        language_id: go
+        file_types: [.go]
+        root_markers: [go.mod, go.work, .git]
+      rust-analyzer:
+        command: rust-analyzer
+        args: []
+        language_id: rust
+        file_types: [.rs]
+        root_markers: [Cargo.toml, rust-project.json, .git]
+      sourcekit-lsp:
+        command: sourcekit-lsp
+        args: []
+        language_id: swift
+        file_types: [.swift]
+        root_markers: [Package.swift, Package.resolved, .git]
+      kotlin-lsp:
+        command: kotlin-lsp
+        args: []
+        language_id: kotlin
+        file_types: [.kt, .kts]
+        root_markers: [settings.gradle, settings.gradle.kts, build.gradle, build.gradle.kts, .git]
+      yaml-language-server:
+        command: yaml-language-server
+        args: [--stdio]
+        language_id: yaml
+        file_types: [.yaml, .yml]
+        root_markers: [.git]
+      marksman:
+        command: marksman
+        args: [server]
+        language_id: markdown
+        file_types: [.md, .markdown]
+        root_markers: [.git]
+      bash-language-server:
+        command: bash-language-server
+        args: [start]
+        language_id: shellscript
+        file_types: [.sh, .bash]
+        root_markers: [.git]
+      vscode-json-language-server:
+        command: vscode-json-language-server
+        args: [--stdio]
+        language_id: json
+        file_types: [.json, .jsonc]
+        root_markers: [package.json, .git]
+      vscode-css-language-server:
+        command: vscode-css-language-server
+        args: [--stdio]
+        language_id: css
+        file_types: [.css, .scss, .less]
+        root_markers: [package.json, .git]
+      vscode-html-language-server:
+        command: vscode-html-language-server
+        args: [--stdio]
+        language_id: html
+        file_types: [.html, .htm]
+        root_markers: [package.json, .git]
+      vscode-eslint-language-server:
+        command: vscode-eslint-language-server
+        args: [--stdio]
+        language_id: eslint
+        file_types: [.ts, .tsx, .js, .jsx, .mjs, .cjs]
+        root_markers: [eslint.config.js, eslint.config.mjs, package.json]
+        is_linter: true
+      docker-langserver:
+        command: docker-langserver
+        args: [--stdio]
+        language_id: dockerfile
+        file_types: []
+        filename_patterns: ["^Dockerfile(\\..*)?"]
+        root_markers: [Dockerfile, .git]
+      emmet-language-server:
+        command: emmet-language-server
+        args: [--stdio]
+        language_id: emmet
+        file_types: [.html, .css, .jsx, .tsx]
+        root_markers: [package.json, .git]

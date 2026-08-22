@@ -1,0 +1,277 @@
+version: 1
+supported_architectures:
+  - amd64
+  - arm64
+servers:
+  - name: typescript-language-server
+    version: "5.3.0"
+    source: "npm:typescript-language-server@5.3.0 typescript@5.8.3"
+    executable: typescript-language-server
+    args: [--stdio]
+    install:
+      kind: npm
+      package: "typescript-language-server@5.3.0 typescript@5.8.3"
+      destination: global
+      launcher: typescript-language-server
+    language_id: typescript
+    file_types: [.ts, .tsx, .js, .jsx, .mjs, .cjs]
+    root_markers: [package.json, tsconfig.json]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: pyright-langserver
+    version: "1.1.400"
+    source: "npm:pyright@1.1.400"
+    executable: pyright-langserver
+    args: [--stdio]
+    install:
+      kind: npm
+      package: "pyright@1.1.400"
+      destination: global
+      launcher: pyright-langserver
+    language_id: python
+    file_types: [.py, .pyi]
+    root_markers: [pyproject.toml, setup.cfg, mypy.ini, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: lua-language-server
+    version: "3.19.1"
+    source: "https://github.com/LuaLS/lua-language-server/releases/download/3.19.1/lua-language-server-3.19.1-linux-{arch}.tar.gz"
+    sources:
+      amd64: https://github.com/LuaLS/lua-language-server/releases/download/3.19.1/lua-language-server-3.19.1-linux-x64.tar.gz
+      arm64: https://github.com/LuaLS/lua-language-server/releases/download/3.19.1/lua-language-server-3.19.1-linux-arm64.tar.gz
+    executable: lua-language-server
+    args: []
+    install:
+      kind: archive
+      destination: /home/dev/.local/opt/lua-language-server
+      launcher: /home/dev/.local/bin/lua-language-server
+      checksum:
+        amd64: e9235d2d72ef55bc41cf8c99cda2ed64777682024b4bb81f5dea425060c5cbb8
+        arm64: abd2572e8fc929dc838a81ffb8473c5bce0bf39bfe8edb4b120b3b623176ce83
+    language_id: lua
+    file_types: [.lua]
+    root_markers: [.git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: clangd
+    version: "18"
+    source: "Ubuntu 24.04 package:clangd-18"
+    executable: clangd
+    args: [--background-index]
+    install:
+      kind: apt
+      package: clangd-18
+      destination: /usr/local/bin
+      launcher: /usr/local/bin/clangd
+    language_id: c
+    file_types: [.c, .h, .cc, .cpp, .cxx, .hpp]
+    root_markers: [compile_commands.json, platformio.ini, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: gopls
+    version: "0.23.0"
+    source: "go install:golang.org/x/tools/gopls@v0.23.0"
+    executable: gopls
+    args: [serve]
+    install:
+      kind: go
+      package: golang.org/x/tools/gopls@v0.23.0
+      destination: /home/dev/.local/bin
+      launcher: /home/dev/.local/bin/gopls
+    language_id: go
+    file_types: [.go]
+    root_markers: [go.mod, go.work, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: rust-analyzer
+    version: "toolchain:rust@1.88.0"
+    source: "rustup component:rust-analyzer from rust@1.88.0"
+    executable: rust-analyzer
+    args: []
+    install:
+      kind: rustup
+      package: "rust-analyzer + rust-src"
+      destination: mise-managed toolchain
+      launcher: rust-analyzer
+    language_id: rust
+    file_types: [.rs]
+    root_markers: [Cargo.toml, rust-project.json, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: sourcekit-lsp
+    version: "6.2.2"
+    source: "Swiftly installer:swift-6.2.2-RELEASE Linux toolchain"
+    executable: sourcekit-lsp
+    args: []
+    install:
+      kind: swiftly
+      package: "swift-6.2.2-RELEASE"
+      destination: /home/dev/.local/share/swiftly
+      launcher: /home/dev/.local/bin/sourcekit-lsp
+    language_id: swift
+    file_types: [.swift]
+    root_markers: [Package.swift, Package.resolved, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: kotlin-lsp
+    version: "262.9593.0"
+    source: "https://download-cdn.jetbrains.com/language-server/kotlin-server/262.9593.0/kotlin-server-{arch}.tar.gz"
+    sources:
+      amd64: https://download-cdn.jetbrains.com/language-server/kotlin-server/262.9593.0/kotlin-server-262.9593.0.tar.gz
+      arm64: https://download-cdn.jetbrains.com/language-server/kotlin-server/262.9593.0/kotlin-server-262.9593.0-aarch64.tar.gz
+    executable: kotlin-lsp
+    args: []
+    install:
+      kind: archive
+      destination: /home/dev/.local/opt/kotlin-lsp
+      launcher: /home/dev/.local/bin/kotlin-lsp
+      checksum:
+        amd64: 2d99d8e198fbe4aa8f4481e37799724ce94803b4ea12a60b416040e3fcd7cc5e
+        arm64: 2317831c6e5607d05b7ebc1da655330125ce0e3d66fbf24517dfce442debc14e
+    language_id: kotlin
+    file_types: [.kt, .kts]
+    root_markers: [settings.gradle, settings.gradle.kts, build.gradle, build.gradle.kts, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: yaml-language-server
+    version: "1.19.0"
+    source: "npm:yaml-language-server@1.19.0"
+    executable: yaml-language-server
+    args: [--stdio]
+    install:
+      kind: npm
+      package: yaml-language-server@1.19.0
+      destination: global
+      launcher: yaml-language-server
+    language_id: yaml
+    file_types: [.yaml, .yml]
+    root_markers: [.git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: marksman
+    version: "2026-02-08"
+    source: "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-{arch}"
+    sources:
+      amd64: https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-x64
+      arm64: https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-arm64
+    executable: marksman
+    args: [server]
+    install:
+      kind: binary
+      destination: /home/dev/.local/bin
+      launcher: /home/dev/.local/bin/marksman
+      checksum:
+        amd64: be5098e8213219269c47fc0d916a66fa31ce0602ec967475c722260aabf26087
+        arm64: db8e124527f7f8048e3e6c91821b9c52ef173d92c01e47d221bf1337afd962fb
+    language_id: markdown
+    file_types: [.md, .markdown]
+    root_markers: [.git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: bash-language-server
+    version: "5.4.0"
+    source: "npm:bash-language-server@5.4.0"
+    executable: bash-language-server
+    args: [start]
+    install:
+      kind: npm
+      package: bash-language-server@5.4.0
+      destination: global
+      launcher: bash-language-server
+    language_id: shellscript
+    file_types: [.sh, .bash]
+    root_markers: [.git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: vscode-json-language-server
+    version: "4.10.0"
+    source: "npm:vscode-langservers-extracted@4.10.0"
+    executable: vscode-json-language-server
+    args: [--stdio]
+    install:
+      kind: npm
+      package: vscode-langservers-extracted@4.10.0
+      destination: global
+      launcher: vscode-json-language-server
+    language_id: json
+    file_types: [.json, .jsonc]
+    root_markers: [package.json, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: vscode-css-language-server
+    version: "4.10.0"
+    source: "npm:vscode-langservers-extracted@4.10.0"
+    executable: vscode-css-language-server
+    args: [--stdio]
+    install:
+      kind: npm
+      package: vscode-langservers-extracted@4.10.0
+      destination: global
+      launcher: vscode-css-language-server
+    language_id: css
+    file_types: [.css, .scss, .less]
+    root_markers: [package.json, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: vscode-html-language-server
+    version: "4.10.0"
+    source: "npm:vscode-langservers-extracted@4.10.0"
+    executable: vscode-html-language-server
+    args: [--stdio]
+    install:
+      kind: npm
+      package: vscode-langservers-extracted@4.10.0
+      destination: global
+      launcher: vscode-html-language-server
+    language_id: html
+    file_types: [.html, .htm]
+    root_markers: [package.json, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: vscode-eslint-language-server
+    version: "4.10.0"
+    source: "npm:vscode-langservers-extracted@4.10.0"
+    executable: vscode-eslint-language-server
+    args: [--stdio]
+    install:
+      kind: npm
+      package: vscode-langservers-extracted@4.10.0
+      destination: global
+      launcher: vscode-eslint-language-server
+    language_id: eslint
+    file_types: [.ts, .tsx, .js, .jsx, .mjs, .cjs]
+    root_markers: [eslint.config.js, eslint.config.mjs, package.json]
+    role: auxiliary
+    is_linter: true
+    architectures: [amd64, arm64]
+  - name: docker-langserver
+    version: "0.15.0"
+    source: "npm:dockerfile-language-server-nodejs@0.15.0"
+    executable: docker-langserver
+    args: [--stdio]
+    install:
+      kind: npm
+      package: dockerfile-language-server-nodejs@0.15.0
+      destination: global
+      launcher: docker-langserver
+    language_id: dockerfile
+    filename_patterns: ["^Dockerfile(\\..*)?"]
+    file_types: []
+    root_markers: [Dockerfile, .git]
+    role: primary
+    architectures: [amd64, arm64]
+  - name: emmet-language-server
+    version: "2.4.0"
+    source: "npm:@olrtg/emmet-language-server@2.4.0"
+    executable: emmet-language-server
+    args: [--stdio]
+    install:
+      kind: npm
+      package: "@olrtg/emmet-language-server@2.4.0"
+      destination: global
+      launcher: emmet-language-server
+    language_id: emmet
+    file_types: [.html, .css, .jsx, .tsx]
+    root_markers: [package.json, .git]
+    role: auxiliary
+    architectures: [amd64, arm64]

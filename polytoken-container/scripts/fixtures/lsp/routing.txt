@@ -1,0 +1,19 @@
+# fixture path|expected server|role
+src/App.tsx|typescript-language-server|primary
+src/index.mjs|typescript-language-server|primary
+tests/test_home.py|pyright-langserver|primary
+resources/plugin.lua|lua-language-server|primary
+src/main.cpp|clangd|primary
+cmd/main.go|gopls|primary
+src/lib.rs|rust-analyzer|primary
+Sources/Core.swift|sourcekit-lsp|primary
+android/MainActivity.kt|kotlin-lsp|primary
+scripts/check.sh|bash-language-server|primary
+docs/README.md|marksman|primary
+config.yaml|yaml-language-server|primary
+package.json|vscode-json-language-server|primary
+client/src/index.css|vscode-css-language-server|primary
+client/public/index.html|vscode-html-language-server|primary
+Dockerfile|docker-langserver|primary
+src/App.tsx|vscode-eslint-language-server|auxiliary
+src/App.tsx|emmet-language-server|auxiliary
