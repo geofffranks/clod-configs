@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 QUOTA_DIR="${POLYTOKEN_QUOTA_DIR:-$ROOT_DIR/../polytoken-quota}"
 QUOTA_DIR="$(cd "$QUOTA_DIR" 2>/dev/null && pwd || true)"
 DOCKER_BIN="${DOCKER_BIN:-podman}"
+DEV_WORKSPACE="${POLY_CONTAINER_WORKSPACE:-$HOME/workspace}"
 
 if [[ ! -f "$QUOTA_DIR/go.mod" || ! -d "$QUOTA_DIR/cmd/polytoken-quota" ]]; then
   echo "polytoken-quota checkout not found at $QUOTA_DIR" >&2
@@ -19,6 +20,7 @@ echo "Building polytoken-dev:latest (DEV_UID=$(id -u), quota=$QUOTA_DIR)..."
 cd "$SCRIPT_DIR"
 DOCKER_BUILDKIT=1 "$DOCKER_BIN" build --no-cache \
   --build-arg DEV_UID="$(id -u)" \
+  --build-arg DEV_WORKSPACE="$DEV_WORKSPACE" \
   --build-context quota="$QUOTA_DIR" \
   -t polytoken-dev:latest \
   .

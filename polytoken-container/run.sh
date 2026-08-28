@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # polytoken container launcher.
-#   - mounts:  ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig,
+#   - mounts:  ~/workspace at its host absolute path, ~/.config/polytoken, ~/bin, ~/.gitconfig,
 #              ~/.config/gh (ro), ~/.gitignore (ro), ~/.local/share/polytoken,
 #              ~/.codex, ~/go/pkg/mod, ~/.claude
 #   - masks container-local node_modules for selected repos via named volumes
@@ -13,6 +13,7 @@
 #   - forces Bypass+ permission mode via an ephemeral .polytoken/config.yaml
 #     (the host keeps Autonomous from its global config)
 #   - extra mounts via env var:  POLY_EXTRA_MOUNTS='-v /extra:/home/dev/extra'
+#   - override the host-matching workspace path with POLY_CONTAINER_WORKSPACE
 #   - API keys via env file:    POLY_ENV_FILE (default ~/.config/polytoken-container.env)
 #
 set -euo pipefail
@@ -22,6 +23,7 @@ TAG="${POLY_TAG:-latest}"
 DEV_HOME="/home/dev"
 
 HOST_WS="$HOME/workspace"
+CONTAINER_WS="${POLY_CONTAINER_WORKSPACE:-$HOST_WS}"
 HOST_CFG="$HOME/.config/polytoken"
 HOST_BIN="$HOME/bin"
 HOST_GITCFG="$HOME/.gitconfig"
@@ -31,9 +33,9 @@ ENV_FILE="${POLY_ENV_FILE:-$HOME/.config/polytoken-container.env}"
 rel="${PWD#"$HOST_WS"}"   # "/dcs-retribution" or ""
 rel="${rel#/}"            # "dcs-retribution" or ""
 if [[ -n "$rel" ]]; then
-  CWD="$DEV_HOME/workspace/$rel"
+  CWD="$CONTAINER_WS/$rel"
 else
-  CWD="$DEV_HOME/workspace"
+  CWD="$CONTAINER_WS"
   echo "run.sh: not under ~/workspace — landing at workspace root." >&2
 fi
 
@@ -44,7 +46,7 @@ done
 
 # ---- mount flags (MOUNTS is always non-empty, so safe to expand) ----
 MOUNTS=(
-  -v "$HOST_WS:$DEV_HOME/workspace"
+  -v "$HOST_WS:$CONTAINER_WS"
   -v "$HOST_CFG:$DEV_HOME/.config/polytoken"
   -v "$HOST_BIN:$DEV_HOME/bin"
 )
@@ -83,7 +85,7 @@ CODEX_MOUNT=0
 POLY_NODE_MODULES_MASK_DEFAULT="track-data-collection track-data-collection/mobile appium-mcp"
 for rel in ${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}; do
   vol="polytoken-nm-$(printf '%s' "$rel" | tr '/' '-')"
-  MOUNTS+=(-v "$vol:$DEV_HOME/workspace/$rel/node_modules")
+  MOUNTS+=(-v "$vol:$CONTAINER_WS/$rel/node_modules")
 done
 if [[ -n "${POLY_EXTRA_MOUNTS:-}" ]]; then
   # shellcheck disable=SC2206
@@ -159,10 +161,10 @@ if [[ "$CODEX_MOUNT" == 1 ]]; then
 fi
 
 echo "run.sh: repairing Codex alias directory ownership" >&2
-podman run --rm --user 0 \
-  -v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken" \
-  "$IMAGE:$TAG" \
-  sh -c 'mkdir -p /home/dev/.local/share/polytoken && chmod 700 /home/dev/.local/share/polytoken && chown -R dev:dev /home/dev/.local/share/polytoken'
+# podman run --rm --user 0 \
+#   -v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken" \
+#   "$IMAGE:$TAG" \
+#   sh -c 'mkdir -p /home/dev/.local/share/polytoken && chmod 700 /home/dev/.local/share/polytoken && chown -R dev:dev /home/dev/.local/share/polytoken'
 
 # chown the masked node_modules volumes so the dev user can npm-install into
 # them (podman creates missing volume mountpoints as root). The repair
@@ -171,11 +173,11 @@ if [[ -n "${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}" ]]; then
   NM_REPAIR=()
   for rel in ${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}; do
     vol="polytoken-nm-$(printf '%s' "$rel" | tr '/' '-')"
-    NM_REPAIR+=(-v "$vol:$DEV_HOME/workspace/$rel/node_modules")
+    NM_REPAIR+=(-v "$vol:$CONTAINER_WS/$rel/node_modules")
   done
   echo "run.sh: repairing masked node_modules volume ownership" >&2
   podman run --rm --user 0 "${NM_REPAIR[@]}" "$IMAGE:$TAG" \
-    sh -c 'find /home/dev/workspace -maxdepth 3 -type d -name node_modules -exec chown -R dev:dev {} +'
+    sh -c 'find "$1" -maxdepth 3 -type d -name node_modules -exec chown -R dev:dev {} +' sh "$CONTAINER_WS"
 fi
 
 echo "run.sh: launching polytoken in $CWD" >&2

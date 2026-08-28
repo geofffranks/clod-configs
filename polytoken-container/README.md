@@ -107,6 +107,7 @@ must contain `go.mod` and `cmd/polytoken-quota`. Override the source location wi
 ```bash
 cd polytoken-container && ./build.sh
 # POLYTOKEN_QUOTA_DIR=/path/to/polytoken-quota ./build.sh
+# POLY_CONTAINER_WORKSPACE=/Users/gfranks/workspace ./build.sh  # override the image workspace path
 ```
 
 The script passes the quota repository as a narrow Docker BuildKit named context,
@@ -193,7 +194,7 @@ host: Autonomous (classifier-judged) from the global config.
 
 | Host | Container | Mode | Purpose |
 |---|---|---|---|
-| `~/workspace` | `/home/dev/workspace` | rw | your repos |
+| `~/workspace` | `/Users/gfranks/workspace` | rw | your repos; matches Git worktree paths |
 | `~/.config/polytoken` | `/home/dev/.config/polytoken` | rw | shared polytoken config |
 | `~/bin` | `/home/dev/bin` | rw | your scripts |
 | `~/.gitconfig` | `~/.gitconfig.host` | ro | git identity (via include) |
@@ -203,7 +204,9 @@ host: Autonomous (classifier-judged) from the global config.
 | `~/.codex` | `/home/dev/.codex` | rw | codex auth/config |
 | `~/go/pkg/mod` | `/home/dev/go/pkg/mod` | rw | shared Go module cache |
 
-Extra mounts: `POLY_EXTRA_MOUNTS='-v /x:/home/dev/x'`.
+Extra mounts: `POLY_EXTRA_MOUNTS='-v /x:/home/dev/x'`. Override the host-matching workspace path with `POLY_CONTAINER_WORKSPACE` when building and running; the default is `$HOME/workspace` (for example, `/Users/gfranks/workspace`).
+
+The container intentionally keeps `HOME=/home/dev`; only the workspace uses the host absolute path. This lets Git worktrees created in the container resolve on the host without changing Linux tool/config paths. Worktrees created before this change may still contain `/home/dev/...` metadata and should be recreated or repaired once.
 
 > The container's polytoken data is a **dedicated** `~/.local/share/polytoken-dev`,
 > not the host's `~/.local/share/polytoken`: macOS Docker stamps dirs a root

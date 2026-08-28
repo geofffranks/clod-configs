@@ -260,6 +260,24 @@ build_contract() {
   grep -Fq -- '--build-context quota=' "$ROOT/build.sh" || fail "build.sh lacks quota named context"
   grep -Fq 'DOCKER_BIN' "$ROOT/build.sh" || fail "build.sh lacks DOCKER_BIN override"
   grep -Fq 'DOCKER_BUILDKIT=1' "$ROOT/build.sh" || fail "build.sh does not enable BuildKit"
+  grep -Fq 'POLY_CONTAINER_WORKSPACE' "$ROOT/build.sh" || fail "build.sh lacks workspace path override"
+  grep -Fq -- '--build-arg DEV_WORKSPACE=' "$ROOT/build.sh" || fail "build.sh does not pass the workspace path to Docker"
+  grep -Fq 'ARG DEV_WORKSPACE=' "$ROOT/Dockerfile" || fail "Dockerfile lacks configurable workspace path"
+  grep -Fq 'RUN mkdir -p "$DEV_WORKSPACE" && chown dev:dev "$DEV_WORKSPACE"' "$ROOT/Dockerfile" || fail "Dockerfile does not create the workspace with dev ownership"
+  grep -Fq 'WORKDIR ${DEV_WORKSPACE}' "$ROOT/Dockerfile" || fail "Dockerfile WORKDIR does not use the configured workspace path"
+  python3 - "$ROOT/Dockerfile" <<'PY' || fail "Dockerfile workspace creation must run as root before returning to dev"
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+start = text.index("ENV HOME=/home/dev")
+end = text.index("# ---- Homebrew", start)
+block = text[start:end]
+assert block.index("USER root") < block.index('RUN mkdir -p "$DEV_WORKSPACE"')
+assert block.index("USER dev", block.index('RUN mkdir -p "$DEV_WORKSPACE"')) < block.index("WORKDIR ${DEV_WORKSPACE}")
+PY
+  grep -Fq 'POLY_CONTAINER_WORKSPACE' "$ROOT/run.sh" || fail "run.sh lacks workspace path override"
+  grep -Fq '"$HOST_WS:$CONTAINER_WS"' "$ROOT/run.sh" || fail "run.sh does not mount workspace at the container workspace path"
+  grep -Fq 'CWD="$CONTAINER_WS/' "$ROOT/run.sh" || fail "run.sh does not launch from the container workspace path"
+  ! grep -Fq '$DEV_HOME/workspace' "$ROOT/run.sh" || fail "run.sh retained the old workspace path"
   grep -Fq 'get.polytoken.dev' "$ROOT/Dockerfile" || fail "Dockerfile installer provenance changed"
   grep -Fq 'https://get.polytoken.dev' "$ROOT/README.md" || fail "README installer provenance is stale"
   python3 - "$ROOT/Dockerfile" <<'PY' || fail "base apt package layer must continue into localedef"

@@ -3,7 +3,8 @@
 # polytoken-dev — isolated dev container for running Polytoken.
 #   brew   = tools (polytoken, gh, rtk, tk, jq, yq, perl, ripgrep, mise)
 #   mise   = language runtimes (python 3.13 + 3.11, node lts, go latest)
-# Mounts are applied by run.sh: ~/workspace, ~/.config/polytoken, ~/bin, ~/.gitconfig, ~/.claude
+# Mounts are applied by run.sh: ~/workspace at the host-matching absolute path,
+# plus ~/.config/polytoken, ~/bin, ~/.gitconfig, ~/.claude.
 #
 FROM ubuntu:24.04 AS base
 
@@ -27,7 +28,11 @@ RUN userdel -r ubuntu 2>/dev/null || true \
 
 USER dev
 ENV HOME=/home/dev
-WORKDIR /home/dev
+ARG DEV_WORKSPACE=/Users/gfranks/workspace
+USER root
+RUN mkdir -p "$DEV_WORKSPACE" && chown dev:dev "$DEV_WORKSPACE"
+USER dev
+WORKDIR ${DEV_WORKSPACE}
 
 # ---- Homebrew (Linuxbrew) ----
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
