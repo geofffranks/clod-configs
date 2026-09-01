@@ -8,7 +8,7 @@ Mac. Brew provides the tools; `mise` provides the language runtimes.
 
 | Tool | Source | Version |
 |---|---|---|
-| polytoken | `https://get.polytoken.dev` installer | current installer channel |
+| polytoken | fetched at launch by `polytoken-rt` into `~/.local/share/polytoken-dev-bin` (not in the image) | latest channel at launch |
 | gh, rtk, tk (ticket), jq, yq, ripgrep, perl | brew | latest |
 | mise | brew | latest |
 | python | mise | 3.13 (default) + 3.11 |
@@ -110,6 +110,14 @@ cd polytoken-container && ./build.sh
 # POLY_CONTAINER_WORKSPACE=/Users/gfranks/workspace ./build.sh  # override the image workspace path
 ```
 
+polytoken itself is **not baked into the image**: at launch, the `polytoken-rt`
+wrapper resolves the latest version and downloads it into the persistent
+`~/.local/share/polytoken-dev-bin` cache only when the version changed. Rebuild
+the image only when the `Dockerfile` (or quota checkout) changes — not for new
+polytoken releases. After a successful build the script runs
+`podman system prune -f` (volumes are preserved) because `--no-cache` builds
+leave every prior layer dangling, which is what fills the disk.
+
 The script passes the quota repository as a narrow Docker BuildKit named context,
 then the image compiles and installs `polytoken-quota` at
 `/home/dev/.local/bin/polytoken-quota`. It is therefore available directly on
@@ -201,6 +209,7 @@ host: Autonomous (classifier-judged) from the global config.
 | `~/.config/gh` | `/home/dev/.config/gh` | ro | gh auth (writes denied by baseline) |
 | `~/.gitignore` | `/home/dev/.gitignore` | ro | global ignore (excludesfile repointed in image) |
 | `~/.local/share/polytoken-dev` | `~/.local/share/polytoken` | rw | container logs/sessions (dedicated dir) |
+| `~/.local/share/polytoken-dev-bin` | `/home/dev/.local/share/polytoken-rt` | rw | polytoken binary cache (version-stamped; fetched at launch by `polytoken-rt`) |
 | `~/.codex` | `/home/dev/.codex` | rw | codex auth/config |
 | `~/go/pkg/mod` | `/home/dev/go/pkg/mod` | rw | shared Go module cache |
 

@@ -3,7 +3,7 @@
 # polytoken container launcher.
 #   - mounts:  ~/workspace at its host absolute path, ~/.config/polytoken, ~/bin, ~/.gitconfig,
 #              ~/.config/gh (ro), ~/.gitignore (ro), ~/.local/share/polytoken,
-#              ~/.codex, ~/go/pkg/mod, ~/.claude
+#              ~/.codex, ~/go/pkg/mod, ~/.claude, ~/.local/share/polytoken-dev-bin
 #   - masks container-local node_modules for selected repos via named volumes
 #     (see POLY_NODE_MODULES_MASK below) so the linux container and the macOS
 #     host each keep their own npm install at the same path
@@ -23,7 +23,7 @@ TAG="${POLY_TAG:-latest}"
 DEV_HOME="/home/dev"
 
 HOST_WS="$HOME/workspace"
-CONTAINER_WS="${POLY_CONTAINER_WORKSPACE:-$HOST_WS}"
+CONTAINER_WS="${HOST_WS}"
 HOST_CFG="$HOME/.config/polytoken"
 HOST_BIN="$HOME/bin"
 HOST_GITCFG="$HOME/.gitconfig"
@@ -64,6 +64,12 @@ mkdir -p "$HOST_PTDAT"
 mkdir -p "$HOST_PTQDAT"
 MOUNTS+=(-v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken")
 MOUNTS+=(-v "$HOST_PTQDAT:$DEV_HOME/.local/polytoken-quota")
+# polytoken is NOT in the image: the polytoken-rt wrapper fetches the latest
+# release into this persistent, version-stamped dir at launch, so daily
+# releases never require an image rebuild.
+HOST_PTBIN="$HOME/.local/share/polytoken-dev-bin"
+mkdir -p "$HOST_PTBIN"
+MOUNTS+=(-v "$HOST_PTBIN:$DEV_HOME/.local/share/polytoken-rt")
 # codex CLI auth/config for the polytoken codex provider (rw: codex writes
 # sessions). Codex creates executable aliases under ~/.codex/tmp/arg0. A prior
 # root-run container may have left that subdirectory root-owned, so repair it below.
@@ -160,12 +166,6 @@ if [[ "$CODEX_MOUNT" == 1 ]]; then
     sh -c 'mkdir -p /home/dev/.codex/tmp/arg0 && chmod 700 /home/dev/.codex/tmp/arg0 && chown -R dev:dev /home/dev/.codex/tmp/arg0'
 fi
 
-echo "run.sh: repairing Codex alias directory ownership" >&2
-# podman run --rm --user 0 \
-#   -v "$HOST_PTDAT:$DEV_HOME/.local/share/polytoken" \
-#   "$IMAGE:$TAG" \
-#   sh -c 'mkdir -p /home/dev/.local/share/polytoken && chmod 700 /home/dev/.local/share/polytoken && chown -R dev:dev /home/dev/.local/share/polytoken'
-
 # chown the masked node_modules volumes so the dev user can npm-install into
 # them (podman creates missing volume mountpoints as root). The repair
 # container mounts ONLY the volumes, so find touches exactly the masked paths.
@@ -187,7 +187,7 @@ if [[ "${1}" == "bash" ]]; then
   cmd=bash
   shift
 else
-  cmd=/home/dev/.local/bin/polytoken
+  cmd=/usr/local/bin/polytoken-rt
 fi
 set -u
 

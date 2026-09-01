@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 #
 # polytoken-dev — isolated dev container for running Polytoken.
-#   brew   = tools (polytoken, gh, rtk, tk, jq, yq, perl, ripgrep, mise)
+#   brew   = tools (gh, rtk, tk, jq, yq, perl, ripgrep, mise)
+#   polytoken is NOT baked in: it is fetched at container runtime by
+#   /usr/local/bin/polytoken-rt (see run.sh), so releases need no rebuild
 #   mise   = language runtimes (python 3.13 + 3.11, node lts, go latest)
 # Mounts are applied by run.sh: ~/workspace at the host-matching absolute path,
 # plus ~/.config/polytoken, ~/bin, ~/.gitconfig, ~/.claude.
@@ -56,7 +58,13 @@ RUN LOG=/tmp/brew.log; \
     (command -v tk >/dev/null 2>&1 || ln -s "$(brew --prefix)/bin/ticket" "$(brew --prefix)/bin/tk") \
     && rm -rf "${HOME}/.cache/Homebrew/"*
 
-RUN curl -fsS https://get.polytoken.dev | bash
+COPY --chmod=0755 polytoken-rt /usr/local/bin/polytoken-rt
+# Shim so interactive `run.sh bash` sessions still have `polytoken` on PATH
+# (~/.local/bin is first on PATH). First invocation fetches the binary via the
+# wrapper; the wrapper's cache dir is bind-mounted from the host by run.sh.
+RUN mkdir -p "$HOME/.local/bin" \
+    && printf '#!/bin/sh\nexec /usr/local/bin/polytoken-rt "$@"\n' > "$HOME/.local/bin/polytoken" \
+    && chmod 0755 "$HOME/.local/bin/polytoken"
 
 # ---- language runtimes via mise ----
 ENV MISE_DATA_DIR=/home/dev/.local/share/mise

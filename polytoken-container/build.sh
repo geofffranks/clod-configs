@@ -24,3 +24,9 @@ DOCKER_BUILDKIT=1 "$DOCKER_BIN" build --no-cache \
   --build-context quota="$QUOTA_DIR" \
   -t polytoken-dev:latest \
   .
+
+# --no-cache leaves every prior build's layers/images dangling behind — the
+# disk-fill culprit. Prune after a successful build; volumes are preserved by
+# default (node_modules mask volumes, quota data).
+echo "Pruning podman state (stopped containers, dangling images, networks)..."
+"$DOCKER_BIN" system prune -f

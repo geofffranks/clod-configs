@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# polytoken-rt — fetch polytoken at container runtime instead of baking it into
+# the image. Resolves the latest version from dl.polytoken.dev/channels.json
+# (a tiny JSON document) and only downloads the binary when the cached copy's
+# version stamp differs. The cache dir is bind-mounted from the host by run.sh
+# (~/.local/share/polytoken-dev-bin) so it survives --rm launches and holds
+# exactly one binary.
+#
+# Offline behavior: if channels.json is unreachable but a cached binary exists,
+# it is used with a warning; with no cache, this fails loudly.
+set -euo pipefail
+
+CACHE_DIR="${POLY_RT_CACHE_DIR:-/home/dev/.local/share/polytoken-rt}"
+BIN="$CACHE_DIR/polytoken"
+STAMP="$CACHE_DIR/.version"
+channel="${PT_CHANNEL:-latest}"
+CHANNELS_URL="${PT_BASE_URL:-https://dl.polytoken.dev}/channels.json"
+
+latest="$(curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 \
+    --header 'Cache-Control: no-cache' "$CHANNELS_URL" \
+    | jq -r --arg ch "$channel" '.channels[$ch] // empty' || true)"
+
+need_install=0
+if [[ -z "$latest" ]]; then
+  if [[ -x "$BIN" ]]; then
+    echo "polytoken-rt: cannot reach $CHANNELS_URL — using cached polytoken" >&2
+  else
+    echo "polytoken-rt: cannot resolve latest polytoken and no cached binary exists" >&2
+    exit 1
+  fi
+elif [[ ! -x "$BIN" || "$(cat "$STAMP" 2>/dev/null || true)" != "$latest" ]]; then
+  need_install=1
+fi
+
+if [[ "$need_install" == 1 ]]; then
+  echo "polytoken-rt: fetching polytoken $latest ($channel)" >&2
+  # PT_INSTALL_DIR pins the target so the installer never touches ~/.local/bin
+  # or shell profiles. It must be EXPORTED: a var-prefix on `curl` alone does
+  # not reach the `bash` process that actually runs the installer.
+  # Installer logs go to stderr to keep polytoken's stdout clean.
+  export PT_INSTALL_DIR="$CACHE_DIR"
+  curl -fsSL --proto '=https' --tlsv1.2 https://get.polytoken.dev | bash >&2
+  if [[ ! -x "$BIN" ]]; then
+    echo "polytoken-rt: installer finished but $BIN is missing" >&2
+    exit 1
+  fi
+  printf '%s\n' "$latest" > "$STAMP"
+fi
+
+exec "$BIN" "$@"
