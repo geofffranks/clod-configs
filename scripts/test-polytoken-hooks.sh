@@ -353,6 +353,6 @@ chmod +x "$race_stat/stat"
 race_out=$(RACE_STAT_DIR="$race_stat" RACE_TARGET="$LARGE_READ_TMP/project/race.diff" PATH="$race_stat:$PATH" large_read_run "$LARGE_READ_TMP/project/race.diff" 2>"$race_stat/stderr")
 race_err=$(cat "$race_stat/stderr")
 [ -z "$race_out" ] || fail "C3 race emitted stdout: $race_out"
-[ "$race_err" = "large-read-guard: metadata changed; allowing read" ] || fail "C3 race diagnostic: $race_err"
+[ -z "$race_err" ] || fail "C3 race emitted stderr: $race_err"
 
 printf 'polytoken hook adapter: PASS\n'

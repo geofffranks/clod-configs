@@ -41,8 +41,8 @@ kind=${before%%|*}
 before_size=${before#*|}; before_size=${before_size%%|*}
 # Re-stat after the access/type checks; a changed identity or size fails open.
 after=$(snapshot "$target") || exit 0
+# Fail open silently: hooks emit nothing on a successful allow.
 if [ "$before" != "$after" ]; then
-  printf '%s\n' 'large-read-guard: metadata changed; allowing read' >&2
   exit 0
 fi
 name=${target##*/}; limit=256000
