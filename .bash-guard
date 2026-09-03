@@ -1,0 +1,7 @@
+# bash-guard config for this repo (see home/bash-guard/hook.sh).
+#
+# keychain: home/usage-fetch.sh reads the Claude Code OAuth token from the macOS
+# Keychain item "Claude Code-credentials" to query /api/oauth/usage for monthly
+# credit spend. Working on that script requires running the same `security
+# find-generic-password` read by hand to verify it.
+allow: keychain

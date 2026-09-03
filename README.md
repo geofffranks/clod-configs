@@ -84,7 +84,8 @@ Copies everything under `home/` into `CLAUDE_CONFIG_DIR`, then merges
 | `read-once/` | De-duplicates repeated file reads to save context. |
 | `skill-once/` | Checks successful loads at `PreToolUse` and records only successful `PostToolUse` deliveries; deduplication is per Claude agent, compaction resets it, and `--force` removes a prior entry before a successful reload records it again. |
 | `agent-join/` | Emits an `<orchestration-status>` block when a Claude Agent subagent joins, so the main session can correlate work by id. |
-| `statusline.sh` | Status line: cwd, git, agent, PR, model, context %, cost, rate limits. |
+| `statusline.sh` | Status line: cwd, git, agent, PR, model, context %, session cost + per-turn cost, rate limits, monthly credit spend. |
+| `usage-fetch.sh` | Fetches monthly usage-credit spend from `/api/oauth/usage` into `.usage-cache.json` for the status line. Runs detached; the status line only reads the cache. |
 | `settings.recommended.json` | `env` (models, thinking budget, autocompact), theme, statusline, and hook wiring. No permissions. |
 | `CLAUDE.md` | Curated global instructions: permission patterns, shell-cwd discipline, commit tips, memory routing. |
 
