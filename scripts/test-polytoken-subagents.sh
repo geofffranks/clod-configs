@@ -390,39 +390,125 @@ checked_restore() {
   return 0
 }
 
-# FOCUSED FAILURE-PATH TEST for the restore contract. A checked restore that
-# cannot overwrite an unwritable live file must (a) fail loudly and (b)
-# preserve the recovery bytes (the original) rather than report success or
-# lose them. Uses an isolated sandbox; touches no managed definition.
+# frontmatter_exit_restore <a_live> <a_orig> <r_live> <r_orig> <backup_dir>:
+# EXIT-time self-heal for --frontmatter-mutations. Invokes checked_restore
+# INDEPENDENTLY for each file (no && short-circuit: a first-restore failure
+# must never prevent the second restore from running) and records both
+# statuses. Removes the backup dir only if BOTH restores verified
+# byte-identical. On any failure it preserves the backup (recovery bytes),
+# reports both statuses loudly, and exits nonzero — the explicit exit is
+# required because a bare nonzero return from within an EXIT trap does not
+# change the process exit status.
+frontmatter_exit_restore() {
+  local a_live="$1" a_orig="$2" r_live="$3" r_orig="$4" backup_dir="$5"
+  local rc_a=0 rc_r=0
+  checked_restore "$a_live" "$a_orig" || rc_a=$?
+  checked_restore "$r_live" "$r_orig" || rc_r=$?
+  if [[ $rc_a -eq 0 && $rc_r -eq 0 ]]; then
+    rm -rf "$backup_dir"
+    return 0
+  fi
+  echo "frontmatter mutation EXIT restore FAILED (architect rc=$rc_a, reviewer rc=$rc_r); recovery bytes preserved in $backup_dir" >&2
+  exit 1
+}
+
+# FOCUSED FAILURE-PATH TEST for the restore contract. Failure is injected
+# deterministically by PATH-shadowing cp with a failing stub, so the injection
+# is privilege-independent (unlike chmod-based write protection, which root
+# bypasses). Three scenarios:
+#   A: checked_restore with an impossible restore must fail loudly (nonzero,
+#      diagnostic on stderr), keep the recovery bytes (orig) intact, and leave
+#      the mutated live file unclobbered.
+#   B: the EXIT-time handler with the FIRST restore failing: the second restore
+#      must still be invoked and its status recorded, the backup dir must be
+#      preserved, and the process must exit nonzero.
+#   C: the EXIT-time handler success path: both files restored
+#      byte-identically, the backup dir removed, exit zero.
+# Sandboxes only; touches no managed definition.
 if [[ "${1:-}" == --frontmatter-restore-failure ]]; then
-  sandbox=$(mktemp -d)
+  restore_dirs=()
+  cleanup_restore_dirs() {
+    local d
+    for d in ${restore_dirs[@]+"${restore_dirs[@]}"}; do rm -rf "$d" 2>/dev/null || true; done
+  }
+  trap cleanup_restore_dirs EXIT
+  fail_restore_mode() { echo "restore failure-path: $1" >&2; exit 1; }
+
+  # PATH shadow: makes every cp invocation fail deterministically.
+  stub_dir=$(mktemp -d) && restore_dirs+=("$stub_dir")
+  printf '#!/bin/sh\nexit 97\n' > "$stub_dir/cp"
+  chmod +x "$stub_dir/cp"
+
+  # --- Scenario A: checked_restore, deterministic restore failure --------
+  sandbox=$(mktemp -d) && restore_dirs+=("$sandbox")
   printf 'original-bytes\n' > "$sandbox/orig"
-  printf 'MUTATED\n' > "$sandbox/live"
-  # Make the restore impossible: live's content is not writable (444) and its
-  # directory is not writable (555), so cp -f cannot overwrite or recreate it.
-  chmod 444 "$sandbox/live"
-  chmod 555 "$sandbox"
-  rc=0
-  checked_restore "$sandbox/live" "$sandbox/orig" || rc=$?
-  chmod 644 "$sandbox/live" 2>/dev/null
-  chmod 755 "$sandbox"
-  if [[ $rc == 0 ]]; then
-    echo "restore failure-path: checked_restore swallowed a failed restore (rc=0)" >&2
-    rm -rf "$sandbox"
-    exit 1
-  fi
-  if [[ ! -f "$sandbox/orig" ]] || ! cmp -s "$sandbox/orig" <(printf 'original-bytes\n'); then
-    echo "restore failure-path: recovery bytes were lost" >&2
-    rm -rf "$sandbox"
-    exit 1
-  fi
-  if ! cmp -s "$sandbox/live" <(printf 'MUTATED\n'); then
-    echo "restore failure-path: live was clobbered by an unverified restore" >&2
-    rm -rf "$sandbox"
-    exit 1
-  fi
-  echo "restore failure-path: loud failure + recovery bytes preserved"
-  rm -rf "$sandbox"
+  printf 'MUTATED\n'        > "$sandbox/live"
+  out=""; rc=0
+  out=$(PATH="$stub_dir:$PATH" checked_restore "$sandbox/live" "$sandbox/orig" 2>&1) && rc=0 || rc=$?
+  [[ $rc -eq 1 ]] || fail_restore_mode "A: checked_restore did not fail on impossible restore (rc=$rc)"
+  [[ "$out" == "frontmatter restore failed: $sandbox/live" ]] \
+    || fail_restore_mode "A: failure was not reported loudly (output: $out)"
+  cmp -s "$sandbox/orig" <(printf 'original-bytes\n') || fail_restore_mode "A: recovery bytes lost"
+  cmp -s "$sandbox/live" <(printf 'MUTATED\n') || fail_restore_mode "A: live clobbered by an unverified restore"
+  echo "restore failure A: loud failure + recovery bytes preserved"
+
+  # --- Scenario B: first EXIT-restore fails; second must still run -------
+  sel_dir=$(mktemp -d) && restore_dirs+=("$sel_dir")
+  # Selective stub: fails only for the architect live target, so the first
+  # restore fails and the second must still execute.
+  real_cp=$(command -v cp)
+  {
+    printf '#!/bin/sh\n'
+    printf 'case "$*" in *architect.live*) exit 97;; esac\n'
+    printf 'exec %s "$@"\n' "$real_cp"
+  } > "$sel_dir/cp"
+  chmod +x "$sel_dir/cp"
+
+  sandbox=$(mktemp -d) && restore_dirs+=("$sandbox")
+  printf 'architect-original\n' > "$sandbox/architect.orig"
+  printf 'architect-MUTATED\n'  > "$sandbox/architect.live"
+  printf 'reviewer-original\n'  > "$sandbox/reviewer.orig"
+  printf 'reviewer-MUTATED\n'   > "$sandbox/reviewer.live"
+  backup="$sandbox/backup"
+  mkdir "$backup"
+  cp "$sandbox/architect.orig" "$backup/architect.orig"
+  cp "$sandbox/reviewer.orig"  "$backup/reviewer.orig"
+  out=""; rc=0
+  out=$(PATH="$sel_dir:$PATH" frontmatter_exit_restore \
+        "$sandbox/architect.live" "$backup/architect.orig" \
+        "$sandbox/reviewer.live"  "$backup/reviewer.orig" "$backup" 2>&1) && rc=0 || rc=$?
+  [[ $rc -eq 1 ]] || fail_restore_mode "B: exit handler did not exit nonzero after restore failure (rc=$rc)"
+  cmp -s "$sandbox/reviewer.live" "$sandbox/reviewer.orig" \
+    || fail_restore_mode "B: second restore did not run after the first failed"
+  [[ "$out" == *"architect rc=1"* && "$out" == *"reviewer rc=0"* ]] \
+    || fail_restore_mode "B: both restore statuses were not recorded (output: $out)"
+  cmp -s "$sandbox/architect.live" <(printf 'architect-MUTATED\n') \
+    || fail_restore_mode "B: failed restore was reported as successful"
+  cmp -s "$backup/architect.orig" "$sandbox/architect.orig" \
+    && cmp -s "$backup/reviewer.orig" "$sandbox/reviewer.orig" \
+    || fail_restore_mode "B: backup (recovery bytes) not preserved"
+  echo "restore failure B: first failure does not skip the second; backup preserved; exit nonzero"
+
+  # --- Scenario C: EXIT-restore success path ------------------------------
+  sandbox=$(mktemp -d) && restore_dirs+=("$sandbox")
+  printf 'architect-original\n' > "$sandbox/architect.orig"
+  printf 'architect-MUTATED\n'  > "$sandbox/architect.live"
+  printf 'reviewer-original\n'  > "$sandbox/reviewer.orig"
+  printf 'reviewer-MUTATED\n'   > "$sandbox/reviewer.live"
+  backup="$sandbox/backup"
+  mkdir "$backup"
+  cp "$sandbox/architect.orig" "$backup/architect.orig"
+  cp "$sandbox/reviewer.orig"  "$backup/reviewer.orig"
+  out=""; rc=0
+  out=$(frontmatter_exit_restore \
+        "$sandbox/architect.live" "$backup/architect.orig" \
+        "$sandbox/reviewer.live"  "$backup/reviewer.orig" "$backup" 2>&1) && rc=0 || rc=$?
+  [[ $rc -eq 0 ]] || fail_restore_mode "C: success path exited nonzero (rc=$rc, output: $out)"
+  cmp -s "$sandbox/architect.live" "$sandbox/architect.orig" \
+    && cmp -s "$sandbox/reviewer.live" "$sandbox/reviewer.orig" \
+    || fail_restore_mode "C: files not restored byte-identically"
+  [[ ! -d "$backup" ]] || fail_restore_mode "C: backup dir not removed after both restores verified"
+  echo "restore success C: both restored byte-identically; backup removed"
   exit 0
 fi
 
@@ -451,19 +537,12 @@ if [[ "${1:-}" == --frontmatter-mutations ]]; then
   cp "$architect" "$backup/architect.orig"
   cp "$reviewer"   "$backup/reviewer.orig"
 
-  # Over-written EXIT trap: self-heals any mid-mutation failure by running
-  # checked_restore on BOTH files. Deletes the backup dir ONLY if both
-  # restores are verified byte-identical; otherwise preserves it and fails
-  # loudly (exit 1).
-  trap '
-    if checked_restore "$architect" "$backup/architect.orig" \
-       && checked_restore "$reviewer" "$backup/reviewer.orig"; then
-      rm -rf "$backup"
-    else
-      echo "frontmatter mutation EXIT restore FAILED; recovery bytes preserved in $backup" >&2
-      exit 1
-    fi
-  ' EXIT
+  # Over-written EXIT trap: self-heals any mid-mutation failure via
+  # frontmatter_exit_restore, which restores BOTH files independently
+  # (records both statuses — a first-restore failure must never prevent the
+  # second from running), deletes the backup dir ONLY if both restores verify
+  # byte-identical, otherwise preserves it and exits 1 loudly.
+  trap 'frontmatter_exit_restore "$architect" "$backup/architect.orig" "$reviewer" "$backup/reviewer.orig" "$backup"' EXIT
 
   mutation_rejected() {
     persona="$1"
