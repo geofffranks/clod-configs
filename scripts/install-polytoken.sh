@@ -516,12 +516,20 @@ if [ -d "$ROOT/home/skills" ]; then
     copy_managed_file "$src" "$DEST/skills/$rel"
   done < <(find "$ROOT/home/skills" -type f -print0)
 fi
-# Native Polytoken subagent definitions.
+# Native Polytoken subagent definitions (top-level managed Markdown only:
+# backups and generated artifacts are never installed).
 if [ -d "$ROOT/polytoken/subagents" ]; then
   while IFS= read -r -d '' src; do
     rel="${src#"$ROOT/polytoken/subagents/"}"
     copy_managed_file "$src" "$DEST/subagents/$rel"
-  done < <(find "$ROOT/polytoken/subagents" -type f -print0)
+  done < <(find "$ROOT/polytoken/subagents" -maxdepth 1 -type f -name '*.md' -print0)
+fi
+# Native Polytoken facet definitions (same top-level *.md discipline).
+if [ -d "$ROOT/polytoken/facets" ]; then
+  while IFS= read -r -d '' src; do
+    rel="${src#"$ROOT/polytoken/facets/"}"
+    copy_managed_file "$src" "$DEST/facets/$rel"
+  done < <(find "$ROOT/polytoken/facets" -maxdepth 1 -type f -name '*.md' -print0)
 fi
 
 # 2. Mark executable scripts executable.

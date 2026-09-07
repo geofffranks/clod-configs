@@ -1,0 +1,651 @@
+#!/usr/bin/env bash
+# Contract test harness for the managed workflow facets (workflow-designer,
+# workflow-delivery) and their installer support. No `set -e`: assertions keep
+# running; the exit status is the assertion count.
+#
+# Modes:
+#   --inventory             managed facet inventory + source subagent inventory
+#   --validate-definitions  polytoken validate for every managed facet/subagent
+#   --designer-authority    designer frontmatter, delegation-boundary prompt
+#                           contract, and runtime effective-tool absence
+#   --approval-contract     designer review/handoff wording, delivery approval
+#                           provenance wording, and daemon handoff transitions
+#   --delivery-policy       delivery frontmatter, risk-based isolation, change
+#                           classes, and review-count matrices
+#   --ratatoskr             ratatoskr-only MCP grants, inspect-before-execute,
+#                           and evidence-tier contract
+#   --live-gateway          opt-in container-to-host gateway smoke; requires
+#                           POLYTOKEN_LIVE_GATEWAY=1, else an explicit skip
+#   --docs                  Task 4 stub: reported PENDING, never a pass
+#
+# Default (no args): full run of the mandatory non-doc source checks. It does
+# not require the live gateway and reports docs validation as pending.
+#
+# Runtime evidence: daemon-backed modes start an ISOLATED polytoken daemon
+# (isolated config/project/session dirs, pre-created credential file) and use
+# the documented /tools/effective?facet=, /facet, and /interrogative/{id}/respond
+# controller endpoints. If the daemon cannot start, the authority checks FAIL —
+# static prompt checks never substitute for runtime evidence.
+set -uo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FACETS_SRC="$REPO/polytoken/facets"
+SUBAGENTS_SRC="$REPO/polytoken/subagents"
+LIVE_CFG="${POLYTOKEN_USER_CONFIG_DIR:-$HOME/.config/polytoken}"
+
+pass=0 fail=0
+ok() { echo "  ok: $1"; pass=$((pass + 1)); }
+no() { echo "  FAIL: $1"; fail=$((fail + 1)); }
+sc() { echo; echo "=== $1 ==="; }
+finish() {
+  echo
+  echo "=== $pass passed, $fail failed ==="
+  [ "$fail" -eq 0 ]
+}
+
+# --- source-file assertion helpers ---
+# Collapsed text of a file: newlines and run of spaces reduced to one space,
+# so contract phrases may span wrapped markdown lines.
+collapse() { tr '\n' ' ' < "$1" | tr -s ' '; }
+expect_in() { # label file phrase
+  if collapse "$2" | grep -Fq -- "$3"; then
+    ok "$1"
+  else
+    no "$1 (missing: $3)"
+  fi
+}
+expect_not_in() { # label file phrase
+  if collapse "$2" | grep -Fq -- "$3"; then
+    no "$1 (stale or contradicting phrase present: $3)"
+  else
+    ok "$1"
+  fi
+}
+# Enable, in an isolated config copy, exactly the disabled models that the
+# managed definitions pin or fall back to. Enabling ALL disabled models is
+# unsafe: the daemon's strict config check rejects enabled entries like
+# zai/glm-4.7 as "custom model overrides require a provider reference".
+# Model liveness is a live-environment property, reported, not silently
+# rewritten across the board.
+enable_referenced_models() { # config-yaml
+  local cfg="$1" fmfile refs key cur
+  fmfile="$(mktemp)"; refs="$(mktemp)"
+  local f
+  for f in "$FACETS_SRC/"*.md "$SUBAGENTS_SRC/"*.md; do
+    awk 'NR==1 && $0=="---"{next} /^---$/{exit} {print}' "$f" > "$fmfile"
+    { yq -r '.polytoken.model // ""' "$fmfile"; yq -r '.polytoken.fallback_models[]?' "$fmfile"; } \
+      | sed 's/(.*$//' >> "$refs"
+  done
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    # No `// true` fallback here: yq's alt operator treats `false` as empty,
+    # so `false // true` prints "true" and the enable step would be skipped.
+    cur="$(yq -r ".models.\"$key\".enabled" "$cfg")" 2>/dev/null
+    [ "$cur" = "false" ] && yq -i ".models.\"$key\".enabled = true" "$cfg"
+  done < <(sort -u "$refs")
+  rm -f "$fmfile" "$refs"
+}
+referenced_disabled_note() { # config-yaml (live copy, pre-enable)
+  local cfg="$1" fmfile refs note
+  fmfile="$(mktemp)"; refs="$(mktemp)"
+  local f
+  for f in "$FACETS_SRC/"*.md "$SUBAGENTS_SRC/"*.md; do
+    awk 'NR==1 && $0=="---"{next} /^---$/{exit} {print}' "$f" > "$fmfile"
+    { yq -r '.polytoken.model // ""' "$fmfile"; yq -r '.polytoken.fallback_models[]?' "$fmfile"; } \
+      | sed 's/(.*$//' >> "$refs"
+  done
+  note="$(while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    # Raw value, no `//`: yq's alt operator maps `false` to the fallback,
+    # which would hide exactly the disabled models we must report.
+    yq -r ".models.\"$key\".enabled" "$cfg" | grep -qx false && echo "$key"
+  done < <(sort -u "$refs"))"
+  if [ -n "$note" ]; then
+    echo "  limitation: live config disables the referenced model(s) enabled only in the"
+    echo "              isolated copy: $(printf '%s' "$note" | tr '\n' ' ')"
+  fi
+  rm -f "$fmfile" "$refs"
+}
+# Frontmatter JSON value: yq -o=json over lines 2..(closing ---).
+fm_json() { # file yq-expr
+  local f="$1" expr="$2" fm rc
+  fm="$(mktemp)"
+  awk 'NR==1 && $0=="---"{next} /^---$/{exit} {print}' "$f" > "$fm"
+  yq -o=json -I=0 "$expr" "$fm"
+  rc=$?
+  rm -f "$fm"
+  return $rc
+}
+expect_fm() { # label file yq-expr expected-json
+  local actual
+  actual="$(fm_json "$2" "$3")" || { no "$2: unparseable frontmatter for $3"; return; }
+  if [ "$actual" = "$4" ]; then
+    ok "$1"
+  else
+    no "$1"
+    echo "       want: $4"
+    echo "       got:  $actual"
+  fi
+}
+expect_list() { # label file yq-expr comma-separated exact-order list
+  local want
+  want="$(printf '[%s]\n' "${4//,/, }" | yq -o=json -I=0 '.')"
+  expect_fm "$1" "$2" "$3" "$want"
+}
+
+# --- isolated daemon helpers ---
+DAEMON_PID=""
+DAEMON_WORK=""
+DAEMON_URL=""
+DAEMON_TKN=""
+WORK_DIRS=()
+cleanup() {
+  if [ -n "$DAEMON_PID" ]; then
+    kill "$DAEMON_PID" 2>/dev/null
+    wait "$DAEMON_PID" 2>/dev/null
+  fi
+  local w
+  for w in "${WORK_DIRS[@]}"; do rm -rf "$w"; done
+  return 0
+}
+trap cleanup EXIT
+
+start_daemon() {
+  local work cfg proj sess token port i attempt
+  command -v polytoken >/dev/null 2>&1 || { echo "  polytoken CLI not found" >&2; return 1; }
+  [ -f "$LIVE_CFG/config.yaml" ] || { echo "  no live config at $LIVE_CFG/config.yaml" >&2; return 1; }
+  work="$(mktemp -d)"
+  WORK_DIRS+=("$work")
+  cfg="$work/gcfg"; proj="$work/proj"; sess="$work/sessions"
+  mkdir -p "$cfg/facets" "$cfg/subagents" "$proj" "$sess"
+  cp "$LIVE_CFG/config.yaml" "$cfg/config.yaml"
+  # Isolated copy only: enable ONLY the disabled models that the managed
+  # definitions pin or fall back to. Enabling ALL disabled entries breaks the
+  # daemon's strict config check (entries without provider refs are rejected
+  # as "custom model overrides"). The live limitation is reported, not hidden.
+  referenced_disabled_note "$cfg/config.yaml"
+  enable_referenced_models "$cfg/config.yaml"
+  cp "$FACETS_SRC/"*.md "$cfg/facets/"
+  cp "$SUBAGENTS_SRC/"*.md "$cfg/subagents/"
+  DAEMON_WORK="$work"
+  DAEMON_URL=""; DAEMON_TKN=""; DAEMON_PID=""
+  for attempt in 1 2 3; do
+    port=$((20000 + RANDOM % 40000))
+    token="$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')"
+    printf '{"version":1,"kind":"polytoken-daemon-credential","token":"%s"}' "$token" > "$work/cred.json"
+    chmod 600 "$work/cred.json"
+    polytoken daemon --global-config-dir "$cfg" --project-dir "$proj" \
+      --sessions-dir "$sess" --credential-file "$work/cred.json" \
+      --listen "127.0.0.1:$port" > "$work/daemon.log" 2>&1 &
+    DAEMON_PID=$!
+    for i in $(seq 1 60); do
+      if curl -sS --max-time 1 -H "Authorization: Bearer $token" \
+           "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
+        DAEMON_URL="http://127.0.0.1:$port"
+        DAEMON_TKN="$token"
+        return 0
+      fi
+      sleep 0.5
+    done
+    kill "$DAEMON_PID" 2>/dev/null; wait "$DAEMON_PID" 2>/dev/null
+    DAEMON_PID=""
+  done
+  echo "  isolated daemon failed to start; log tail:" >&2
+  tail -n 8 "$work/daemon.log" >&2
+  return 1
+}
+stop_daemon() {
+  if [ -n "$DAEMON_PID" ]; then
+    kill "$DAEMON_PID" 2>/dev/null
+    wait "$DAEMON_PID" 2>/dev/null
+  fi
+  DAEMON_PID=""
+}
+# dapi METHOD PATH BODY OUTFILE -> prints HTTP status code
+dapi() {
+  local method="$1" path="$2" body="$3" out="$4"
+  local -a args=(-sS --max-time 20 -o "$out" -w '%{http_code}' -X "$method"
+    -H "Authorization: Bearer $DAEMON_TKN" -H 'Content-Type: application/json')
+  [ -n "$body" ] && args+=(-d "$body")
+  curl "${args[@]}" "$DAEMON_URL$path"
+}
+daemon_state() { # prints JSON body of GET /state
+  local out="$DAEMON_WORK/state.json"
+  dapi GET /state "" "$out" >/dev/null
+  cat "$out"
+}
+effective_plan() { # facet OUTFILE -> 0 on success; OUTFILE holds the response
+  local code out
+  out="$2"
+  code="$(dapi GET "/tools/effective?facet=$1" "" "$out")"
+  [ "$code" = 200 ]
+}
+plan_names() { # planJSONfile -> sorted tool names
+  jq -r '.plan.full_schema[].name' "$1" | sort
+}
+require_daemon() { # label
+  if ! start_daemon; then
+    no "$1: isolated daemon unavailable — runtime authority checks cannot run"
+    echo "       (per contract, static checks never substitute: mode fails)" >&2
+    return 1
+  fi
+  return 0
+}
+
+DESIGNER="$FACETS_SRC/workflow-designer.md"
+DELIVERY="$FACETS_SRC/workflow-delivery.md"
+
+# =====================================================================
+run_inventory() {
+  sc "managed_facet_inventory"
+  [ -f "$DESIGNER" ] && ok "designer source file present" || no "designer source file present"
+  [ -f "$DELIVERY" ] && ok "delivery source file present" || no "delivery source file present"
+  [ -f "$DESIGNER" ] && [ -f "$DELIVERY" ] || return
+  local found
+  found="$(find "$FACETS_SRC" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
+  [ "$found" = "$(printf '%s\n' workflow-delivery.md workflow-designer.md | sort)" ] \
+    && ok "source facets are exactly the two managed definitions" \
+    || { no "source facets are exactly the two managed definitions"; printf '%s\n' "$found" | sed 's/^/       /'; }
+  [ "$(fm_json "$DESIGNER" '.name')" = '"workflow-designer"' ] \
+    && ok "designer: frontmatter name matches file stem" || no "designer: frontmatter name matches file stem"
+  [ "$(fm_json "$DELIVERY" '.name')" = '"workflow-delivery"' ] \
+    && ok "delivery: frontmatter name matches file stem" || no "delivery: frontmatter name matches file stem"
+  local head
+  for f in "$DESIGNER" "$DELIVERY"; do
+    head="$(awk '/^---$/{c++; next} c==2{print; exit}' "$f")"
+    [ "$head" = '{{ transclude("polytoken://system_prompts/facet.md") }}' ] \
+      && ok "$(basename "$f"): body starts with the facet base transclusion" \
+      || no "$(basename "$f"): body starts with the facet base transclusion (got: $head)"
+  done
+  sc "managed source subagent inventory (14)"
+  local actual expected
+  expected="$(printf '%s\n' abstraction-reviewer agent-workflow-architect agent-workflow-engineer \
+    completeness-reviewer correctness-reviewer general-reviewer implementer maintainability-reviewer \
+    mobile-app-expert researcher reviewer software-architect software-engineer validator | sort)"
+  actual="$(find "$SUBAGENTS_SRC" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sed 's/\.md$//' | sort)"
+  [ "$actual" = "$expected" ] && ok "14 managed subagent definitions present" \
+    || { no "14 managed subagent definitions present"; diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | sed 's/^/       /'; }
+}
+
+# =====================================================================
+run_validate_definitions() {
+  sc "all_source_definitions_validate"
+  command -v polytoken >/dev/null 2>&1 || { no "polytoken CLI available"; return; }
+  [ -f "$LIVE_CFG/config.yaml" ] || { no "live config to seed isolated validation dir"; return; }
+  local work f name out
+  work="$(mktemp -d)"; WORK_DIRS+=("$work")
+  mkdir -p "$work/facets" "$work/subagents"
+  cp "$LIVE_CFG/config.yaml" "$work/config.yaml"
+  referenced_disabled_note "$work/config.yaml"
+  enable_referenced_models "$work/config.yaml"
+  for f in "$FACETS_SRC/"*.md; do
+    if out="$(polytoken --config-dir "$work" validate facet "$f" 2>&1)"; then
+      ok "validate facet: $(basename "$f")"
+    else
+      no "validate facet: $(basename "$f")"
+      printf '%s\n' "$out" | sed 's/^/       /'
+    fi
+  done
+  for f in "$SUBAGENTS_SRC/"*.md; do
+    if out="$(polytoken --config-dir "$work" validate subagent "$f" 2>&1)"; then
+      ok "validate subagent: $(basename "$f")"
+    else
+      no "validate subagent: $(basename "$f")"
+      printf '%s\n' "$out" | sed 's/^/       /'
+    fi
+  done
+}
+
+# =====================================================================
+run_designer_authority() {
+  sc "designer frontmatter contract"
+  expect_fm "designer: model pin" "$DESIGNER" '.polytoken.model' '"codex/gpt-5.6-luna"'
+  expect_list "designer: fallback_models" "$DESIGNER" '.polytoken.fallback_models' "zai/glm-5.2"
+  expect_list "designer: tools" "$DESIGNER" '.polytoken.tools' \
+    "file_read,glob,grep,web_search,web_fetch,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,write_plan,edit_plan,handoff_plan,read_goal,block_goal,mcp__ratatoskr"
+  expect_list "designer: tools_deny" "$DESIGNER" '.polytoken.tools_deny' \
+    "file_write,file_edit_search_replace,shell_exec,shell_monitor,shell_service,lsp,switch_facet,complete_goal"
+  expect_list "designer: undeferred_tools" "$DESIGNER" '.polytoken.undeferred_tools' \
+    "file_read,glob,grep,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,write_plan,edit_plan,handoff_plan"
+  expect_list "designer: skills_allow" "$DESIGNER" '.polytoken.skills_allow' \
+    "tag!research,brainstorming,agent-orchestration"
+  expect_fm "designer: skills_deny empty" "$DESIGNER" '.polytoken.skills_deny' '[]'
+  expect_fm "designer: autonomous_hint" "$DESIGNER" '.polytoken.autonomous_hint' \
+    '"Allow read-only investigation, read-only specialist consultation, plan editing, and approval handoff; deny direct or delegated project mutation during design."'
+  expect_fm "designer: compaction_hint" "$DESIGNER" '.polytoken.compaction_hint' \
+    '"Preserve goals, constraints, evidence, alternatives, specialist job IDs/results, review dispositions, plan revision, and approval state."'
+  [ "$(fm_json "$DESIGNER" '.polytoken.facet_transitions')" = "null" ] \
+    && ok "designer: no facet_transitions block" || no "designer: no facet_transitions block"
+
+  sc "designer delegation boundary disclosure contract (prompt)"
+  expect_in "discloses no facet-level subagent-name allowlist" "$DESIGNER" \
+    "Polytoken has no facet-level subagent-name allowlist"
+  expect_in "names the boundary as a non-runtime prompt contract" "$DESIGNER" \
+    "not a runtime security boundary"
+  expect_in "prohibits write-capable subagent dispatch" "$DESIGNER" \
+    "Never dispatch write-capable or implementation roles"
+  expect_in "never claims enforcement of name restrictions" "$DESIGNER" \
+    "never claim that Polytoken technically enforces subagent-name restrictions"
+  expect_not_in "makes no positive runtime-enforcement claim" "$DESIGNER" \
+    "Polytoken prevents"
+  expect_in "consults architect and read-only specialists only" "$DESIGNER" \
+    'Consult via `agent-workflow-architect` and conditional read-only specialists only'
+  expect_in "bounds concurrency to 4" "$DESIGNER" "limit concurrency to 4 simultaneous subagents"
+  expect_in "forbids duplicate active assignments" "$DESIGNER" \
+    "never hold two active assignments"
+
+  sc "designer_effective_tools_are_read_only + designer_mutation_attempt_is_unavailable (runtime)"
+  if require_daemon "designer authority (runtime)"; then
+    local out="$DAEMON_WORK/designer-effective.json"
+    if effective_plan workflow-designer "$out"; then
+      ok "runtime: /tools/effective resolved workflow-designer"
+      [ "$(jq -r '.model' "$out")" = "codex/gpt-5.6-luna" ] \
+        && ok "runtime: designer model pin resolves" || no "runtime: designer model pin resolves (got $(jq -r .model "$out"))"
+      local names n missing=""
+      names="$(plan_names "$out")"
+      local required="ask_user_question block_goal edit_plan file_read glob grep handoff_plan job_block job_cancel job_result job_status list_jobs message_subagent read_goal skill subagent tool_search web_fetch web_search write_plan"
+      for n in $required; do
+        grep -qx "$n" <<<"$names" || missing="$missing $n"
+      done
+      [ -z "$missing" ] && ok "runtime: required designer tools all exposed" || no "runtime: required designer tools present (missing:$missing)"
+      local forbidding="file_write file_edit_search_replace shell_exec shell_monitor shell_service lsp switch_facet complete_goal" absent=""
+      for n in $forbidding; do
+        grep -qx "$n" <<<"$names" && absent="$absent $n"
+      done
+      [ -z "$absent" ] && ok "runtime: mutation/self-transition/goal-completion tools absent" \
+        || no "runtime: designer mutation tools absent (present:$absent)"
+    else
+      no "runtime: /tools/effective resolved workflow-designer"
+    fi
+    stop_daemon
+  fi
+}
+
+# =====================================================================
+run_approval_contract() {
+  sc "designer_review_and_target_contract (prompt)"
+  expect_in "explicitly dispatches built-in plan-reviewer" "$DESIGNER" \
+    "explicitly dispatch the named built-in \`plan-reviewer\` subagent against the saved plan"
+  expect_in "rebut-or-fix Critical/High then fresh rereview" "$DESIGNER" \
+    "dispatch a fresh \`plan-reviewer\` rereview against the revised saved plan"
+  expect_in "loops until no blocking finding" "$DESIGNER" "Repeat until no blocking finding remains"
+  expect_in "requests explicit operator approval" "$DESIGNER" \
+    "present the final plan to the operator and request explicit approval"
+  expect_in "handoff target is workflow-delivery by prompt contract" "$DESIGNER" \
+    "call \`handoff_plan\` with target facet \`workflow-delivery\`"
+  expect_in "discloses handoff accepts any target argument" "$DESIGNER" \
+    "\`handoff_plan\` accepts any target argument, so do not claim the target is technically restricted"
+  expect_in "never switches or hands off before approval" "$DESIGNER" \
+    "never switch or hand off before approval"
+  expect_in "does not use switch_facet at all" "$DESIGNER" "Do not use \`switch_facet\`"
+
+  sc "delivery_unverified_provenance_disclosure (prompt)"
+  expect_in "defaults approval provenance unverified" "$DELIVERY" \
+    "Default to \`approval provenance unverified\`"
+  expect_in "states no documented activation provenance exists" "$DELIVERY" \
+    "no documented activation reason, previous-facet field, or approved-handoff flag"
+  expect_in "direct invocation is execution authority" "$DELIVERY" \
+    "operator authorization to execute the requested work"
+  expect_in "direct invocation is not reviewed-plan proof" "$DELIVERY" \
+    "It is **not** proof that a plan was reviewed or approved"
+  expect_in "reports provenance state plainly" "$DELIVERY" "report the provenance state plainly"
+  expect_in "material redesign returns to designer for renewed approval" "$DELIVERY" \
+    "returns to \`workflow-designer\` for renewed planning and operator approval"
+  expect_in "bounded in-scope decisions proceed" "$DELIVERY" \
+    "Ordinary bounded implementation decisions within the approved scope can proceed without returning"
+
+  sc "approved handoff to workflow-delivery (runtime controller)"
+  if ! require_daemon "approval handoff (runtime)"; then return; fi
+  local out="$DAEMON_WORK/handoff.json" code
+  local base; base="$(daemon_state | jq -r .active_facet 2>/dev/null)"
+  code="$(dapi POST /facet '{"facet":"workflow-designer"}' "$out")"
+  [ "$code" = 200 ] && ok "runtime: can activate designer from active facet ($base)" \
+    || no "runtime: can activate designer (HTTP $code: $(cat "$out" | head -c 200))"
+  [ "$(daemon_state | jq -r .active_facet)" = "workflow-designer" ] \
+    && ok "runtime: active facet is workflow-designer" || no "runtime: active facet is workflow-designer"
+  code="$(dapi POST /facet '{"facet":"no-such-facet"}' "$out")"
+  [ "$code" = 422 ] && ok "runtime: unknown facet rejected (422)" \
+    || no "runtime: unknown facet rejected (got HTTP $code)"
+  code="$(dapi POST /facet '{"facet":"workflow-delivery"}' "$out")"
+  [ "$code" = 200 ] && ok "runtime: operator-approved handoff designer -> workflow-delivery succeeds (POST /facet 200)" \
+    || no "runtime: handoff designer -> workflow-delivery (HTTP $code: $(cat "$out" | head -c 200))"
+  [ "$(daemon_state | jq -r .active_facet)" = "workflow-delivery" ] \
+    && ok "runtime: active facet is workflow-delivery after handoff" \
+    || no "runtime: active facet is workflow-delivery after handoff"
+
+  sc "conditional return to designer gates on confirmation (runtime)"
+  local logfile known newid i
+  # Baseline of pending interrogative IDs, captured before triggering.
+  known="$(daemon_state | jq -r '.pending_interrogatives[].interrogative_id' 2>/dev/null | head -n 1)"
+  local curlout="$DAEMON_WORK/condswitch.log"
+  curl -sS --max-time 60 -w '%{http_code}' -X POST -H "Authorization: Bearer $DAEMON_TKN" \
+    -H 'Content-Type: application/json' -d '{"facet":"workflow-designer"}' \
+    "$DAEMON_URL/facet" > "$curlout" 2>&1 &
+  local curlpid=$!
+  newid=""
+  for i in $(seq 1 40); do
+    local pending; pending="$(daemon_state | jq -r '.pending_interrogatives[].interrogative_id' 2>/dev/null)"
+    if [ -n "$known" ]; then
+      newid="$(grep -v -x -F -- "$known" <<<"$pending" | head -1)"
+    else
+      newid="$(head -1 <<<"$pending")"
+    fi
+    [ -n "$newid" ] && break
+    sleep 0.5
+  done
+  [ -n "$newid" ] && ok "runtime: conditional transition raised a confirmation interrogative" \
+    || no "runtime: conditional transition raised a confirmation interrogative"
+  if [ -n "$newid" ]; then
+    local q
+    q="$(daemon_state | jq -r ".pending_interrogatives[] | select(.interrogative_id==\"$newid\") | .question" 2>/dev/null)"
+    [ "$q" = "Material redesign requires renewed planning and operator approval." ] \
+      && ok "runtime: interrogative asks the exact delivery->designer condition" \
+      || no "runtime: interrogative asks the exact condition (got: $q)"
+    code="$(dapi POST "/interrogative/$newid/respond" '{"kind":"confirmation_answer","confirmed":true}' "$out")"
+    [ "$code" = 200 ] && ok "runtime: confirmation accepted (HTTP 200)" || no "runtime: confirmation accepted (HTTP $code)"
+  fi
+  wait "$curlpid" 2>/dev/null
+  local finalcode; finalcode="$(tail -1 "$curlout")"
+  [ "$finalcode" = 200 ] && ok "runtime: conditional switch POST completed 200 after confirmation" \
+    || no "runtime: conditional switch POST completed 200 (got $finalcode)"
+  [ "$(daemon_state | jq -r .active_facet)" = "workflow-designer" ] \
+    && ok "runtime: confirmed switch lands on workflow-designer" \
+    || no "runtime: confirmed switch lands on workflow-designer"
+  # The session log lives under the on-disk session directory, which differs
+  # from the session_id field of /state. The isolated sessions dir belongs to
+  # this daemon alone, so locate it directly.
+  logfile="$(find "$DAEMON_WORK/sessions" -name 'log.jsonl' -type f 2>/dev/null | head -1)"
+  [ -n "$logfile" ] && \
+    grep -q '"from_facet":"workflow-delivery","to_facet":"workflow-designer"' "$logfile" \
+    && ok "runtime: session log records the delivery -> designer facet_switch" \
+    || no "runtime: session log records the delivery -> designer facet_switch"
+  stop_daemon
+}
+
+# =====================================================================
+run_delivery_policy() {
+  sc "delivery frontmatter contract"
+  expect_fm "delivery: model pin" "$DELIVERY" '.polytoken.model' '"codex/gpt-5.6-luna"'
+  expect_list "delivery: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "zai/glm-5.2"
+  expect_list "delivery: tools" "$DELIVERY" '.polytoken.tools' \
+    "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,shell_monitor,shell_service,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,todo_create,todo_update,todo_complete,todo_delete,todo_list,pushd,popd,switch_facet,read_goal,complete_goal,block_goal,mcp__ratatoskr"
+  expect_list "delivery: tools_deny" "$DELIVERY" '.polytoken.tools_deny' \
+    "write_plan,edit_plan,handoff_plan"
+  expect_list "delivery: undeferred_tools" "$DELIVERY" '.polytoken.undeferred_tools' \
+    "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,todo_create,todo_update,todo_complete,todo_list,read_goal,complete_goal,block_goal"
+  expect_list "delivery: skills_allow" "$DELIVERY" '.polytoken.skills_allow' \
+    "tag!research,brainstorming,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy"
+  expect_fm "delivery: skills_deny empty" "$DELIVERY" '.polytoken.skills_deny' '[]'
+  expect_fm "delivery: autonomous_hint" "$DELIVERY" '.polytoken.autonomous_hint' \
+    '"Allow approved bounded implementation and verification; require confirmation for scope expansion, remote writes, destructive operations, or unverified authority."'
+  expect_fm "delivery: compaction_hint" "$DELIVERY" '.polytoken.compaction_hint' \
+    '"Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, and completion state."'
+  [ "$(fm_json "$DELIVERY" '.polytoken.facet_transitions.workflow-designer.allowed')" = "true" ] \
+    && ok "delivery: facet_transitions.workflow-designer.allowed is true" \
+    || no "delivery: facet_transitions.workflow-designer.allowed is true"
+  expect_fm "delivery: transition condition exact" "$DELIVERY" \
+    '.polytoken.facet_transitions.workflow-designer.condition' \
+    '"Material redesign requires renewed planning and operator approval."'
+
+  sc "risk_class_matrix + dirty_tree_and_parallel_writer_isolation (prompt)"
+  expect_in "worktree+branch for multi-file/executable/high-risk/dirty/isolated" "$DELIVERY" \
+    "Use a feature branch plus a separate worktree whenever the work is multi-file, executable (scripts, hooks, code, MCP), high-risk, starts from a dirty tree, or needs physical isolation."
+  expect_in "bounded edit in current clean tree permitted" "$DELIVERY" \
+    "bounded prompt/config/document edit in the current tree only when the tree is clean"
+  expect_in "exact worktree cwd passed to writers" "$DELIVERY" \
+    "Pass the selected worktree as the exact \`cwd\` of every write-capable subagent you dispatch"
+  expect_in "overlapping slices serialized" "$DELIVERY" "Serialize overlapping implementation slices"
+  expect_in "parallel only distinct worktrees, disjoint ownership, one integration owner" "$DELIVERY" \
+    "Parallel writers are allowed only in distinct worktrees with disjoint file ownership and one named integration owner"
+  expect_in "never overwrites unexpected work; stops and reports" "$DELIVERY" \
+    "Never overwrite unrelated work: if unexpected changes overlap your scope, stop and report rather than continuing"
+
+  sc "delegation and concurrency (prompt)"
+  expect_in "delegates bounded slices to agent-workflow-engineer" "$DELIVERY" \
+    "Delegate bounded implementation slices to \`agent-workflow-engineer\`"
+  expect_in "correlates dispatches by job ID" "$DELIVERY" "correlate every dispatch by job ID"
+  expect_in "bounds concurrency to 4" "$DELIVERY" "limit concurrency to 4 simultaneous subagents"
+  expect_in "forbids duplicate active assignments" "$DELIVERY" \
+    "never hold two active assignments to the same role on the same scope"
+
+  sc "change-class test policy matrix (prompt)"
+  expect_in "prompt/docs: no TDD" "$DELIVERY" "Prompt/Markdown/docs: no TDD"
+  expect_in "declarative: no forced RED/GREEN; validate exposure" "$DELIVERY" \
+    "Declarative facet/subagent/configuration: no forced RED/GREEN; validate"
+  expect_in "executable: RED/GREEN then focused and broader" "$DELIVERY" \
+    "Executable scripts, hooks, code, and MCP behavior: RED/GREEN TDD, then focused and broader checks"
+  expect_in "mixed tasks split" "$DELIVERY" "Split mixed tasks"
+
+  sc "review_count_matrix (prompt)"
+  expect_in "every substantive change: one architect review" "$DELIVERY" \
+    "one independent \`agent-workflow-architect\` review"
+  expect_in "second fresh review for high-risk surfaces" "$DELIVERY" \
+    "A second fresh workflow review is additionally required"
+  expect_in "names the high-risk surfaces" "$DELIVERY" \
+    "permissions, authority, approval gates, delegation, autonomous behavior, MCP routing, or destructive capabilities"
+  expect_in "reviewers never fix their own findings" "$DELIVERY" "Reviewers never fix their own findings"
+  expect_in "batch fixes, rerun only affected checks" "$DELIVERY" \
+    "Batch valid blocking findings into one coherent fix, then rerun only the affected checks"
+
+  sc "evidence and completion (prompt)"
+  expect_in "evidence tiers named" "$DELIVERY" \
+    "container-local evidence, host evidence mediated through ratatoskr, and manual operator confirmation"
+  expect_in "no automatic remote writes" "$DELIVERY" "No remote writes: never push, open a PR"
+  expect_in "verify before complete_goal" "$DELIVERY" "Verify before \`complete_goal\`"
+}
+
+# =====================================================================
+run_ratatoskr() {
+  sc "ratatoskr-only MCP grants (frontmatter)"
+  local f
+  for f in "$DESIGNER" "$DELIVERY"; do
+    local b="$(basename "$f" .md)"
+    local mcp_tools nonrs
+    mcp_tools="$(fm_json "$f" '.polytoken.tools' | jq -r '.[] | select(startswith("mcp__"))')"
+    local only_rs=1 t
+    for t in $mcp_tools; do [ "$t" = "mcp__ratatoskr" ] || only_rs=0; done
+    [ -n "$mcp_tools" ] && [ "$only_rs" = 1 ] \
+      && ok "$b: only mcp__ratatoskr MCP namespace granted" || no "$b: only mcp__ratatoskr MCP namespace granted"
+    fm_json "$f" '.' | grep -q 'ALL_MCP' && no "$b: no tag!ALL_MCP grant" || ok "$b: no tag!ALL_MCP grant"
+  done
+  sc "inspect-before-execute and reconnect rules (prompt)"
+  for f in "$DESIGNER" "$DELIVERY"; do
+    local b="$(basename "$f" .md)"
+    expect_in "$b: list servers/tools then inspect schema before executing" "$f" \
+      "Before executing anything through the gateway: list the available servers and tools, then inspect the selected tool's schema"
+    expect_in "$b: reconnect only on auth/token expiry" "$f" \
+      "Reconnect an upstream only after an authentication or token-expiry failure"
+    expect_in "$b: never direct upstream MCP first" "$f" \
+      "Never set up or authenticate a duplicate direct MCP connection first"
+  done
+  sc "evidence_tier_contract (prompt)"
+  expect_in "designer: three evidence tiers" "$DESIGNER" \
+    "container-local evidence, host evidence mediated through ratatoskr, and manual operator confirmation"
+  expect_in "delivery: three evidence tiers" "$DELIVERY" \
+    "container-local evidence, host evidence mediated through ratatoskr, and manual operator confirmation"
+  sc "ratatoskr_only_effective_grants (runtime)"
+  if ! require_daemon "ratatoskr namespace (runtime)"; then return; fi
+  local out facet
+  # The daemon connects to the ratatoskr gateway asynchronously after boot;
+  # /tools/effective has no mcp__ratatoskr__* entries until the connection
+  # lands (~10-20s empirically). Wait for it to appear before asserting —
+  # a 60s timeout is a real failure, not a static substitution.
+  local waited=0
+  while [ "$waited" -lt 60 ]; do
+    effective_plan workflow-delivery "$DAEMON_WORK/mcp-wait.json" || true
+    [ -n "$(jq -r '.plan.full_schema[].name' "$DAEMON_WORK/mcp-wait.json" 2>/dev/null \
+        | grep '^mcp__ratatoskr__' | head -1)" ] && break
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if [ "$waited" -ge 60 ]; then
+    no "runtime: ratatoskr gateway tools appeared in effective plan within 60s"
+    stop_daemon
+    return
+  fi
+  for facet in workflow-designer workflow-delivery; do
+    out="$DAEMON_WORK/$facet-effective.json"
+    if effective_plan "$facet" "$out"; then
+      bad_mcp="$(jq -r '.plan.full_schema[].name' "$out" | grep '^mcp__' | grep -v '^mcp__ratatoskr__' || true)"
+      [ -z "$bad_mcp" ] && ok "runtime $facet: effective MCP tools stay in ratatoskr namespace" \
+        || no "runtime $facet: non-ratatoskr MCP tools present ($bad_mcp)"
+      [ -n "$(jq -r '.plan.full_schema[].name' "$out" | grep '^mcp__ratatoskr__' | head -1)" ] \
+        && ok "runtime $facet: ratatoskr gateway tools exposed" \
+        || no "runtime $facet: no mcp__ratatoskr__* tools in effective plan"
+    else
+      no "runtime $facet: /tools/effective failed"
+    fi
+  done
+  stop_daemon
+}
+
+# =====================================================================
+run_live_gateway() {
+  sc "live_gateway_smoke (container -> host.docker.internal:8910/mcp)"
+  if [ "${POLYTOKEN_LIVE_GATEWAY:-0}" != "1" ]; then
+    echo "  SKIP: live gateway smoke requires POLYTOKEN_LIVE_GATEWAY=1 (explicit skip; offline CI is expected)"
+    return
+  fi
+  local code
+  code="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' http://host.docker.internal:8910/mcp 2>/dev/null || echo 000)"
+  if [ "$code" != "000" ]; then
+    ok "gateway reachable at host.docker.internal:8910/mcp (HTTP $code)"
+  else
+    no "gateway reachable at host.docker.internal:8910/mcp (no HTTP response)"
+  fi
+  echo "  limitation: container-local reachability probe only; gateway capability and"
+  echo "              upstream health are host-tier evidence via mcp__ratatoskr, not this smoke"
+}
+
+run_docs() {
+  sc "docs validation"
+  echo "  PENDING (Task 4): README docs validation is not implemented yet."
+  echo "                    Reported as pending — this is NOT a pass."
+}
+
+# =====================================================================
+case "${1:-}" in
+  --inventory)            run_inventory ;;
+  --validate-definitions) run_validate_definitions ;;
+  --designer-authority)   run_designer_authority ;;
+  --approval-contract)    run_approval_contract ;;
+  --delivery-policy)      run_delivery_policy ;;
+  --ratatoskr)            run_ratatoskr ;;
+  --live-gateway)         run_live_gateway ;;
+  --docs)                 run_docs ;;
+  ""|full)
+    run_inventory
+    run_validate_definitions
+    run_designer_authority
+    run_approval_contract
+    run_delivery_policy
+    run_ratatoskr
+    sc "docs"
+    echo "  PENDING (Task 4): docs validation deferred — reported as pending, not passed."
+    ;;
+  *)
+    echo "usage: $0 [--inventory|--validate-definitions|--designer-authority|--approval-contract|--delivery-policy|--ratatoskr|--live-gateway|--docs]" >&2
+    exit 2
+    ;;
+esac
+finish

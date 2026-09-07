@@ -70,10 +70,16 @@ for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/h
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-expected_subagents="$(printf '%s\n' implementer.md researcher.md reviewer.md validator.md | sort)"
+expected_subagents="$(printf '%s\n' abstraction-reviewer.md agent-workflow-architect.md agent-workflow-engineer.md completeness-reviewer.md correctness-reviewer.md general-reviewer.md implementer.md maintainability-reviewer.md mobile-app-expert.md researcher.md reviewer.md software-architect.md software-engineer.md validator.md | sort)"
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "installed exactly the shipped subagents" || no "installed exactly the shipped subagents"
+  && ok "installed exactly the 14 shipped subagents" || no "installed exactly the 14 shipped subagents"
+expected_facets="$(printf '%s\n' workflow-designer.md workflow-delivery.md | sort)"
+actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
+[ "$actual_facets" = "$expected_facets" ] \
+  && ok "installed exactly the 2 shipped facets" || no "installed exactly the 2 shipped facets"
+cmp -s "$REPO/polytoken/facets/workflow-delivery.md" "$D/facets/workflow-delivery.md" 2>/dev/null \
+  && ok "installed facet matches source" || no "installed facet matches source"
 [ -x "$D/hooks/adapter.sh" ] && ok "adapter executable" || no "adapter executable"
 for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/grep-guard/hook.sh compat/large-read-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -x "$D/$x" ] && ok "executable: $x" || no "executable: $x"
@@ -399,6 +405,99 @@ else
   echo "-----------------------------------------" >&2
 fi
 rm -rf "$D" "$FAKEHOME"
+
+# --- P23: only top-level *.md definitions install; backups/generated/nested excluded ---
+sc "P23 top-level *.md only -> backups, generated files, and subdirs excluded"
+# Scratch install root: real subagent/facet sources plus planted non-definition
+# artifacts that a top-level-only selection must skip.
+S="$(mktemp -d)"
+mkdir -p "$S/scripts"
+cp "$INSTALL_PT" "$S/scripts/install-polytoken.sh"
+ln -s "$REPO/home" "$S/home"
+cp -R "$REPO/polytoken" "$S/polytoken"
+printf 'backup junk\n' > "$S/polytoken/subagents/validator.md.bak-20260101-000000"
+mkdir -p "$S/polytoken/subagents/generated"
+printf 'nested junk\n' > "$S/polytoken/subagents/generated/nested.md"
+printf 'swp junk\n' > "$S/polytoken/facets/workflow-designer.md.swp"
+mkdir -p "$S/polytoken/facets/backups"
+printf 'backup junk\n' > "$S/polytoken/facets/backups/workflow-delivery.md.bak-20260101-000000"
+D="$(mktemp -d)"
+POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 0 >/dev/null
+actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
+[ "$actual_subagents" = "$expected_subagents" ] \
+  && ok "top-level-only: subagent inventory still exactly 14" || no "top-level-only: subagent inventory still exactly 14"
+actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
+[ "$actual_facets" = "$expected_facets" ] \
+  && ok "top-level-only: facet inventory still exactly 2" || no "top-level-only: facet inventory still exactly 2"
+[ ! -e "$D/subagents/validator.md.bak-20260101-000000" ] \
+  && ok "top-level-only: subagent backup not installed" || no "top-level-only: subagent backup not installed"
+[ ! -e "$D/subagents/generated" ] \
+  && ok "top-level-only: subagent subdirectory not installed" || no "top-level-only: subagent subdirectory not installed"
+[ ! -e "$D/facets/workflow-designer.md.swp" ] \
+  && ok "top-level-only: facet swapfile not installed" || no "top-level-only: facet swapfile not installed"
+[ ! -e "$D/facets/backups" ] \
+  && ok "top-level-only: facet backup directory not installed" || no "top-level-only: facet backup directory not installed"
+rm -rf "$D" "$S"
+
+# --- P24: definition conflict -> decline preserves, overwrite replaces with backup ---
+sc "P24 definition conflict -> decline preserves, overwrite replaces with backup"
+D="$(valid_base)"
+custom_subagent="$D/subagents/my-custom.md"
+mkdir -p "$D/subagents" "$D/facets"
+printf 'user subagent definition\n' > "$custom_subagent"
+printf -- '---\nname: implementer\npolytoken:\n  model: codex/gpt-5.6-luna\n---\nUSER-CUSTOM-IMPLEMENTER-MARKER\n' > "$D/subagents/implementer.md"
+cp "$REPO/polytoken/facets/workflow-designer.md" "$D/facets/workflow-designer.md"
+printf '\nUSER-CUSTOM-FACET-MARKER\n' >> "$D/facets/workflow-designer.md"
+before_subagent="$(cat "$D/subagents/implementer.md")"
+before_facet="$(cat "$D/facets/workflow-designer.md")"
+TTY="$(mktemp)"; printf 'n\n' > "$TTY"
+out="$(run_pt "$D" "$TTY" 0)"
+[ "$(cat "$D/subagents/implementer.md")" = "$before_subagent" ] \
+  && ok "declined subagent conflict kept your bytes" || no "declined subagent conflict kept your bytes"
+[ "$(cat "$D/facets/workflow-designer.md")" = "$before_facet" ] \
+  && ok "declined facet conflict kept your bytes" || no "declined facet conflict kept your bytes"
+[ ! -e "$custom_subagent" ] && no "unrelated destination subagent preserved" || ok "unrelated destination subagent preserved"
+ls "$D"/subagents/implementer.md.bak-* >/dev/null 2>&1 \
+  && no "declined subagent conflict wrote no backup" || ok "declined subagent conflict wrote no backup"
+rm -rf "$D" "$TTY"
+
+D="$(valid_base)"
+custom_subagent="$D/subagents/my-custom.md"
+mkdir -p "$D/subagents" "$D/facets"
+printf 'user subagent definition\n' > "$custom_subagent"
+printf -- '---\nname: implementer\npolytoken:\n  model: codex/gpt-5.6-luna\n---\nUSER-CUSTOM-IMPLEMENTER-MARKER\n' > "$D/subagents/implementer.md"
+cp "$REPO/polytoken/facets/workflow-designer.md" "$D/facets/workflow-designer.md"
+printf '\nUSER-CUSTOM-FACET-MARKER\n' >> "$D/facets/workflow-designer.md"
+out="$(run_pt "$D" /nonexistent-xyz 1)"
+cmp -s "$REPO/polytoken/subagents/implementer.md" "$D/subagents/implementer.md" \
+  && ok "overwrite took recommended subagent bytes" || no "overwrite took recommended subagent bytes"
+ls "$D"/subagents/implementer.md.bak-* >/dev/null 2>&1 \
+  && ok "overwrite subagent conflict wrote backup" || no "overwrite subagent conflict wrote backup"
+cmp -s "$REPO/polytoken/facets/workflow-designer.md" "$D/facets/workflow-designer.md" \
+  && ok "overwrite took recommended facet bytes" || no "overwrite took recommended facet bytes"
+ls "$D"/facets/workflow-designer.md.bak-* >/dev/null 2>&1 \
+  && ok "overwrite facet conflict wrote backup" || no "overwrite facet conflict wrote backup"
+[ "$(cat "$custom_subagent")" = "user subagent definition" ] \
+  && ok "unrelated destination subagent preserved under overwrite" || no "unrelated destination subagent preserved under overwrite"
+# Unrelated destination facet (not in the managed source set) also survives overwrite.
+printf 'unrelated facet\n' > "$D/facets/my-own-facet.md"
+run_pt "$D" /nonexistent-xyz 1 >/dev/null
+[ -f "$D/facets/my-own-facet.md" ] \
+  && ok "unrelated destination facet preserved under overwrite" || no "unrelated destination facet preserved under overwrite"
+rm -rf "$D"
+
+# --- P25: second-run definition idempotence -> no new backup, unchanged lines ---
+sc "P25 definition idempotence -> second run no new backup, unchanged"
+D="$(valid_base)"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+n1="$(find "$D/subagents" "$D/facets" -name '*.bak-*' | wc -l | tr -d ' ')"
+out="$(run_pt "$D" /nonexistent-xyz 0)"
+n2="$(find "$D/subagents" "$D/facets" -name '*.bak-*' | wc -l | tr -d ' ')"
+[ "$n2" = "$n1" ] && ok "definition repeat run no new backup ($n1 -> $n2)" || no "definition repeat run no new backup ($n1 -> $n2)"
+has "$out" "unchanged: subagents/implementer.md" "second run reports subagent unchanged"
+has "$out" "unchanged: facets/workflow-designer.md" "second run reports first facet unchanged"
+has "$out" "unchanged: facets/workflow-delivery.md" "second run reports second facet unchanged"
+rm -rf "$D"
 
 echo
 echo "=== $pass passed, $fail failed ==="
