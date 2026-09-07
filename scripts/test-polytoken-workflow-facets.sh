@@ -10,13 +10,17 @@
 #                           contract, and runtime effective-tool absence
 #   --approval-contract     designer review/handoff wording, delivery approval
 #                           provenance wording, and daemon handoff transitions
-#   --delivery-policy       delivery frontmatter, risk-based isolation, change
-#                           classes, and review-count matrices
+#   --delivery-policy       delivery frontmatter, risk-based isolation,
+#                           change classes, review-count matrices, and
+#                           runtime effective-tool exposure (isolated daemon)
 #   --ratatoskr             ratatoskr-only MCP grants, inspect-before-execute,
 #                           and evidence-tier contract
 #   --live-gateway          opt-in container-to-host gateway smoke; requires
 #                           POLYTOKEN_LIVE_GATEWAY=1, else an explicit skip
 #   --docs                  Task 4 stub: reported PENDING, never a pass
+#   --selftest              deterministic lifecycle tests for the shared
+#                           child tracker and bounded TERM->KILL escalation
+#                           (no daemon required)
 #
 # Default (no args): full run of the mandatory non-doc source checks. It does
 # not require the live gateway and reports docs validation as pending.
@@ -134,21 +138,64 @@ expect_list() { # label file yq-expr comma-separated exact-order list
 }
 
 # --- isolated daemon helpers ---
+# --- shared child/temp-dir tracker (cleanup contract) -----------------
+# Every background coprocess this harness starts (the isolated daemon, the
+# conditional-transition curl, selftest fixtures) is registered in
+# CHILD_PIDS. cleanup() TERM-signals each child with a BOUNDED wait,
+# escalates to KILL with a BOUNDED reap, and only then removes workdirs.
+# No wait path in this harness is unbounded.
 DAEMON_PID=""
 DAEMON_WORK=""
 DAEMON_URL=""
 DAEMON_TKN=""
 WORK_DIRS=()
+CHILD_PIDS=()
+TERM_TIMEOUT=2
+proc_dead() { # pid -> 0 when dead, reaped, or a zombie
+  kill -0 "$1" 2>/dev/null || return 0
+  [ "$(ps -o command= -p "$1" 2>/dev/null | head -1)" = "<defunct>" ]
+}
+kill_child() { # pid: TERM -> bounded wait -> KILL -> bounded reap
+  local pid="$1" i
+  proc_dead "$pid" && return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  for i in $(seq 1 $((TERM_TIMEOUT * 5))); do
+    proc_dead "$pid" && return 0
+    sleep 0.2
+  done
+  # Still alive (ignoring TERM): escalate to KILL.
+  kill -KILL "$pid" 2>/dev/null || true
+  for i in $(seq 1 $((TERM_TIMEOUT * 5))); do
+    proc_dead "$pid" && break
+    sleep 0.2
+  done
+  wait "$pid" 2>/dev/null || true
+  return 0
+}
 cleanup() {
+  local p w
   if [ -n "$DAEMON_PID" ]; then
-    kill "$DAEMON_PID" 2>/dev/null
-    wait "$DAEMON_PID" 2>/dev/null
+    kill_child "$DAEMON_PID"
   fi
-  local w
-  for w in "${WORK_DIRS[@]}"; do rm -rf "$w"; done
+  DAEMON_PID=""
+  for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do
+    kill_child "$p"
+  done
+  CHILD_PIDS=()
+  # Workdirs are removed only after EVERY child has been handled: children
+  # may still hold temp files open under them.
+  for w in ${WORK_DIRS[@]+"${WORK_DIRS[@]}"}; do rm -rf "$w"; done
+  WORK_DIRS=()
   return 0
 }
 trap cleanup EXIT
+on_interrupt() { # sig: bounded cleanup on SIGINT/SIGTERM, then canonical exit
+  trap - EXIT INT TERM
+  cleanup
+  case "$1" in INT) exit 130 ;; *) exit 143 ;; esac
+}
+trap 'on_interrupt INT' INT
+trap 'on_interrupt TERM' TERM
 
 start_daemon() {
   local work cfg proj sess token port i attempt
@@ -187,7 +234,7 @@ start_daemon() {
       fi
       sleep 0.5
     done
-    kill "$DAEMON_PID" 2>/dev/null; wait "$DAEMON_PID" 2>/dev/null
+    kill_child "$DAEMON_PID"
     DAEMON_PID=""
   done
   echo "  isolated daemon failed to start; log tail:" >&2
@@ -196,8 +243,7 @@ start_daemon() {
 }
 stop_daemon() {
   if [ -n "$DAEMON_PID" ]; then
-    kill "$DAEMON_PID" 2>/dev/null
-    wait "$DAEMON_PID" 2>/dev/null
+    kill_child "$DAEMON_PID"
   fi
   DAEMON_PID=""
 }
@@ -422,6 +468,7 @@ run_approval_contract() {
     -H 'Content-Type: application/json' -d '{"facet":"workflow-designer"}' \
     "$DAEMON_URL/facet" > "$curlout" 2>&1 &
   local curlpid=$!
+  CHILD_PIDS+=("$curlpid")
   newid=""
   for i in $(seq 1 40); do
     local pending; pending="$(daemon_state | jq -r '.pending_interrogatives[].interrogative_id' 2>/dev/null)"
@@ -445,6 +492,7 @@ run_approval_contract() {
     [ "$code" = 200 ] && ok "runtime: confirmation accepted (HTTP 200)" || no "runtime: confirmation accepted (HTTP $code)"
   fi
   wait "$curlpid" 2>/dev/null
+  kill_child "$curlpid"
   local finalcode; finalcode="$(tail -1 "$curlout")"
   [ "$finalcode" = 200 ] && ok "runtime: conditional switch POST completed 200 after confirmation" \
     || no "runtime: conditional switch POST completed 200 (got $finalcode)"
@@ -532,6 +580,39 @@ run_delivery_policy() {
     "container-local evidence, host evidence mediated through ratatoskr, and manual operator confirmation"
   expect_in "no automatic remote writes" "$DELIVERY" "No remote writes: never push, open a PR"
   expect_in "verify before complete_goal" "$DELIVERY" "Verify before \`complete_goal\`"
+
+  # Runtime tool-plan evidence (isolated daemon), same contract as
+  # --designer-authority: a daemon-start failure FAILS this mode; static
+  # prompt checks never substitute for runtime evidence.
+  sc "delivery_effective_tools are mutation surface + plan tools denied (runtime)"
+  if ! require_daemon "delivery policy (runtime)"; then return; fi
+  local out="$DAEMON_WORK/delivery-effective.json"
+  if effective_plan workflow-delivery "$out"; then
+    ok "runtime: /tools/effective resolved workflow-delivery"
+    [ "$(jq -r '.model' "$out")" = "codex/gpt-5.6-luna" ] \
+      && ok "runtime: delivery model pin resolves" || no "runtime: delivery model pin resolves (got $(jq -r '.model' "$out"))"
+    local names n missing=""
+    names="$(plan_names "$out")"
+    local required="file_edit_search_replace file_write job_cancel lsp pushd popd shell_exec shell_monitor shell_service switch_facet todo_complete todo_create todo_delete todo_list todo_update"
+    for n in $required; do
+      grep -qx "$n" <<<"$names" || missing="$missing $n"
+    done
+    [ -z "$missing" ] && ok "runtime: required mutation-surface tools all exposed" \
+      || no "runtime: required mutation tools present (missing:$missing)"
+    local denied="write_plan edit_plan handoff_plan" present=""
+    for n in $denied; do
+      grep -qx "$n" <<<"$names" && present="$present $n"
+    done
+    [ -z "$present" ] && ok "runtime: plan tools denied (write_plan/edit_plan/handoff_plan absent)" \
+      || no "runtime: plan tools denied (present:$present)"
+    local bad_mcp
+    bad_mcp="$(jq -r '.plan.full_schema[].name' "$out" | grep '^mcp__' | grep -v '^mcp__ratatoskr__' || true)"
+    [ -z "$bad_mcp" ] && ok "runtime: effective MCP tools stay in ratatoskr namespace" \
+      || no "runtime: non-ratatoskr MCP tools present in effective plan ($bad_mcp)"
+  else
+    no "runtime: /tools/effective resolved workflow-delivery"
+  fi
+  stop_daemon
 }
 
 # =====================================================================
@@ -624,6 +705,161 @@ run_docs() {
 }
 
 # =====================================================================
+# --- lifecycle selftest (deterministic; no daemon, no network) ---
+# Tests the shared child tracker and the bounded TERM -> KILL -> reap
+# escalation that the EXIT/INT/TERM interrupt paths rely on. Children are
+# same-tree coprocesses of this shell (or of the spawned fixture), so signal
+# delivery is deterministic; every wait is bounded.
+assert_dead() { # label pid
+  if kill -0 "$2" 2>/dev/null; then
+    no "$1 (pid $2 still alive)"
+  else
+    ok "$1"
+  fi
+}
+int_trap_probe() { # outfile -> 0 if a coprocess can trap SIGINT here
+  # Some non-interactive environments (e.g. this sandbox's tool wrappers)
+  # enter with SIGINT ignored; bash cannot trap a signal ignored on entry,
+  # so a SIGINT interruption assertion would test the environment, not the
+  # harness. Detect that explicitly and report it as a limitation.
+  local o="$1" pid i
+  bash -c 'trap "echo INT_TRAPPED" INT; sleep 2; echo INT_DONE' > "$o" 2>&1 &
+  pid=$!
+  sleep 0.4
+  kill -INT "$pid" 2>/dev/null
+  for i in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  wait "$pid" 2>/dev/null
+  grep -q INT_TRAPPED "$o"
+}
+run_lifecycle_fixture() { # --_lifecycle-fixture (used only by --selftest)
+  # Reports its workdir and tracked child pid, then blocks until signaled.
+  # The interrupt traps (added by --selftest's fix) must kill the child via
+  # tracked cleanup and remove the workdir before exit.
+  local work
+  work="$(mktemp -d)"
+  WORK_DIRS+=("$work")
+  sleep 300 > /dev/null 2>&1 &
+  CHILD_PIDS+=("$!")
+  { echo "$work"; echo "$!"; } > "$LIFIXTURE_PIDFILE"
+  # Short sleeps: bash runs trapped signals only once the current command
+  # finishes, so a long sleep would delay the interrupt path needlessly.
+  while :; do sleep 1; done
+}
+run_selftest() {
+  sc "lifecycle_selftest: cleanup tracks every child, TERM then bounded KILL escalation"
+  local w sleep_pid stall_pid
+  w="$(mktemp -d)"; WORK_DIRS+=("$w")
+  # (a) ordinary child: dies to plain TERM.
+  sleep 60 > /dev/null 2>&1 &
+  sleep_pid=$!
+  CHILD_PIDS+=("$sleep_pid")
+  # (b) stalling child: ignores TERM, must be escalated to KILL.
+  sh -c 'trap "" TERM; while :; do sleep 0.2; done' > /dev/null 2>&1 &
+  stall_pid=$!
+  CHILD_PIDS+=("$stall_pid")
+  # Direct call of the same function the interrupt traps run.
+  cleanup
+  assert_dead "cleanup: TERM-able child killed" "$sleep_pid"
+  assert_dead "cleanup: TERM-ignoring child escalated to KILL" "$stall_pid"
+  [ ! -e "$w" ] && ok "cleanup: workdir removed after children handled" \
+    || no "cleanup: workdir removed after children handled ($w still exists)"
+  [ "${#CHILD_PIDS[@]}" -eq 0 ] && ok "cleanup: child tracker emptied after reap" \
+    || no "cleanup: child tracker emptied after reap (${#CHILD_PIDS[@]} left)"
+
+  sc "lifecycle_selftest: SIGINT/SIGTERM interruption runs bounded cleanup"
+  local pidfile fixture_out lpid fwork fchild i rc sig want stopped
+  local outdir; outdir="$(mktemp -d)"; WORK_DIRS+=("$outdir")
+  local int_trappable=1
+  if ! int_trap_probe "$outdir/int-trap-probe.out"; then
+    int_trappable=0
+  fi
+  for sig in INT TERM; do
+    if [ "$sig" = "INT" ] && [ "$int_trappable" != 1 ]; then
+      # SIGINT is ignored on entry in this environment (bash cannot trap a
+      # signal ignored on entry, so the signal round would test the sandbox,
+      # not the harness). Verify the identical on_interrupt handler instead,
+      # executed directly in a subshell with a real tracked child + workdir.
+      local hwork hchild
+      hwork="$(mktemp -d)"; WORK_DIRS+=("$hwork")
+      (
+        # Scope the tracker state to this subshell's own entries: cleanup
+        # inside the handler must not remove the selftest's own workdirs.
+        sleep 300 > /dev/null 2>&1 &
+        CHILD_PIDS=("$!")
+        WORK_DIRS=("$hwork")
+        echo "$!" > "$outdir/INT-handler.child"
+        on_interrupt INT
+      )
+      rc=$?
+      want=130
+      [ "$rc" = "$want" ] && ok "handler ($sig): on_interrupt exited with status $want" \
+        || no "handler ($sig): on_interrupt exited with status $want (got $rc)"
+      hchild="$(cat "$outdir/INT-handler.child" 2>/dev/null)"
+      if [ -n "$hchild" ]; then
+        assert_dead "handler ($sig): tracked child killed" "$hchild"
+      else
+        no "handler ($sig): tracked child killed (child pid not reported)"
+      fi
+      [ ! -e "$hwork" ] && ok "handler ($sig): workdir removed after children handled" \
+        || no "handler ($sig): workdir removed after children handled ($hwork still exists)"
+      echo "  limitation: SIGINT is ignored on entry in this environment (not trap-able);"
+      echo "              the INT handler was executed directly. Interactive terminals"
+      echo "              (Ctrl-C trap-able) get the same handler via the INT trap."
+      continue
+    fi
+    pidfile="$outdir/${sig}.pid"; fixture_out="$outdir/${sig}.out"
+    LIFIXTURE_PIDFILE="$pidfile" bash "$0" --_lifecycle-fixture > "$fixture_out" 2>&1 &
+    lpid=$!
+    CHILD_PIDS+=("$lpid")
+    fwork=""; fchild=""
+    for i in $(seq 1 40); do
+      if [ -f "$pidfile" ]; then
+        fwork="$(sed -n 1p "$pidfile")"; fchild="$(sed -n 2p "$pidfile")"
+        [ -n "$fwork" ] && break
+      fi
+      kill -0 "$lpid" 2>/dev/null || break
+      sleep 0.25
+    done
+    # Track the fixture's own child plus its workdir in THIS shell too, so a
+    # failed run can never leak them (fallback cleanup at exit).
+    [ -n "$fchild" ] && CHILD_PIDS+=("$fchild")
+    [ -n "$fwork" ] && WORK_DIRS+=("$fwork")
+    if [ -n "$fwork" ]; then
+      ok "fixture ($sig): started with tracked child under a real workdir"
+    else
+      no "fixture ($sig): started with tracked child (pidfile not ready)"
+      continue
+    fi
+    kill -"$sig" "$lpid" 2>/dev/null
+    # Bounded wait for the interrupt path: trap -> cleanup -> exit. The wait
+    # itself is bounded so a broken interrupt path can never hang this test.
+    # 20s bound: the observed handler latency in slow sandboxes is ~5-10s.
+    stopped=0
+    for i in $(seq 1 80); do
+      if ! kill -0 "$lpid" 2>/dev/null; then stopped=1; break; fi
+      sleep 0.25
+    done
+    case "$sig" in INT) want=130 ;; TERM) want=143 ;; *) want=0 ;; esac
+    if [ "$stopped" = 1 ]; then
+      wait "$lpid" 2>/dev/null; rc=$?
+      [ "$rc" = "$want" ] && ok "fixture ($sig): interrupt exited with status $want within 20s" \
+        || no "fixture ($sig): interrupt exited with status $want within 20s (got $rc)"
+    else
+      no "fixture ($sig): did not exit within 20s of SIG$sig — leak guard engaged"
+      kill -KILL "$fchild" 2>/dev/null
+      kill -KILL "$lpid" 2>/dev/null
+      wait "$lpid" 2>/dev/null
+    fi
+    assert_dead "fixture ($sig): tracked child killed on interruption" "$fchild"
+    [ ! -e "$fwork" ] && ok "fixture ($sig): workdir removed after children handled on interruption" \
+      || no "fixture ($sig): workdir removed after children handled ($fwork still exists)"
+  done
+}
+
+# =====================================================================
 case "${1:-}" in
   --inventory)            run_inventory ;;
   --validate-definitions) run_validate_definitions ;;
@@ -633,6 +869,8 @@ case "${1:-}" in
   --ratatoskr)            run_ratatoskr ;;
   --live-gateway)         run_live_gateway ;;
   --docs)                 run_docs ;;
+  --selftest)             run_selftest ;;
+  --_lifecycle-fixture)   run_lifecycle_fixture ;;
   ""|full)
     run_inventory
     run_validate_definitions
@@ -640,11 +878,12 @@ case "${1:-}" in
     run_approval_contract
     run_delivery_policy
     run_ratatoskr
+    run_selftest
     sc "docs"
     echo "  PENDING (Task 4): docs validation deferred — reported as pending, not passed."
     ;;
   *)
-    echo "usage: $0 [--inventory|--validate-definitions|--designer-authority|--approval-contract|--delivery-policy|--ratatoskr|--live-gateway|--docs]" >&2
+    echo "usage: $0 [--inventory|--validate-definitions|--designer-authority|--approval-contract|--delivery-policy|--ratatoskr|--live-gateway|--docs|--selftest]" >&2
     exit 2
     ;;
 esac
