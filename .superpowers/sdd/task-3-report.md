@@ -366,3 +366,11 @@ only. No push (per brief).
 - Conditional transition uses bounded polling plus shared lifecycle cleanup; timeout/failure records failed approval assertions and cannot hang.
 - Deterministic selftests cover still-alive simulation and transition timeout without long waits.
 - GREEN: `--selftest` 14/14; `--approval-contract` 26/26; `bash -n` OK. Wait audit found no production bare/unbounded wait; remaining waits are selftest reaps after bounded death polls.
+
+## Ownership-aware reaping corrective evidence
+
+- RED: before this correction, `reap_child` was an unconditional no-op and there was no zombie-collection assertion; confirmed-dead shell-owned children could remain zombies until shell exit.
+- GREEN implementation: added explicit `CHILD_OWNED[pid]` metadata populated at every registration path (daemon retries, conditional curl, lifecycle fixtures, probes, and selftests). `reap_child` invokes `wait` only when metadata confirms current-shell ownership; foreign/non-child PIDs never reach `wait`. Cleanup rebuilds ownership metadata with unresolved PID state, preventing stale/mismatched entries.
+- Focused regression: `bash scripts/test-polytoken-workflow-facets.sh --selftest` → **19 passed, 0 failed**, stderr empty. New assertions verify a shell-owned exited child is collected (PID no longer exists) and a confirmed-dead non-child remains quiet (no stderr).
+- Required verification: focused modes `--inventory`, `--validate-definitions`, `--designer-authority`, `--approval-contract`, `--delivery-policy`, `--ratatoskr`, and `--selftest` all passed; full workflow harness → **145 passed, 0 failed**; `bash scripts/test-polytoken-subagents.sh` passed all persona assertions; `bash -n scripts/test-polytoken-workflow-facets.sh` OK; `git diff --check` OK.
+- Broader stderr: expected shell job notifications for intentionally KILLed daemon/fixture processes and one `wait_for: No record of process` diagnostic in the existing forced lifecycle path; exit statuses remained successful. No focused-selftest stderr noise.

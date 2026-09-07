@@ -147,6 +147,7 @@ DAEMON_URL=""
 DAEMON_TKN=""
 WORK_DIRS=()
 CHILD_PIDS=()
+declare -A CHILD_OWNED=()
 TERM_TIMEOUT=2
 PROC_DEAD_OVERRIDE=""
 proc_dead() { # pid -> 0 when dead, reaped, or a zombie
@@ -154,8 +155,23 @@ proc_dead() { # pid -> 0 when dead, reaped, or a zombie
   kill -0 "$1" 2>/dev/null || return 0
   [ "$(ps -o command= -p "$1" 2>/dev/null | head -1)" = "<defunct>" ]
 }
-reap_child() { # confirmed-dead non-child PIDs need no blocking reap
-  :
+track_child() { # pid [owned]: register PID and explicit shell-ownership metadata
+  local pid="$1" owned="${2:-1}"
+  CHILD_PIDS+=("$pid")
+  CHILD_OWNED["$pid"]="$owned"
+}
+remove_child() { # pid: remove tracker entry and ownership metadata
+  local pid="$1" p; local -a remaining=()
+  for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do
+    [ "$p" = "$pid" ] || remaining+=("$p")
+  done
+  CHILD_PIDS=("${remaining[@]}")
+  unset 'CHILD_OWNED[$pid]'
+}
+reap_child() { # pid: wait only for explicitly registered shell-owned children
+  local pid="$1"
+  [ "${CHILD_OWNED[$pid]:-0}" = 1 ] || return 0
+  wait "$pid" 2>/dev/null || true
 }
 kill_child() { # pid: bounded TERM/KILL; wait only after death is confirmed
   local pid="$1" i limit
@@ -177,20 +193,18 @@ kill_child() { # pid: bounded TERM/KILL; wait only after death is confirmed
 cleanup() {
   local p w rc=0 handled=0
   local -a unresolved=()
+  local -A unresolved_owned=()
   # DAEMON_PID aliases a tracked child. Handle it explicitly once, then remove
   # it from the shared tracker only after successful handling.
   if [ -n "$DAEMON_PID" ]; then
     if kill_child "$DAEMON_PID"; then
       handled=1
-      local -a remaining=()
-      for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do
-        [ "$p" = "$DAEMON_PID" ] || remaining+=("$p")
-      done
-      CHILD_PIDS=("${remaining[@]}")
+      remove_child "$DAEMON_PID"
       DAEMON_PID=""
     else
       rc=1
       unresolved+=("$DAEMON_PID")
+      unresolved_owned["$DAEMON_PID"]="${CHILD_OWNED[$DAEMON_PID]:-0}"
     fi
   fi
   for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do
@@ -200,9 +214,14 @@ cleanup() {
     else
       rc=1
       unresolved+=("$p")
+      unresolved_owned["$p"]="${CHILD_OWNED[$p]:-0}"
     fi
   done
   CHILD_PIDS=("${unresolved[@]}")
+  CHILD_OWNED=()
+  for p in ${unresolved[@]+"${unresolved[@]}"}; do
+    CHILD_OWNED["$p"]="${unresolved_owned[$p]:-0}"
+  done
   # Workdirs remain available for diagnostics while any child is unresolved.
   if [ "$rc" -eq 0 ] && [ "${#CHILD_PIDS[@]}" -eq 0 ] && [ -z "$DAEMON_PID" ]; then
     for w in ${WORK_DIRS[@]+"${WORK_DIRS[@]}"}; do rm -rf "$w"; done
@@ -251,7 +270,7 @@ start_daemon() {
       --sessions-dir "$sess" --credential-file "$work/cred.json" \
       --listen "127.0.0.1:$port" > "$work/daemon.log" 2>&1 &
     DAEMON_PID=$!
-    CHILD_PIDS+=("$DAEMON_PID")
+    track_child "$DAEMON_PID" 1
     for i in $(seq 1 60); do
       if curl -sS --max-time 1 -H "Authorization: Bearer $token" \
            "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
@@ -495,7 +514,7 @@ run_approval_contract() {
     -H 'Content-Type: application/json' -d '{"facet":"workflow-designer"}' \
     "$DAEMON_URL/facet" > "$curlout" 2>&1 &
   local curlpid=$!
-  CHILD_PIDS+=("$curlpid")
+  track_child "$curlpid" 1
   newid=""
   for i in $(seq 1 40); do
     local pending; pending="$(daemon_state | jq -r '.pending_interrogatives[].interrogative_id' 2>/dev/null)"
@@ -785,7 +804,7 @@ run_lifecycle_fixture() { # --_lifecycle-fixture (used only by --selftest)
   work="$(mktemp -d)"
   WORK_DIRS+=("$work")
   sleep 300 > /dev/null 2>&1 &
-  CHILD_PIDS+=("$!")
+  track_child "$!" 1
   { echo "$work"; echo "$!"; } > "$LIFIXTURE_PIDFILE"
   # Short sleeps: bash runs trapped signals only once the current command
   # finishes, so a long sleep would delay the interrupt path needlessly.
@@ -810,7 +829,7 @@ run_selftest() {
   TERM_TIMEOUT=2
   local transition_pid
   ( sleep 30 ) & transition_pid=$!
-  CHILD_PIDS+=("$transition_pid")
+  track_child "$transition_pid" 1
   TERM_TIMEOUT=0
   if ! kill_child "$transition_pid" >/dev/null 2>&1; then
     ok "conditional transition timeout path fails within bounded lifecycle"
@@ -820,7 +839,33 @@ run_selftest() {
   TERM_TIMEOUT=2
   kill -KILL "$transition_pid" 2>/dev/null || true
   wait "$transition_pid" 2>/dev/null || true
-  CHILD_PIDS=(); WORK_DIRS=(); DAEMON_PID=""
+  CHILD_PIDS=(); CHILD_OWNED=(); WORK_DIRS=(); DAEMON_PID=""
+  sc "lifecycle_selftest: dead-child reaping is ownership-aware"
+  local zombie_pid foreign_pid foreign_err
+  ( exit 0 ) & zombie_pid=$!
+  track_child "$zombie_pid" 1
+  sleep 0.1
+  if kill_child "$zombie_pid"; then
+    if ! kill -0 "$zombie_pid" 2>/dev/null; then
+      ok "kill_child: shell-owned zombie collected by wait"
+    else
+      no "kill_child: shell-owned zombie collected by wait (still present)"
+    fi
+  else
+    no "kill_child: shell-owned zombie collected by wait (kill_child failed)"
+  fi
+  remove_child "$zombie_pid"
+  foreign_pid=999999999
+  track_child "$foreign_pid" 0
+  foreign_err="$(mktemp)"
+  if kill_child "$foreign_pid" 2>"$foreign_err"; then
+    [ ! -s "$foreign_err" ] && ok "kill_child: confirmed-dead non-child remains quiet" \
+      || no "kill_child: confirmed-dead non-child remains quiet (stderr emitted)"
+  else
+    no "kill_child: confirmed-dead non-child remains quiet (kill_child failed)"
+  fi
+  rm -f "$foreign_err"
+  remove_child "$foreign_pid"
   sc "lifecycle_selftest: cleanup preserves unresolved state and probe timeout is bounded"
   local unresolved_work unresolved_pid probe_start probe_elapsed
   # Keep this fixture outside every pre-existing tracked workdir: cleanup must
@@ -830,7 +875,7 @@ run_selftest() {
   # Use a confirmed-dead, non-child PID: the forced probe must not trigger a
   # shell wait diagnostic or require an actual process to remain alive.
   unresolved_pid=999999999
-  CHILD_PIDS+=("$unresolved_pid")
+  track_child "$unresolved_pid" 0
   PROC_DEAD_OVERRIDE=1; TERM_TIMEOUT=0
   if ! cleanup >/dev/null 2>&1; then
     [ "${#CHILD_PIDS[@]}" -eq 1 ] && [ "${CHILD_PIDS[0]}" = "$unresolved_pid" ] && ok "cleanup: failed child remains tracked" || no "cleanup: failed child remains tracked (got ${CHILD_PIDS[*]})"
@@ -843,7 +888,7 @@ run_selftest() {
   PROC_DEAD_OVERRIDE=""; TERM_TIMEOUT=2
   kill -KILL "$unresolved_pid" 2>/dev/null || true
   wait "$unresolved_pid" 2>/dev/null || true
-  CHILD_PIDS=(); rm -rf "$unresolved_work"; WORK_DIRS=()
+  CHILD_PIDS=(); CHILD_OWNED=(); rm -rf "$unresolved_work"; WORK_DIRS=()
   probe_start=$SECONDS
   PROC_DEAD_OVERRIDE=1; TERM_TIMEOUT=0
   if ! int_trap_probe "$(mktemp)" >/dev/null 2>&1; then
@@ -859,11 +904,11 @@ run_selftest() {
   # (a) ordinary child: dies to plain TERM.
   sleep 60 > /dev/null 2>&1 &
   sleep_pid=$!
-  CHILD_PIDS+=("$sleep_pid")
+  track_child "$sleep_pid" 1
   # (b) stalling child: ignores TERM, must be escalated to KILL.
   sh -c 'trap "" TERM; while :; do sleep 0.2; done' > /dev/null 2>&1 &
   stall_pid=$!
-  CHILD_PIDS+=("$stall_pid")
+  track_child "$stall_pid" 1
   # Direct call of the same function the interrupt traps run.
   cleanup
   assert_dead "cleanup: TERM-able child killed" "$sleep_pid"
@@ -893,6 +938,7 @@ run_selftest() {
         # inside the handler must not remove the selftest's own workdirs.
         sleep 300 > /dev/null 2>&1 &
         CHILD_PIDS=("$!")
+        CHILD_OWNED=( ["$!"]=1 )
         WORK_DIRS=("$hwork")
         echo "$!" > "$outdir/INT-handler.child"
         on_interrupt INT
@@ -917,7 +963,7 @@ run_selftest() {
     pidfile="$outdir/${sig}.pid"; fixture_out="$outdir/${sig}.out"
     LIFIXTURE_PIDFILE="$pidfile" bash "$0" --_lifecycle-fixture > "$fixture_out" 2>&1 &
     lpid=$!
-    CHILD_PIDS+=("$lpid")
+    track_child "$lpid" 1
     fwork=""; fchild=""
     for i in $(seq 1 40); do
       if [ -f "$pidfile" ]; then
@@ -929,7 +975,7 @@ run_selftest() {
     done
     # Track the fixture's own child plus its workdir in THIS shell too, so a
     # failed run can never leak them (fallback cleanup at exit).
-    [ -n "$fchild" ] && CHILD_PIDS+=("$fchild")
+    [ -n "$fchild" ] && track_child "$fchild" 0
     [ -n "$fwork" ] && WORK_DIRS+=("$fwork")
     if [ -n "$fwork" ]; then
       ok "fixture ($sig): started with tracked child under a real workdir"
