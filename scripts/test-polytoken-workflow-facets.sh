@@ -154,18 +154,21 @@ proc_dead() { # pid -> 0 when dead, reaped, or a zombie
   kill -0 "$1" 2>/dev/null || return 0
   [ "$(ps -o command= -p "$1" 2>/dev/null | head -1)" = "<defunct>" ]
 }
+reap_child() { # confirmed-dead non-child PIDs need no blocking reap
+  :
+}
 kill_child() { # pid: bounded TERM/KILL; wait only after death is confirmed
   local pid="$1" i limit
-  proc_dead "$pid" && { wait "$pid" 2>/dev/null || true; return 0; }
+  proc_dead "$pid" && { reap_child "$pid"; return 0; }
   kill -TERM "$pid" 2>/dev/null || true
   limit=$((TERM_TIMEOUT * 5))
   for i in $(seq 1 "$limit"); do
-    proc_dead "$pid" && { wait "$pid" 2>/dev/null || true; return 0; }
+    proc_dead "$pid" && { reap_child "$pid"; return 0; }
     sleep 0.2
   done
   kill -KILL "$pid" 2>/dev/null || true
   for i in $(seq 1 "$limit"); do
-    proc_dead "$pid" && { wait "$pid" 2>/dev/null || true; return 0; }
+    proc_dead "$pid" && { reap_child "$pid"; return 0; }
     sleep 0.2
   done
   echo "  cleanup: child pid $pid still alive/unreapable after TERM/KILL deadlines" >&2
@@ -770,8 +773,8 @@ int_trap_probe() { # outfile -> 0 if a coprocess can trap SIGINT here
     kill_child "$pid" || true
     return 1
   fi
-  # Reap only after the bounded poll confirmed death.
-  wait "$pid" 2>/dev/null || true
+  # A confirmed-dead probe may not be this shell's child; never block on wait.
+  reap_child "$pid"
   grep -q INT_TRAPPED "$o"
 }
 run_lifecycle_fixture() { # --_lifecycle-fixture (used only by --selftest)
@@ -820,8 +823,13 @@ run_selftest() {
   CHILD_PIDS=(); WORK_DIRS=(); DAEMON_PID=""
   sc "lifecycle_selftest: cleanup preserves unresolved state and probe timeout is bounded"
   local unresolved_work unresolved_pid probe_start probe_elapsed
-  unresolved_work="$(mktemp -d)"; WORK_DIRS+=("$unresolved_work")
-  sleep 30 >/dev/null 2>&1 & unresolved_pid=$!
+  # Keep this fixture outside every pre-existing tracked workdir: cleanup must
+  # retain the unresolved entry and therefore must not remove its parent.
+  unresolved_work="$(mktemp -d /dev/shm/workflow-facet-unresolved.XXXXXX)"
+  WORK_DIRS+=("$unresolved_work")
+  # Use a confirmed-dead, non-child PID: the forced probe must not trigger a
+  # shell wait diagnostic or require an actual process to remain alive.
+  unresolved_pid=999999999
   CHILD_PIDS+=("$unresolved_pid")
   PROC_DEAD_OVERRIDE=1; TERM_TIMEOUT=0
   if ! cleanup >/dev/null 2>&1; then
