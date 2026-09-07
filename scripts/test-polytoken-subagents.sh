@@ -373,26 +373,103 @@ if [[ "${1:-}" == --mutation-tests ]]; then
   exit 0
 fi
 
+# checked_restore <live> <orig>: restore the live file from the preserved
+# original, then verify byte identity. On a failed copy or a failed verify it
+# must report loudly (return nonzero) and leave the recovery bytes (orig)
+# untouched — it never deletes them itself.
+checked_restore() {
+  local live="$1" orig="$2"
+  if ! cp -f "$orig" "$live" 2>/dev/null; then
+    echo "frontmatter restore failed: $live" >&2
+    return 1
+  fi
+  if ! cmp -s "$live" "$orig"; then
+    echo "frontmatter restore verify failed: $live" >&2
+    return 1
+  fi
+  return 0
+}
+
+# FOCUSED FAILURE-PATH TEST for the restore contract. A checked restore that
+# cannot overwrite an unwritable live file must (a) fail loudly and (b)
+# preserve the recovery bytes (the original) rather than report success or
+# lose them. Uses an isolated sandbox; touches no managed definition.
+if [[ "${1:-}" == --frontmatter-restore-failure ]]; then
+  sandbox=$(mktemp -d)
+  printf 'original-bytes\n' > "$sandbox/orig"
+  printf 'MUTATED\n' > "$sandbox/live"
+  # Make the restore impossible: live's content is not writable (444) and its
+  # directory is not writable (555), so cp -f cannot overwrite or recreate it.
+  chmod 444 "$sandbox/live"
+  chmod 555 "$sandbox"
+  rc=0
+  checked_restore "$sandbox/live" "$sandbox/orig" || rc=$?
+  chmod 644 "$sandbox/live" 2>/dev/null
+  chmod 755 "$sandbox"
+  if [[ $rc == 0 ]]; then
+    echo "restore failure-path: checked_restore swallowed a failed restore (rc=0)" >&2
+    rm -rf "$sandbox"
+    exit 1
+  fi
+  if [[ ! -f "$sandbox/orig" ]] || ! cmp -s "$sandbox/orig" <(printf 'original-bytes\n'); then
+    echo "restore failure-path: recovery bytes were lost" >&2
+    rm -rf "$sandbox"
+    exit 1
+  fi
+  if ! cmp -s "$sandbox/live" <(printf 'MUTATED\n'); then
+    echo "restore failure-path: live was clobbered by an unverified restore" >&2
+    rm -rf "$sandbox"
+    exit 1
+  fi
+  echo "restore failure-path: loud failure + recovery bytes preserved"
+  rm -rf "$sandbox"
+  exit 0
+fi
+
 if [[ "${1:-}" == --frontmatter-mutations ]]; then
   # Deliberate temporary mutations of managed definition frontmatter. Each
-  # mutation must be rejected by validate_persona, and each file must restore
-  # byte-exactly (verified with cmp). The EXIT trap self-heals a restore even
-  # if a check fails mid-mutation; the detection subshell clears it so it
-  # never restores behind the parent's back.
+  # mutation must be rejected by validate_persona, and each live file must be
+  # restored by checked_restore which verifies byte identity.
+  #
+  # SAFETY CONTRACT:
+  #   * The ORIGINAL (untouched) byte sequence is preserved once per file in
+  #     the backup dir. These are the "recovery bytes".
+  #   * Every restore is performed by checked_restore: it cp's the orig over
+  #     the live file and then cmp-verifies identity. If either step fails it
+  #     returns nonzero (loudly) WITHOUT deleting orig.
+  #   * The backup dir is deleted ONLY after ALL restore-and-verify cycles
+  #     have succeeded. If any restore fails the backup is left in place so
+  #     the operator can recover manually.
+  #   * The EXIT trap is a last-resort self-heal that also obeys the same
+  #     checked_restore contract: it never swallows a cp/cmp failure into an
+  #     rm -rf.
   backup=$(mktemp -d)
-  trap 'rm -rf "$backup"' EXIT
   architect=polytoken/subagents/agent-workflow-architect.md
   reviewer=polytoken/subagents/reviewer.md
-  cp "$architect" "$backup/agent-workflow-architect.md"
-  cp "$architect" "$backup/agent-workflow-architect.verified"
-  cp "$reviewer" "$backup/reviewer.md"
-  cp "$reviewer" "$backup/reviewer.verified"
-  trap 'mv -f "$backup/agent-workflow-architect.md" "$architect" 2>/dev/null || true
-         mv -f "$backup/reviewer.md" "$reviewer" 2>/dev/null || true
-         rm -rf "$backup"' EXIT
+
+  # Preserve the untouched originals; these are the sole recovery bytes.
+  cp "$architect" "$backup/architect.orig"
+  cp "$reviewer"   "$backup/reviewer.orig"
+
+  # Over-written EXIT trap: self-heals any mid-mutation failure by running
+  # checked_restore on BOTH files. Deletes the backup dir ONLY if both
+  # restores are verified byte-identical; otherwise preserves it and fails
+  # loudly (exit 1).
+  trap '
+    if checked_restore "$architect" "$backup/architect.orig" \
+       && checked_restore "$reviewer" "$backup/reviewer.orig"; then
+      rm -rf "$backup"
+    else
+      echo "frontmatter mutation EXIT restore FAILED; recovery bytes preserved in $backup" >&2
+      exit 1
+    fi
+  ' EXIT
 
   mutation_rejected() {
     persona="$1"
+    # Run the validator in a subshell with the EXIT trap cleared so that a
+    # validate_persona failure does not trigger the parent restore logic
+    # behind the caller's back. Exit 0 means "rejected" (good).
     if (trap - EXIT; validate_persona "$persona" >/dev/null 2>&1); then
       echo "frontmatter mutation not detected: $persona still validates" >&2
       exit 1
@@ -400,38 +477,54 @@ if [[ "${1:-}" == --frontmatter-mutations ]]; then
     echo "frontmatter mutation rejected: $persona"
   }
 
-  # Mutation 1: changed required description (agent-workflow-architect). The
-  # replacement is a YAML-safe scalar so any detection comes from the exact
-  # description comparison, not the generic malformed-YAML fallback.
-  awk '/^description:/ && !done { sub(/routing\.$/, "gateway routing."); done = 1 } { print }' "$architect" > "$backup/m1.md"
+  # --- Mutation 1: changed required description (agent-workflow-architect) --
+  awk '/^description:/ && !done { sub(/routing\.$/, "gateway routing."); done = 1 } { print }' \
+      "$architect" > "$backup/m1.md"
   if cmp -s "$architect" "$backup/m1.md"; then
     echo "frontmatter mutation 1 had no effect" >&2
     exit 1
   fi
   mv "$backup/m1.md" "$architect"
   mutation_rejected agent-workflow-architect
-  mv "$backup/agent-workflow-architect.md" "$architect"
+  checked_restore "$architect" "$backup/architect.orig"
+  echo "frontmatter mutation 1 restored: agent-workflow-architect"
 
-  # Mutation 2: changed fallback list (reviewer: drop one of two fallbacks).
-  awk '{ if (done || $0 != "  - codex/gpt-5.6-luna") print; else done = 1 }' "$reviewer" > "$backup/m2.md"
+  # --- Mutation 2: drop one of two fallback_models (reviewer) ------------
+  awk '{ if (done || $0 != "  - codex/gpt-5.6-luna") print; else done = 1 }' \
+      "$reviewer" > "$backup/m2.md"
   if cmp -s "$reviewer" "$backup/m2.md"; then
     echo "frontmatter mutation 2 had no effect" >&2
     exit 1
   fi
   mv "$backup/m2.md" "$reviewer"
   mutation_rejected reviewer
-  mv "$backup/reviewer.md" "$reviewer"
+  checked_restore "$reviewer" "$backup/reviewer.orig"
+  echo "frontmatter mutation 2 restored: reviewer"
 
-  # The restore mv consumed the restore backups, so byte-exactness is
-  # verified against separate copies kept in the backup dir.
-  if ! cmp -s "$architect" "$backup/agent-workflow-architect.verified"; then
-    echo "frontmatter mutation restore failed: agent-workflow-architect" >&2
+  # --- Mutation 3: same-membership reorder of fallback_models (reviewer) --
+  # Reviewer has two fallbacks; swapping them (same membership, different
+  # order) must be rejected by the order-sensitive fallback comparison.
+  awk '
+    $0 == "  - codex/gpt-5.6-luna" { swap = 1; next }
+    $0 == "  - minime/google_gemma-4-26b-a4b-it" && swap {
+      print "  - minime/google_gemma-4-26b-a4b-it"
+      print "  - codex/gpt-5.6-luna"
+      swap = 0; next
+    }
+    { print }
+  ' "$reviewer" > "$backup/m3.md"
+  if cmp -s "$reviewer" "$backup/m3.md"; then
+    echo "frontmatter mutation 3 had no effect" >&2
     exit 1
   fi
-  if ! cmp -s "$reviewer" "$backup/reviewer.verified"; then
-    echo "frontmatter mutation restore failed: reviewer" >&2
-    exit 1
-  fi
+  mv "$backup/m3.md" "$reviewer"
+  mutation_rejected reviewer
+  checked_restore "$reviewer" "$backup/reviewer.orig"
+  echo "frontmatter mutation 3 restored: reviewer"
+
+  # Final belt-and-suspenders verification before EXIT trap cleanup.
+  cmp -s "$architect" "$backup/architect.orig" || { echo "final verify failed: agent-workflow-architect" >&2; exit 1; }
+  cmp -s "$reviewer"   "$backup/reviewer.orig"   || { echo "final verify failed: reviewer" >&2; exit 1; }
   echo "frontmatter mutation files restored byte-identically"
   exit 0
 fi
