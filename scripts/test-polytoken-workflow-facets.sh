@@ -172,20 +172,44 @@ kill_child() { # pid: bounded TERM/KILL; wait only after death is confirmed
   return 1
 }
 cleanup() {
-  local p w
+  local p w rc=0 handled=0
+  local -a unresolved=()
+  # DAEMON_PID aliases a tracked child. Handle it explicitly once, then remove
+  # it from the shared tracker only after successful handling.
   if [ -n "$DAEMON_PID" ]; then
-    kill_child "$DAEMON_PID"
+    if kill_child "$DAEMON_PID"; then
+      handled=1
+      local -a remaining=()
+      for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do
+        [ "$p" = "$DAEMON_PID" ] || remaining+=("$p")
+      done
+      CHILD_PIDS=("${remaining[@]}")
+      DAEMON_PID=""
+    else
+      rc=1
+      unresolved+=("$DAEMON_PID")
+    fi
   fi
-  DAEMON_PID=""
   for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do
-    kill_child "$p"
+    [ -n "$DAEMON_PID" ] && [ "$p" = "$DAEMON_PID" ] && continue
+    if kill_child "$p"; then
+      handled=1
+    else
+      rc=1
+      unresolved+=("$p")
+    fi
   done
-  CHILD_PIDS=()
-  # Workdirs are removed only after EVERY child has been handled: children
-  # may still hold temp files open under them.
-  for w in ${WORK_DIRS[@]+"${WORK_DIRS[@]}"}; do rm -rf "$w"; done
-  WORK_DIRS=()
-  return 0
+  CHILD_PIDS=("${unresolved[@]}")
+  # Workdirs remain available for diagnostics while any child is unresolved.
+  if [ "$rc" -eq 0 ] && [ "${#CHILD_PIDS[@]}" -eq 0 ] && [ -z "$DAEMON_PID" ]; then
+    for w in ${WORK_DIRS[@]+"${WORK_DIRS[@]}"}; do rm -rf "$w"; done
+    WORK_DIRS=()
+  else
+    rc=1
+    echo "  cleanup: retaining ${#WORK_DIRS[@]} workdir(s) for unresolved child diagnostics" >&2
+  fi
+  [ "$rc" -eq 0 ] || echo "  cleanup: unresolved child tracker entries retained" >&2
+  return "$rc"
 }
 trap cleanup EXIT
 on_interrupt() { # sig: bounded cleanup on SIGINT/SIGTERM, then canonical exit
@@ -735,12 +759,19 @@ int_trap_probe() { # outfile -> 0 if a coprocess can trap SIGINT here
   pid=$!
   sleep 0.4
   kill -INT "$pid" 2>/dev/null
+  local stopped=0
   for i in $(seq 1 20); do
-    kill -0 "$pid" 2>/dev/null || break
+    if ! kill -0 "$pid" 2>/dev/null; then stopped=1; break; fi
     sleep 0.25
   done
-  # The bounded poll above confirmed death; this is a nonblocking reap only.
-  wait "$pid" 2>/dev/null
+  if [ "$stopped" != 1 ]; then
+    # Never wait unconditionally after a timeout: use the same bounded
+    # termination contract as cleanup, then report probe failure.
+    kill_child "$pid" || true
+    return 1
+  fi
+  # Reap only after the bounded poll confirmed death.
+  wait "$pid" 2>/dev/null || true
   grep -q INT_TRAPPED "$o"
 }
 run_lifecycle_fixture() { # --_lifecycle-fixture (used only by --selftest)
@@ -784,6 +815,36 @@ run_selftest() {
     no "conditional transition timeout path fails within bounded lifecycle"
   fi
   TERM_TIMEOUT=2
+  kill -KILL "$transition_pid" 2>/dev/null || true
+  wait "$transition_pid" 2>/dev/null || true
+  CHILD_PIDS=(); WORK_DIRS=(); DAEMON_PID=""
+  sc "lifecycle_selftest: cleanup preserves unresolved state and probe timeout is bounded"
+  local unresolved_work unresolved_pid probe_start probe_elapsed
+  unresolved_work="$(mktemp -d)"; WORK_DIRS+=("$unresolved_work")
+  sleep 30 >/dev/null 2>&1 & unresolved_pid=$!
+  CHILD_PIDS+=("$unresolved_pid")
+  PROC_DEAD_OVERRIDE=1; TERM_TIMEOUT=0
+  if ! cleanup >/dev/null 2>&1; then
+    [ "${#CHILD_PIDS[@]}" -eq 1 ] && [ "${CHILD_PIDS[0]}" = "$unresolved_pid" ] && ok "cleanup: failed child remains tracked" || no "cleanup: failed child remains tracked (got ${CHILD_PIDS[*]})"
+    [ -d "$unresolved_work" ] && ok "cleanup: unresolved child workdir retained" || no "cleanup: unresolved child workdir retained"
+  else
+    no "cleanup: reports unresolved child failure"
+    no "cleanup: failed child remains tracked"
+    no "cleanup: unresolved child workdir retained"
+  fi
+  PROC_DEAD_OVERRIDE=""; TERM_TIMEOUT=2
+  kill -KILL "$unresolved_pid" 2>/dev/null || true
+  wait "$unresolved_pid" 2>/dev/null || true
+  CHILD_PIDS=(); rm -rf "$unresolved_work"; WORK_DIRS=()
+  probe_start=$SECONDS
+  PROC_DEAD_OVERRIDE=1; TERM_TIMEOUT=0
+  if ! int_trap_probe "$(mktemp)" >/dev/null 2>&1; then
+    probe_elapsed=$((SECONDS - probe_start))
+    [ "$probe_elapsed" -lt 8 ] && ok "int_trap_probe: timeout fails without unbounded wait" || no "int_trap_probe: timeout remains bounded"
+  else
+    no "int_trap_probe: timeout fails without unbounded wait"
+  fi
+  PROC_DEAD_OVERRIDE=""; TERM_TIMEOUT=2
   sc "lifecycle_selftest: cleanup tracks every child, TERM then bounded KILL escalation"
   local w sleep_pid stall_pid
   w="$(mktemp -d)"; WORK_DIRS+=("$w")
