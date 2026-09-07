@@ -137,13 +137,10 @@ expect_list() { # label file yq-expr comma-separated exact-order list
   expect_fm "$1" "$2" "$3" "$want"
 }
 
-# --- isolated daemon helpers ---
 # --- shared child/temp-dir tracker (cleanup contract) -----------------
-# Every background coprocess this harness starts (the isolated daemon, the
-# conditional-transition curl, selftest fixtures) is registered in
-# CHILD_PIDS. cleanup() TERM-signals each child with a BOUNDED wait,
-# escalates to KILL with a BOUNDED reap, and only then removes workdirs.
-# No wait path in this harness is unbounded.
+# Every background process started by this harness is registered in CHILD_PIDS;
+# DAEMON_PID is a convenience alias for the isolated daemon's tracked PID.
+# cleanup() terminates children within bounded deadlines before removing dirs.
 DAEMON_PID=""
 DAEMON_WORK=""
 DAEMON_URL=""
@@ -151,26 +148,28 @@ DAEMON_TKN=""
 WORK_DIRS=()
 CHILD_PIDS=()
 TERM_TIMEOUT=2
+PROC_DEAD_OVERRIDE=""
 proc_dead() { # pid -> 0 when dead, reaped, or a zombie
+  [ -n "$PROC_DEAD_OVERRIDE" ] && return 1
   kill -0 "$1" 2>/dev/null || return 0
   [ "$(ps -o command= -p "$1" 2>/dev/null | head -1)" = "<defunct>" ]
 }
-kill_child() { # pid: TERM -> bounded wait -> KILL -> bounded reap
-  local pid="$1" i
-  proc_dead "$pid" && return 0
+kill_child() { # pid: bounded TERM/KILL; wait only after death is confirmed
+  local pid="$1" i limit
+  proc_dead "$pid" && { wait "$pid" 2>/dev/null || true; return 0; }
   kill -TERM "$pid" 2>/dev/null || true
-  for i in $(seq 1 $((TERM_TIMEOUT * 5))); do
-    proc_dead "$pid" && return 0
+  limit=$((TERM_TIMEOUT * 5))
+  for i in $(seq 1 "$limit"); do
+    proc_dead "$pid" && { wait "$pid" 2>/dev/null || true; return 0; }
     sleep 0.2
   done
-  # Still alive (ignoring TERM): escalate to KILL.
   kill -KILL "$pid" 2>/dev/null || true
-  for i in $(seq 1 $((TERM_TIMEOUT * 5))); do
-    proc_dead "$pid" && break
+  for i in $(seq 1 "$limit"); do
+    proc_dead "$pid" && { wait "$pid" 2>/dev/null || true; return 0; }
     sleep 0.2
   done
-  wait "$pid" 2>/dev/null || true
-  return 0
+  echo "  cleanup: child pid $pid still alive/unreapable after TERM/KILL deadlines" >&2
+  return 1
 }
 cleanup() {
   local p w
@@ -225,6 +224,7 @@ start_daemon() {
       --sessions-dir "$sess" --credential-file "$work/cred.json" \
       --listen "127.0.0.1:$port" > "$work/daemon.log" 2>&1 &
     DAEMON_PID=$!
+    CHILD_PIDS+=("$DAEMON_PID")
     for i in $(seq 1 60); do
       if curl -sS --max-time 1 -H "Authorization: Bearer $token" \
            "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
@@ -491,11 +491,19 @@ run_approval_contract() {
     code="$(dapi POST "/interrogative/$newid/respond" '{"kind":"confirmation_answer","confirmed":true}' "$out")"
     [ "$code" = 200 ] && ok "runtime: confirmation accepted (HTTP 200)" || no "runtime: confirmation accepted (HTTP $code)"
   fi
-  wait "$curlpid" 2>/dev/null
-  kill_child "$curlpid"
-  local finalcode; finalcode="$(tail -1 "$curlout")"
-  [ "$finalcode" = 200 ] && ok "runtime: conditional switch POST completed 200 after confirmation" \
-    || no "runtime: conditional switch POST completed 200 (got $finalcode)"
+  # Allow the confirmed response to flush before bounded lifecycle cleanup.
+  for i in $(seq 1 50); do
+    proc_dead "$curlpid" && break
+    sleep 0.2
+  done
+  if kill_child "$curlpid"; then
+    local finalcode; finalcode="$(tail -1 "$curlout")"
+    [ "$finalcode" = 200 ] && ok "runtime: conditional switch POST completed 200 after confirmation" \
+      || no "runtime: conditional switch POST completed 200 (got $finalcode)"
+  else
+    no "runtime: conditional switch child terminated and was reaped within bounded deadline"
+    no "runtime: conditional switch POST completed 200 after confirmation (child still alive/unreapable)"
+  fi
   [ "$(daemon_state | jq -r .active_facet)" = "workflow-designer" ] \
     && ok "runtime: confirmed switch lands on workflow-designer" \
     || no "runtime: confirmed switch lands on workflow-designer"
@@ -731,6 +739,7 @@ int_trap_probe() { # outfile -> 0 if a coprocess can trap SIGINT here
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.25
   done
+  # The bounded poll above confirmed death; this is a nonblocking reap only.
   wait "$pid" 2>/dev/null
   grep -q INT_TRAPPED "$o"
 }
@@ -749,6 +758,32 @@ run_lifecycle_fixture() { # --_lifecycle-fixture (used only by --selftest)
   while :; do sleep 1; done
 }
 run_selftest() {
+  sc "lifecycle_selftest: bounded failure paths never block"
+  local fake_pid failure_start failure_elapsed
+  sleep 30 >/dev/null 2>&1 & fake_pid=$!
+  failure_start=$SECONDS
+  PROC_DEAD_OVERRIDE=1
+  TERM_TIMEOUT=0
+  if ! kill_child "$fake_pid" >/dev/null 2>&1; then
+    ok "kill_child: still-alive simulation returns failure without blocking"
+  else
+    no "kill_child: still-alive simulation returns failure without blocking"
+  fi
+  failure_elapsed=$((SECONDS - failure_start))
+  [ "$failure_elapsed" -lt 2 ] && ok "kill_child: still-alive simulation is bounded" \
+    || no "kill_child: still-alive simulation is bounded (${failure_elapsed}s)"
+  PROC_DEAD_OVERRIDE=""
+  TERM_TIMEOUT=2
+  local transition_pid
+  ( sleep 30 ) & transition_pid=$!
+  CHILD_PIDS+=("$transition_pid")
+  TERM_TIMEOUT=0
+  if ! kill_child "$transition_pid" >/dev/null 2>&1; then
+    ok "conditional transition timeout path fails within bounded lifecycle"
+  else
+    no "conditional transition timeout path fails within bounded lifecycle"
+  fi
+  TERM_TIMEOUT=2
   sc "lifecycle_selftest: cleanup tracks every child, TERM then bounded KILL escalation"
   local w sleep_pid stall_pid
   w="$(mktemp -d)"; WORK_DIRS+=("$w")
@@ -851,7 +886,8 @@ run_selftest() {
       no "fixture ($sig): did not exit within 20s of SIG$sig — leak guard engaged"
       kill -KILL "$fchild" 2>/dev/null
       kill -KILL "$lpid" 2>/dev/null
-      wait "$lpid" 2>/dev/null
+      TERM_TIMEOUT=2
+      kill_child "$lpid" >/dev/null 2>&1 || true
     fi
     assert_dead "fixture ($sig): tracked child killed on interruption" "$fchild"
     [ ! -e "$fwork" ] && ok "fixture ($sig): workdir removed after children handled on interruption" \
