@@ -17,13 +17,13 @@
 #                           and evidence-tier contract
 #   --live-gateway          opt-in container-to-host gateway smoke; requires
 #                           POLYTOKEN_LIVE_GATEWAY=1, else an explicit skip
-#   --docs                  Task 4 stub: reported PENDING, never a pass
+#   --docs                  README workflow roles, gates, override, and MCP routing
 #   --selftest              deterministic lifecycle tests for the shared
 #                           child tracker and bounded TERM->KILL escalation
 #                           (no daemon required)
 #
-# Default (no args): full run of the mandatory non-doc source checks. It does
-# not require the live gateway and reports docs validation as pending.
+# Default (no args): full run of the mandatory source checks. It does not
+# require the live gateway.
 #
 # Runtime evidence: daemon-backed modes start an ISOLATED polytoken daemon
 # (isolated config/project/session dirs, pre-created credential file) and use
@@ -754,8 +754,13 @@ run_live_gateway() {
 
 run_docs() {
   sc "docs validation"
-  echo "  PENDING (Task 4): README docs validation is not implemented yet."
-  echo "                    Reported as pending — this is NOT a pass."
+  local readme="$REPO/README.md"
+  expect_in "README: workflow facets listed" "$readme" '`workflow-designer` and `workflow-delivery`'
+  expect_in "README: specialist roles named" "$readme" '`agent-workflow-architect` and `agent-workflow-engineer`'
+  expect_in "README: operator approval before handoff" "$readme" 'waits for approval. After approval it hands the plan to `workflow-delivery`'
+  expect_in "README: direct delivery invocation provenance" "$readme" 'it does not prove that a plan was reviewed or approved'
+  expect_in "README: risk-based TDD policy" "$readme" 'runtime validation instead of forced TDD'
+  expect_in "README: Ratatoskr-only MCP routing" "$readme" 'execute through `mcp__ratatoskr`; they do not connect directly to upstream MCP servers'
 }
 
 # =====================================================================
@@ -1030,8 +1035,7 @@ case "${1:-}" in
     run_delivery_policy
     run_ratatoskr
     run_selftest
-    sc "docs"
-    echo "  PENDING (Task 4): docs validation deferred — reported as pending, not passed."
+    run_docs
     ;;
   *)
     echo "usage: $0 [--inventory|--validate-definitions|--designer-authority|--approval-contract|--delivery-policy|--ratatoskr|--live-gateway|--docs|--selftest]" >&2
