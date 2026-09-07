@@ -31,6 +31,10 @@ legacy_skill() { jq -nc --arg d '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken
 legacy_reset() { jq -nc --arg d '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '{name:"skill-once-reset",event:"post_compaction",handler:{bash:("bash \""+$d+"/hooks/adapter.sh\" skill-once/compact.sh compact")}}'; }
 seed_hooks() { jq -s '.' "$@"; }
 backup_count() { find "$1" -maxdepth 1 -name 'hooks.json.bak-*' | wc -l | tr -d ' '; }
+# recommended hook inventory derived from source, so counts never go stale
+RECOMMENDED_HOOKS="$REPO/polytoken/hooks.json"
+REC_HOOKS="$(jq 'length' "$RECOMMENDED_HOOKS")"
+REC_HOOK_NAMES="$(jq -c '[.[].name]|sort' "$RECOMMENDED_HOOKS")"
 
 # --- P1: fresh target creates the expected file set, omits Claude-only artifacts ---
 sc "P1 fresh target -> expected files, no Claude-only artifacts"
@@ -81,14 +85,14 @@ jq -e --arg p "$portable" '[.[] | select(.handler.bash | contains("adapter.sh"))
   && ok "hooks reference portable runtime adapter path" || no "hooks reference portable runtime adapter path"
 rm -rf "$D"
 
-# --- P2: config no-TTY -> additive applied, tui.theme conflict preserved ---
-sc "P2 config no-TTY -> additive applied, theme conflict preserved"
+# --- P2: config no-TTY -> additive applied, lsp-enabled conflict preserved ---
+sc "P2 config no-TTY -> additive applied, lsp-enabled conflict preserved"
 D="$(valid_base)"
-yq -i '.tui.theme = "light"' "$D/config.yaml"
-yq -i 'del(.tui.status-line)' "$D/config.yaml"
+yq -i '.daemon.lsp.enabled = false' "$D/config.yaml"
+yq -i 'del(.mcp_servers.ratatoskr)' "$D/config.yaml"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
-ayq "$D/config.yaml" '.tui.theme == "light"'            "theme conflict preserved (light)"
-ayq "$D/config.yaml" '.tui.status-line != null'         "status-line additive added"
+ayq "$D/config.yaml" '.daemon.lsp.enabled == false'                   "lsp-enabled conflict preserved (false)"
+ayq "$D/config.yaml" '.mcp_servers.ratatoskr.transport == "http"'     "ratatoskr url/transport additive added"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
@@ -98,8 +102,8 @@ D="$(valid_base)"
 printf '%s\n' '[ {"name":"my-custom","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ "$(jq -r '.[0].name' "$D/hooks.json")" = "my-custom" ] && ok "custom hook order preserved (first)" || no "custom hook order preserved"
-# P3: one custom plus nine recommended
-ajq "$D/hooks.json" 'length == 10' "9 recommended + 1 custom"
+# P3: one custom plus the full recommended set from source
+ajq "$D/hooks.json" "length == $REC_HOOKS + 1" "1 custom + $REC_HOOKS recommended"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -107,19 +111,19 @@ rm -rf "$D"
 # --- P4: same-name hook conflict declined then accepted (interactive) ---
 sc "P4 same-name hook conflict -> decline preserves, accept replaces"
 D="$(valid_base)"
-printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
+printf '%s\n' '[ {"name":"git-safe","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 TTY="$(mktemp)"; printf 'n\n' > "$TTY"
 run_pt "$D" "$TTY" 0 >/dev/null
-[ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "true" ] \
+[ "$(jq -r '.[]|select(.name=="git-safe")|.handler.bash' "$D/hooks.json")" = "true" ] \
   && ok "declined conflict kept user handler" || no "declined conflict kept user handler"
 hasbakh "$D" && no "declined conflict wrote backup" || ok "declined conflict wrote no backup"
 rm -rf "$D" "$TTY"
 
 D="$(valid_base)"
-printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
+printf '%s\n' '[ {"name":"git-safe","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 TTY="$(mktemp)"; printf 'y\n' > "$TTY"
 run_pt "$D" "$TTY" 0 >/dev/null
-case "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" in
+case "$(jq -r '.[]|select(.name=="git-safe")|.handler.bash' "$D/hooks.json")" in
   *adapter.sh*) ok "accepted conflict took recommended handler" ;;
   *) no "accepted conflict took recommended handler" ;;
 esac
@@ -141,27 +145,27 @@ rm -rf "$D"
 # --- P6: no-TTY applies hook additions but preserves same-name conflict ---
 sc "P6 no-TTY -> hook additions applied, conflict preserved"
 D="$(valid_base)"
-printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
+printf '%s\n' '[ {"name":"git-safe","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
-[ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "true" ] \
+[ "$(jq -r '.[]|select(.name=="git-safe")|.handler.bash' "$D/hooks.json")" = "true" ] \
   && ok "no-TTY preserved conflict handler" || no "no-TTY preserved conflict handler"
-# P6: bash-guard conflicts, leaving eight additive recommended hooks
-[ "$(jq '[.[]|select(.name!="bash-guard")]|length' "$D/hooks.json")" = "8" ] \
-  && ok "no-TTY applied 8 additive hooks" || no "no-TTY applied additive hooks"
+# P6: git-safe conflicts, leaving the rest of the recommended set as additive
+[ "$(jq '[.[]|select(.name!="git-safe")]|length' "$D/hooks.json")" = "$((REC_HOOKS - 1))" ] \
+  && ok "no-TTY applied $((REC_HOOKS - 1)) additive hooks" || no "no-TTY applied additive hooks"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
 # --- P7: overwrite accepts conflicts without deleting unrelated entries ---
 sc "P7 overwrite -> conflicts accepted, unrelated preserved"
 D="$(valid_base)"
-yq -i '.tui.theme = "light"' "$D/config.yaml"
+yq -i '.daemon.lsp.enabled = false' "$D/config.yaml"
 printf '%s\n' '[ {"name":"unrelated-user","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}},
-  {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
+  {"name":"git-safe","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
 run_pt "$D" /nonexistent-xyz 1 >/dev/null
-ayq "$D/config.yaml" '.tui.theme == "dark"'             "overwrite took theme"
-case "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" in
-  *adapter.sh*) ok "overwrite took bash-guard handler" ;;
-  *) no "overwrite took bash-guard handler" ;;
+ayq "$D/config.yaml" '.daemon.lsp.enabled == true'     "overwrite took recommended lsp-enabled"
+case "$(jq -r '.[]|select(.name=="git-safe")|.handler.bash' "$D/hooks.json")" in
+  *adapter.sh*) ok "overwrite took git-safe handler" ;;
+  *) no "overwrite took git-safe handler" ;;
 esac
 ajq "$D/hooks.json" '[.[]|select(.name=="unrelated-user")]|length == 1' "unrelated hook preserved under overwrite"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
@@ -199,7 +203,7 @@ rm -rf "$D"
 
 # --- P10: write failure leaves originals intact ---
 sc "P10 write failure -> originals intact"
-D="$(valid_base)"; yq -i '.tui.theme = "light"' "$D/config.yaml"
+D="$(valid_base)"; yq -i '.mcp_servers.ratatoskr.transport = "stdio"' "$D/config.yaml"
 before="$(cat "$D/config.yaml")"
 chmod -w "$D"
 rc=0; run_pt "$D" /nonexistent-xyz 0 >/dev/null || rc=$?
@@ -232,24 +236,23 @@ rm -rf "$D" "$TTY"
 # --- P13: config conflict prompt shows both yours and recommended values ---
 sc "P13 config conflict -> prompt shows yours and recommended values"
 D="$(valid_base)"
-yq -i '.tui.theme = "light"' "$D/config.yaml"
+yq -i '.daemon.lsp.enabled = false' "$D/config.yaml"
 TTY="$(mktemp)"; printf 'n\n' > "$TTY"
 out="$(run_pt "$D" "$TTY" 0)"
-has "$out" "light"          "conflict shows your current value (light)"
-has "$out" "recommended:"   "conflict shows recommended: label + value"
-ayq "$D/config.yaml" '.tui.theme == "light"'   "declined conflict kept your theme (light)"
+has "$out" "yours:       false"  "conflict shows your current value (false)"
+has "$out" "recommended: true"   "conflict shows recommended: label + value"
+ayq "$D/config.yaml" '.daemon.lsp.enabled == false'   "declined conflict kept your lsp setting (false)"
 rm -rf "$D" "$TTY"
 
 # --- P14: hook conflict prompt shows both yours and recommended handlers ---
 sc "P14 hook conflict -> prompt shows yours and recommended"
 D="$(valid_base)"
-yq -i '.tui.theme = "dark"' "$D/config.yaml"   # match recommended: isolate the hook as the only conflict
-printf '%s\n' '[ {"name":"bash-guard","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"echo CUSTOM-HOOK-MARKER"}} ]' > "$D/hooks.json"
+printf '%s\n' '[ {"name":"git-safe","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"echo CUSTOM-HOOK-MARKER"}} ]' > "$D/hooks.json"
 TTY="$(mktemp)"; printf 'n\n' > "$TTY"
 out="$(run_pt "$D" "$TTY" 0)"
 has "$out" "CUSTOM-HOOK-MARKER"  "conflict shows your handler value"
 has "$out" "recommended:"        "conflict shows recommended: label"
-[ "$(jq -r '.[]|select(.name=="bash-guard")|.handler.bash' "$D/hooks.json")" = "echo CUSTOM-HOOK-MARKER" ] && ok "declined conflict kept your handler" || no "declined conflict kept your handler"
+[ "$(jq -r '.[]|select(.name=="git-safe")|.handler.bash' "$D/hooks.json")" = "echo CUSTOM-HOOK-MARKER" ] && ok "declined conflict kept your handler" || no "declined conflict kept your handler"
 rm -rf "$D" "$TTY"
 
 # --- P15: existing hooks with non-recommended events (e.g. session_start) survive merge ---
@@ -260,8 +263,8 @@ printf '%s\n' '[ {"name":"superpowers-session-start","event":"session_start","ha
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
 ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
-# P15: two existing plus nine recommended
-ajq "$D/hooks.json" 'length == 11' "2 existing + 9 recommended"
+# P15: two existing plus the full recommended set from source
+ajq "$D/hooks.json" "length == $REC_HOOKS + 2" "2 existing + $REC_HOOKS recommended"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -270,7 +273,8 @@ sc "P16 fresh install omits compatibility skill scripts"
 D="$(mktemp -d)"; run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ ! -e "$D/compat/skill-once/hook.sh" ] && ok "fresh hook script omitted" || no "fresh hook script omitted"
 [ ! -e "$D/compat/skill-once/compact.sh" ] && ok "fresh compact script omitted" || no "fresh compact script omitted"
-ajq "$D/hooks.json" 'length==9 and ([.[].name]|index("skill-once")==null) and ([.[].name]|index("skill-once-reset")==null)' "fresh hooks contain nine safe names"
+[ "$(jq -c '[.[].name]|sort' "$D/hooks.json")" = "$REC_HOOK_NAMES" ] \
+  && ok "fresh hooks match the $REC_HOOKS recommended names from source" || no "fresh hooks match the recommended names from source"
 rm -rf "$D"
 
 sc "P17 exact legacy entries removed independently with one backup"
