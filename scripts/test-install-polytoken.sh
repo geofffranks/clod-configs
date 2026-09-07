@@ -35,6 +35,27 @@ backup_count() { find "$1" -maxdepth 1 -name 'hooks.json.bak-*' | wc -l | tr -d 
 RECOMMENDED_HOOKS="$REPO/polytoken/hooks.json"
 REC_HOOKS="$(jq 'length' "$RECOMMENDED_HOOKS")"
 REC_HOOK_NAMES="$(jq -c '[.[].name]|sort' "$RECOMMENDED_HOOKS")"
+# Count of "+ hook ... (new)" prompts in installer output. When nonzero in a
+# same-name-conflict scenario, the single TTY input line is shared with
+# alphabetically earlier/later new-hook prompts — non-deterministic per-prompt
+# answers (installer patches sort by name).
+new_hook_prompts() { grep -oE '\+ hook [a-z0-9-]+ \(new\) \[y/N\]:' <<<"$1" | wc -l | tr -d ' '; }
+# Rendered recommended hooks for fixtures, mirroring the installer's token
+# rendering (render_hooks in install-polytoken.sh) so seeded entries compare
+# identical and generate no patches.
+rendered_recommended() {
+  jq --arg dir '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' \
+     'walk(if type == "string" then gsub("__POLYTOKEN_CONFIG_DIR__"; $dir) else . end)' "$RECOMMENDED_HOOKS"
+}
+# P4 fixture: the full rendered recommended set with only git-safe divergent.
+# Identical entries generate no patch, so the git-safe same-name conflict is
+# the sole hook prompt and one TTY line answers exactly that decision —
+# deterministically, independent of installer sort order or read consumption.
+p4_seed() {
+  rendered_recommended | jq -c 'map(if .name == "git-safe" then
+    {name:"git-safe",event:"pre_tool_use","matcher":"shell_exec",handler:{bash:"true"}}
+    else . end)' > "$1"
+}
 
 # --- P1: fresh target creates the expected file set, omits Claude-only artifacts ---
 sc "P1 fresh target -> expected files, no Claude-only artifacts"
@@ -109,24 +130,34 @@ pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
 # --- P4: same-name hook conflict declined then accepted (interactive) ---
+# p4_seed makes the git-safe conflict the only hook prompt, so each TTY file's
+# single line answers exactly that decision — even though installer patches
+# sort by name and container-awareness would otherwise prompt first.
 sc "P4 same-name hook conflict -> decline preserves, accept replaces"
 D="$(valid_base)"
-printf '%s\n' '[ {"name":"git-safe","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
+p4_seed "$D/hooks.json"
 TTY="$(mktemp)"; printf 'n\n' > "$TTY"
-run_pt "$D" "$TTY" 0 >/dev/null
+out="$(run_pt "$D" "$TTY" 0)"
+[ "$(new_hook_prompts "$out")" = 0 ] \
+  && ok "no new-hook prompt shares the conflict input" || no "no new-hook prompt shares the conflict input"
+has "$out" "~ hook git-safe" "conflict prompt shown for git-safe"
 [ "$(jq -r '.[]|select(.name=="git-safe")|.handler.bash' "$D/hooks.json")" = "true" ] \
   && ok "declined conflict kept user handler" || no "declined conflict kept user handler"
 hasbakh "$D" && no "declined conflict wrote backup" || ok "declined conflict wrote no backup"
 rm -rf "$D" "$TTY"
 
 D="$(valid_base)"
-printf '%s\n' '[ {"name":"git-safe","event":"pre_tool_use","matcher":"shell_exec","handler":{"bash":"true"}} ]' > "$D/hooks.json"
+p4_seed "$D/hooks.json"
 TTY="$(mktemp)"; printf 'y\n' > "$TTY"
-run_pt "$D" "$TTY" 0 >/dev/null
+out="$(run_pt "$D" "$TTY" 0)"
+[ "$(new_hook_prompts "$out")" = 0 ] \
+  && ok "no new-hook prompt consumes the single accept" || no "no new-hook prompt consumes the single accept"
+has "$out" "~ hook git-safe" "conflict prompt shown for git-safe (accept)"
 case "$(jq -r '.[]|select(.name=="git-safe")|.handler.bash' "$D/hooks.json")" in
   *adapter.sh*) ok "accepted conflict took recommended handler" ;;
   *) no "accepted conflict took recommended handler" ;;
 esac
+ajq "$D/hooks.json" "length == $REC_HOOKS" "accept replaced conflict, kept full hook inventory"
 hasbakh "$D" && ok "accepted conflict wrote backup" || no "accepted conflict wrote backup"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D" "$TTY"
