@@ -27,6 +27,8 @@ subagent_manifest=(
   'mobile-app-expert|codex/gpt-5.6-luna(high)|file_read,glob,grep|file_read,glob,grep||source_revision,scope_id,summary,recommendation,alternatives,risks,assumptions,evidence,limitations|alternatives,assumptions,evidence,follow_up_opportunities,limitations,recommendation,risks,scope_id,source_revision,summary||1ce1e39d0a669ff063739a9a2737fd5fdbb90044fa19a65eee20b490a2d1751e'
   'software-architect|codex/gpt-5.6-sol(high)|file_read,glob,grep|file_read,glob,grep||source_revision,scope_id,summary,recommendation,alternatives,risks,assumptions,evidence,limitations|alternatives,assumptions,evidence,follow_up_opportunities,limitations,recommendation,risks,scope_id,source_revision,summary||a4ad06c39aa4a76a6c812f0b03ae982442214871f6cfbc5d346746f8dddce52d'
   'software-engineer|codex/gpt-5.6-luna(high)|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec||source_revision,scope_id,status,summary,changed_files,tests,concerns|changed_files,concerns,follow_up_opportunities,scope_id,source_revision,status,summary,tests|status=done,done_with_concerns,needs_context,blocked|da142e2ec4caa3c66b93e6b282d22a7a9046af76bcde9627652b7a4a2c1dd579'
+  'agent-workflow-architect|zai/glm-5.2|file_read,glob,grep,web_search,web_fetch|file_read,glob,grep,web_search,web_fetch|tag!research|verdict,summary,recommendation,findings,evidence,risks,limitations,second_review_required|evidence,findings,limitations,recommendation,risks,second_review_required,summary,verdict|verdict=approved,needs_fixes,blocked|'
+  'agent-workflow-engineer|codex/gpt-5.6-luna|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,mcp__ratatoskr|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec||status,summary,changed_files,checks,tdd_evidence,concerns,limitations|changed_files,checks,concerns,limitations,status,summary,tdd_evidence|status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT|'
 )
 
 manifest_names() {
@@ -119,6 +121,41 @@ validate_persona_contracts() {
     'Review the entire repository before starting' \
     'Read the diff file once' \
     'do not re-derive it'
+  workflow_architect=polytoken/subagents/agent-workflow-architect.md
+  workflow_engineer=polytoken/subagents/agent-workflow-engineer.md
+
+  assert_contract persona_workflow_architect_requires_dispatch_context "$workflow_architect" \
+    'The dispatch names the phase, scope ID, source revision, requested' \
+    'these is missing, return `blocked` and name the gap; do not guess.'
+  assert_contract persona_workflow_architect_is_read_only "$workflow_architect" \
+    'You are read-only. You never edit files, run shell commands, fix your own' \
+    'findings, or spawn subagents — not even for a defect you just found.'
+  assert_contract persona_workflow_architect_evidence_and_severity "$workflow_architect" \
+    'Separate observed evidence from inference; cite paths with line numbers or' \
+    'URLs for every claim. Classify each finding by severity; state limitations.'
+  assert_contract persona_workflow_architect_second_review_triggers "$workflow_architect" \
+    'Mark `second_review_required` true when the work touches permissions,' \
+    'authority, approval gates, delegation, autonomous behavior, MCP routing,'
+  assert_contract persona_workflow_architect_ratatoskr_routing "$workflow_architect" \
+    'all MCP through ratatoskr with inspect-before-execute behavior;'
+  assert_contract persona_workflow_architect_final_compliance "$workflow_architect" \
+    'verify final source-revision compliance against the approved'
+
+  assert_contract persona_workflow_engineer_requires_dispatch_context "$workflow_engineer" \
+    'required checks, prohibited actions, and report expectations. If the' \
+    'approved design is insufficient, stop and return `NEEDS_CONTEXT`; never'
+  assert_contract persona_workflow_engineer_risk_based_test_policy "$workflow_engineer" \
+    '- Declarative facet, subagent, and config work: no forced RED/GREEN;' \
+    '- Executable script, hook, code, or MCP behavior: RED/GREEN TDD, then'
+  assert_contract persona_workflow_engineer_tool_discipline "$workflow_engineer" \
+    'use LSP for symbol navigation, and `shell_exec` only for real commands.'
+  assert_contract persona_workflow_engineer_ratatoskr_only "$workflow_engineer" \
+    'Use ratatoskr for all MCP: list servers, inspect a tool schema, then' \
+    'execute. Reconnect only on auth or token expiry. Never set up or'
+  assert_contract persona_workflow_engineer_evidence_boundaries "$workflow_engineer" \
+    'Report every check labeled container-local, ratatoskr-mediated host, or'
+  assert_contract persona_workflow_engineer_stays_bounded "$workflow_engineer" \
+    'Stay bounded: no remote writes, no destructive actions, and no nested'
   return "$CONTRACT_FAILURES"
 }
 
@@ -268,6 +305,7 @@ validate_persona() {
         fi
         ;;
       string) ;;
+      boolean) ;;
       *)
         echo "$persona: property $prop has unsupported type: $ptype" >&2
         exit 1
