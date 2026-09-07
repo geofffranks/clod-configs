@@ -102,8 +102,49 @@ with Polytoken-native equivalents.
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
 | `hooks.json` | `polytoken/hooks.json` | Nine native hooks, including the metadata-only `large-read-guard`. Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
+| `facets/` | `polytoken/facets/` | The `workflow-designer` and `workflow-delivery` workflow facets described below. |
+| `subagents/` | `polytoken/subagents/` | Managed built-in and workflow-specialist roles, including `agent-workflow-architect` and `agent-workflow-engineer`. |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
 | `compat/` | `home/{bash-guard,branch-guard,git-safe,grep-guard,large-read-guard,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
+
+#### Agent-workflow design and delivery
+
+Use `workflow-designer` when you want to turn a desired AI-workflow behavior
+into an implementation plan. It can inspect the project, consult the read-only
+`agent-workflow-architect` and other read-only specialists, compare approaches,
+and edit a saved plan. It cannot directly modify the project. Because Polytoken
+does not restrict subagent names per facet, its promise to dispatch only
+read-only roles is a prompt rule rather than a runtime security boundary.
+
+Before implementation, the designer explicitly sends the saved plan to the
+built-in `plan-reviewer`, resolves blocking findings, presents the result to the
+operator, and waits for approval. After approval it hands the plan to
+`workflow-delivery`; it cannot switch facets itself. Directly invoking
+`workflow-delivery` is also supported and authorizes the requested execution,
+but it does not prove that a plan was reviewed or approved. Delivery reports
+that provenance honestly.
+
+`workflow-delivery` implements the approved scope, normally through the
+write-capable `agent-workflow-engineer`, with these gates:
+
+- material changes to scope, permissions, approval, delegation, or MCP routing
+  return to `workflow-designer` for renewed approval;
+- multi-file, executable, high-risk, or dirty-tree work uses a feature branch
+  and isolated worktree; a small clean-tree prompt/config/docs edit may stay in
+  place;
+- scripts, hooks, code, and MCP behavior use test-first RED/GREEN checks;
+  prompt, Markdown, and declarative configuration use focused structural and
+  runtime validation instead of forced TDD;
+- substantive work gets an independent workflow-architecture review, with a
+  second fresh review when authority, permissions, autonomous behavior,
+  approval gates, delegation, destructive capability, or MCP routing changes;
+- pushing and other remote writes always require separate operator action.
+
+Both facets pin `codex/gpt-5.6-luna` with `zai/glm-5.2` fallback. Their MCP
+surface is limited to the Ratatoskr gateway: discover available servers, inspect
+the selected tool schema, then execute through `mcp__ratatoskr`; they do not
+connect directly to upstream MCP servers. The gateway itself runs on the Mac,
+including when Polytoken runs in the Linux container.
 
 #### MCP: everything behind the ratatoskr gateway
 
