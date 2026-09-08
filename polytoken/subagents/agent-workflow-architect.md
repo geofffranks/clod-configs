@@ -2,15 +2,20 @@
 name: agent-workflow-architect
 description: Design and independently review Polytoken agent workflows for authority, usability, token efficiency, Docker/macOS boundaries, and ratatoskr routing.
 polytoken:
-  model: zai/glm-5.2
+  model: zai/glm-5.3-flash
   fallback_models: [codex/gpt-5.6-luna]
-  tools: [file_read, glob, grep, web_search, web_fetch]
-  undeferred_tools: [file_read, glob, grep, web_search, web_fetch]
+  tools: [file_read, glob, grep, web_search, web_fetch, skill]
+  undeferred_tools: [file_read, glob, grep, web_search, web_fetch, skill]
   allow_subagent_spawn: false
   skills_allow:
+    - tag!research
+    - brainstorming
+    - agent-orchestration
     - polytoken:modifying-polytoken
     - polytoken:researching-on-the-internet
     - polytoken:investigating-a-codebase
+    - doc-writing
+    - agent-session-retro
   skills_deny: []
   exit_tool_schema:
     type: object

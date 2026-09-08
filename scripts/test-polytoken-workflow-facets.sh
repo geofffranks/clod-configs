@@ -392,7 +392,7 @@ run_validate_definitions() {
 run_designer_authority() {
   sc "designer frontmatter contract"
   expect_fm "designer: model pin" "$DESIGNER" '.polytoken.model' '"codex/gpt-5.6-luna"'
-  expect_list "designer: fallback_models" "$DESIGNER" '.polytoken.fallback_models' "zai/glm-5.2"
+  expect_list "designer: fallback_models" "$DESIGNER" '.polytoken.fallback_models' "zai/glm-5.3-flash"
   expect_list "designer: tools" "$DESIGNER" '.polytoken.tools' \
     "file_read,glob,grep,web_search,web_fetch,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,write_plan,edit_plan,handoff_plan,read_goal,block_goal,mcp__ratatoskr"
   expect_list "designer: tools_deny" "$DESIGNER" '.polytoken.tools_deny' \
@@ -400,7 +400,7 @@ run_designer_authority() {
   expect_list "designer: undeferred_tools" "$DESIGNER" '.polytoken.undeferred_tools' \
     "file_read,glob,grep,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,write_plan,edit_plan,handoff_plan"
   expect_list "designer: skills_allow" "$DESIGNER" '.polytoken.skills_allow' \
-    "tag!research,brainstorming,agent-orchestration"
+    "tag!research,brainstorming,agent-orchestration,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
   expect_fm "designer: skills_deny empty" "$DESIGNER" '.polytoken.skills_deny' '[]'
   expect_fm "designer: autonomous_hint" "$DESIGNER" '.polytoken.autonomous_hint' \
     '"Allow read-only investigation, read-only specialist consultation, plan editing, and approval handoff; deny direct or delegated project mutation during design."'
@@ -568,7 +568,7 @@ run_approval_contract() {
 run_delivery_policy() {
   sc "delivery frontmatter contract"
   expect_fm "delivery: model pin" "$DELIVERY" '.polytoken.model' '"codex/gpt-5.6-luna"'
-  expect_list "delivery: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "zai/glm-5.2"
+  expect_list "delivery: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "zai/glm-5.3-flash"
   expect_list "delivery: tools" "$DELIVERY" '.polytoken.tools' \
     "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,shell_monitor,shell_service,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,todo_create,todo_update,todo_complete,todo_delete,todo_list,pushd,popd,switch_facet,read_goal,complete_goal,block_goal,mcp__ratatoskr"
   expect_list "delivery: tools_deny" "$DELIVERY" '.polytoken.tools_deny' \
@@ -576,7 +576,7 @@ run_delivery_policy() {
   expect_list "delivery: undeferred_tools" "$DELIVERY" '.polytoken.undeferred_tools' \
     "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,todo_create,todo_update,todo_complete,todo_list,read_goal,complete_goal,block_goal"
   expect_list "delivery: skills_allow" "$DELIVERY" '.polytoken.skills_allow' \
-    "tag!research,brainstorming,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy"
+    "tag!research,brainstorming,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
   expect_fm "delivery: skills_deny empty" "$DELIVERY" '.polytoken.skills_deny' '[]'
   expect_fm "delivery: autonomous_hint" "$DELIVERY" '.polytoken.autonomous_hint' \
     '"Allow approved bounded implementation and verification; require confirmation for scope expansion, remote writes, destructive operations, or unverified authority."'

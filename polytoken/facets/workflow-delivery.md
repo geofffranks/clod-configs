@@ -2,7 +2,7 @@
 name: workflow-delivery
 polytoken:
   model: codex/gpt-5.6-luna
-  fallback_models: [zai/glm-5.2]
+  fallback_models: [zai/glm-5.3-flash]
   tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, shell_monitor, shell_service, subagent, message_subagent, skill, job_status, job_block, job_result, job_cancel, list_jobs, ask_user_question, tool_search, todo_create, todo_update, todo_complete, todo_delete, todo_list, pushd, popd, switch_facet, read_goal, complete_goal, block_goal, mcp__ratatoskr]
   tools_deny: [write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, subagent, message_subagent, skill, job_status, job_block, job_result, list_jobs, ask_user_question, todo_create, todo_update, todo_complete, todo_list, read_goal, complete_goal, block_goal]

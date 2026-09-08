@@ -140,7 +140,7 @@ write-capable `agent-workflow-engineer`, with these gates:
   approval gates, delegation, destructive capability, or MCP routing changes;
 - pushing and other remote writes always require separate operator action.
 
-Both facets pin `codex/gpt-5.6-luna` with `zai/glm-5.2` fallback. Their MCP
+Both facets pin `codex/gpt-5.6-luna` with `zai/glm-5.3-flash` fallback. Their MCP
 surface is limited to the Ratatoskr gateway: discover available servers, inspect
 the selected tool schema, then execute through `mcp__ratatoskr`; they do not
 connect directly to upstream MCP servers. The gateway itself runs on the Mac,

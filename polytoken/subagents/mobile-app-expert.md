@@ -6,10 +6,12 @@ polytoken:
   fallback_models:
     - neuralwatt/qwen-3.8-27b(medium)
     - zai/glm-5.3-flash(low)
-  tools: [file_read, glob, grep]
-  undeferred_tools: [file_read, glob, grep]
+  tools: [file_read, glob, grep, skill]
+  undeferred_tools: [file_read, glob, grep, skill]
   allow_subagent_spawn: false
-  skills_allow: []
+  skills_allow:
+    - polytoken:investigating-a-codebase
+    - polytoken:modifying-polytoken
   skills_deny: []
   exit_tool_schema:
     type: object

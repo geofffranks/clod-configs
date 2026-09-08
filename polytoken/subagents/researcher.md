@@ -5,11 +5,15 @@ polytoken:
   model: minime/google_gemma-4-26b-a4b-it
   fallback_models:
   - codex/gpt-5.6-luna
-  - zai/glm-5.2
+  - zai/glm-5.3-flash
   tools: [file_read, grep, glob, web_search, web_fetch]
   undeferred_tools: [grep, glob, web_search, web_fetch]
   allow_subagent_spawn: false
-  skills_allow: [tag!research]
+  skills_allow:
+    - tag!research
+    - polytoken:researching-on-the-internet
+    - polytoken:investigating-a-codebase
+    - polytoken:modifying-polytoken
   skills_deny: []
   exit_tool_schema:
     type: object

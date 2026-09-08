@@ -2,14 +2,18 @@
 name: validator
 description: Execute a validation plan end-to-end — runs each validation item, captures command output as evidence, judges pass/fail, and reports an overall verdict. Does not fix issues; reports them.
 polytoken:
-  model: zai/glm-5.2
+  model: zai/glm-5.3-flash
   fallback_models:
   - codex/gpt-5.6-luna
   - minime/google_gemma-4-26b-a4b-it
-  tools: [file_read, glob, grep, shell_exec, file_write]
-  undeferred_tools: [file_read, glob, grep, shell_exec, file_write]
+  tools: [file_read, glob, grep, shell_exec, file_write, skill]
+  undeferred_tools: [file_read, glob, grep, shell_exec, file_write, skill]
   allow_subagent_spawn: false
-  skills_allow: []
+  skills_allow:
+    - systematic-debugging
+    - verification-before-completion
+    - polytoken:investigating-a-codebase
+    - polytoken:modifying-polytoken
   skills_deny: []
   exit_tool_schema:
     type: object

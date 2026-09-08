@@ -3,14 +3,27 @@ name: agent-workflow-engineer
 description: Implement bounded Polytoken workflow changes with risk-based testing and explicit container/host evidence.
 polytoken:
   model: codex/gpt-5.6-luna
-  fallback_models: [zai/glm-5.2]
-  tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, mcp__ratatoskr]
-  undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec]
+  fallback_models: [zai/glm-5.3-flash]
+  tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, skill, mcp__ratatoskr]
+  undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, skill]
   allow_subagent_spawn: false
   skills_allow:
+    - tag!research
+    - brainstorming
+    - agent-orchestration
+    - git-workflow
+    - using-git-worktrees
+    - systematic-debugging
+    - test-driven-development
+    - receiving-code-review
+    - requesting-code-review
+    - verification-before-completion
+    - artifact-retention-policy
     - polytoken:modifying-polytoken
     - polytoken:researching-on-the-internet
     - polytoken:investigating-a-codebase
+    - doc-writing
+    - agent-session-retro
   skills_deny: []
   exit_tool_schema:
     type: object

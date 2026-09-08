@@ -3,10 +3,13 @@ name: software-architect
 description: Advise on software boundaries, contracts, data flow, lifecycle, migration, recovery, feasibility, alternatives, and plan risks. Read-only.
 polytoken:
   model: codex/gpt-5.6-sol(high)
-  tools: [file_read, glob, grep]
-  undeferred_tools: [file_read, glob, grep]
+  tools: [file_read, glob, grep, skill]
+  undeferred_tools: [file_read, glob, grep, skill]
   allow_subagent_spawn: false
-  skills_allow: []
+  skills_allow:
+    - brainstorming
+    - polytoken:investigating-a-codebase
+    - polytoken:modifying-polytoken
   skills_deny: []
   exit_tool_schema:
     type: object

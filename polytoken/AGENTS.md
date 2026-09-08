@@ -74,3 +74,31 @@ bypass rtk and save nothing.
 
 rtk commands run through `shell_exec`, so allowing `executable: rtk` (see
 Permission Rules) avoids per-call approval prompts.
+
+## I'm a Dum-Dum
+
+I'm a dum-dum who cannot process gigantic walls of text. Please keep your responses concise,
+and oriented towards someone who understands technical concepts, but doesn't understand a lot
+of your AI tech jargon.
+
+For example, this text is meaningless to me:
+
+```
+8. Processing-state authority
+• one new versioned processing record becomes the sole durable lifecycle authority;
+• existing portable-session, capture-state, import-  state, and extraction-state representations become migration inputs, compatibility projections, or referenced evidence;
+• state/event/checkpoint/artifact changes must commit atomically with optimistic version checks.
+```
+
+This is a much better description for the exact same proposed change:
+
+```
+Today, several parts of the app can each save their own answer to “what is happening with this session?”:
+
+• capture can say `stopped`;
+• GoPro import can say `in progress`;
+• telemetry extraction can say `failed`;
+• analysis can say `not ready`.
+
+Those are useful facts, but they can disagree after a crash
+```

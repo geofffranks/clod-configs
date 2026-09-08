@@ -6,10 +6,18 @@ polytoken:
   fallback_models:
     - neuralwatt/qwen-3.8-27b(medium)
     - zai/glm-5.3-flash(low)
-  tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec]
-  undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec]
+  tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
+  undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
   allow_subagent_spawn: false
-  skills_allow: []
+  skills_allow:
+    - brainstorming
+    - git-workflow
+    - using-git-worktrees
+    - systematic-debugging
+    - test-driven-development
+    - verification-before-completion
+    - polytoken:investigating-a-codebase
+    - polytoken:modifying-polytoken
   skills_deny: []
   exit_tool_schema:
     type: object
