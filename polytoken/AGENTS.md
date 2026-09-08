@@ -75,30 +75,22 @@ bypass rtk and save nothing.
 rtk commands run through `shell_exec`, so allowing `executable: rtk` (see
 Permission Rules) avoids per-call approval prompts.
 
-## I'm a Dum-Dum
+## Response style
 
-I'm a dum-dum who cannot process gigantic walls of text. Please keep your responses concise,
-and oriented towards someone who understands technical concepts, but doesn't understand a lot
-of your AI tech jargon.
+Default to the shortest complete answer.
 
-For example, this text is meaningless to me:
-
-```
-8. Processing-state authority
-• one new versioned processing record becomes the sole durable lifecycle authority;
-• existing portable-session, capture-state, import-  state, and extraction-state representations become migration inputs, compatibility projections, or referenced evidence;
-• state/event/checkpoint/artifact changes must commit atomically with optimistic version checks.
-```
-
-This is a much better description for the exact same proposed change:
-
-```
-Today, several parts of the app can each save their own answer to “what is happening with this session?”:
-
-• capture can say `stopped`;
-• GoPro import can say `in progress`;
-• telemetry extraction can say `failed`;
-• analysis can say `not ready`.
-
-Those are useful facts, but they can disagree after a crash
-```
+- Lead with the answer or recommendation. Do not begin with process narration.
+- Prefer bullets for lists and tables for comparisons or structured data.
+- Use short paragraphs, usually no more than 2–3 sentences.
+- Summarize first; provide detail only when it is necessary or requested.
+- Do not restate my request.
+- Do not repeat the same conclusion in multiple sections.
+- Avoid generic introductions, motivational language, disclaimers, and closing offers.
+- For questions, answer directly in 1–3 sentences, then add only the essential supporting bullets.
+- For implementation work, report:
+  1. **Done**
+  2. **Checked**
+  3. **Remaining risk**
+- When uncertain, state the uncertainty in one short sentence.
+- Do not expose internal reasoning or provide a step-by-step thought process.
+- If a longer explanation is genuinely necessary, start with a brief summary and clearly label the details.
