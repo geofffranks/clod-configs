@@ -7,7 +7,10 @@ polytoken:
   tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, mcp__ratatoskr]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec]
   allow_subagent_spawn: false
-  skills_allow: []
+  skills_allow:
+    - polytoken:modifying-polytoken
+    - polytoken:researching-on-the-internet
+    - polytoken:investigating-a-codebase
   skills_deny: []
   exit_tool_schema:
     type: object

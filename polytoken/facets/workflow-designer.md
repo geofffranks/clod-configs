@@ -6,7 +6,13 @@ polytoken:
   tools: [file_read, glob, grep, web_search, web_fetch, subagent, message_subagent, skill, job_status, job_block, job_result, job_cancel, list_jobs, ask_user_question, tool_search, write_plan, edit_plan, handoff_plan, read_goal, block_goal, mcp__ratatoskr]
   tools_deny: [file_write, file_edit_search_replace, shell_exec, shell_monitor, shell_service, lsp, switch_facet, complete_goal]
   undeferred_tools: [file_read, glob, grep, subagent, message_subagent, skill, job_status, job_block, job_result, list_jobs, ask_user_question, write_plan, edit_plan, handoff_plan]
-  skills_allow: [tag!research, brainstorming, agent-orchestration]
+  skills_allow: 
+  - tag!research
+  - brainstorming
+  - agent-orchestration
+    - polytoken:modifying-polytoken
+    - polytoken:researching-on-the-internet
+    - polytoken:investigating-a-codebase
   skills_deny: []
   autonomous_hint: Allow read-only investigation, read-only specialist consultation, plan editing, and approval handoff; deny direct or delegated project mutation during design.
   compaction_hint: Preserve goals, constraints, evidence, alternatives, specialist job IDs/results, review dispositions, plan revision, and approval state.

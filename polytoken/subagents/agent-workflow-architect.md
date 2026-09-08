@@ -7,7 +7,10 @@ polytoken:
   tools: [file_read, glob, grep, web_search, web_fetch]
   undeferred_tools: [file_read, glob, grep, web_search, web_fetch]
   allow_subagent_spawn: false
-  skills_allow: [tag!research]
+  skills_allow:
+    - polytoken:modifying-polytoken
+    - polytoken:researching-on-the-internet
+    - polytoken:investigating-a-codebase
   skills_deny: []
   exit_tool_schema:
     type: object
