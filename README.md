@@ -116,13 +116,16 @@ and edit a saved plan. It cannot directly modify the project. Because Polytoken
 does not restrict subagent names per facet, its promise to dispatch only
 read-only roles is a prompt rule rather than a runtime security boundary.
 
-Before implementation, the designer explicitly sends the saved plan to the
-built-in `plan-reviewer`, resolves blocking findings, presents the result to the
-operator, and waits for approval. After approval it hands the plan to
-`workflow-delivery`; it cannot switch facets itself. Directly invoking
-`workflow-delivery` is also supported and authorizes the requested execution,
-but it does not prove that a plan was reviewed or approved. Delivery reports
-that provenance honestly.
+Before implementation, the designer sends the saved plan to
+`agent-workflow-architect` for one bounded workflow review covering plan
+coherence and scope, authority, approval, delegation, MCP routing, host
+boundaries, usability, operational risks, and compliance with the requested
+design. Blocking findings are fixed or rebutted and the revised plan receives a
+fresh architect rereview before the designer presents it to the operator and
+waits for approval. After approval it hands the plan to `workflow-delivery`; it
+cannot switch facets itself. Directly invoking `workflow-delivery` is also
+supported and authorizes the requested execution, but it does not prove that a
+plan was reviewed or approved. Delivery reports that provenance honestly.
 
 `workflow-delivery` implements the approved scope, normally through the
 write-capable `agent-workflow-engineer`, with these gates:
@@ -132,13 +135,21 @@ write-capable `agent-workflow-engineer`, with these gates:
 - multi-file, executable, high-risk, or dirty-tree work uses a feature branch
   and isolated worktree; a small clean-tree prompt/config/docs edit may stay in
   place;
-- scripts, hooks, code, and MCP behavior use test-first RED/GREEN checks;
-  prompt, Markdown, and declarative configuration use focused structural and
-  runtime validation instead of forced TDD;
+- checks are selected by the actual consumed contract: Markdown instructions
+  receive independent content review and scenario walkthroughs; machine-
+  consumed configuration receives parser/CLI/schema and effective-runtime
+  validation; executable production behavior receives risk-based executable
+  checks and TDD only when required;
+- executable replicas of prompt policies are not created solely to unit-test
+  prose, and new validation infrastructure requires a concrete contract,
+  failure, simpler-alternative, and limitation justification;
 - substantive work gets an independent workflow-architecture review, with a
   second fresh review when authority, permissions, autonomous behavior,
   approval gates, delegation, destructive capability, or MCP routing changes;
 - pushing and other remote writes always require separate operator action.
+
+Reviewers are routed to one bounded question and named evidence. They identify
+risks and missing evidence rather than prescribing unit tests by default.
 
 Both facets pin `codex/gpt-5.6-luna` with `zai/glm-5.3-flash` fallback. Their MCP
 surface is limited to the Ratatoskr gateway: discover available servers, inspect

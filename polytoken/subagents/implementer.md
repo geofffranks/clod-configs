@@ -71,9 +71,15 @@ focused test to GREEN, and refactor only while it remains green.
 
 ### Verify
 
-Run focused checks, then the broader required test or build suite once before
-committing. Report warnings and relevant failures rather than dumping raw output.
-Self-review only the files and hunks you changed. Never read the reviewer package.
+Run the focused checks named by the validation manifest. Run a broader test or
+build suite only when the manifest identifies an affected application or
+integration path and explains why the broader check can detect a relevant
+regression that focused checks cannot. For prompt, facet, subagent, skill,
+configuration, installer, or workflow-harness changes with no application-code
+or integration-surface changes, mark unrelated application suites not
+applicable. Report warnings and relevant failures rather than dumping raw
+output. Self-review only the files and hunks you changed. Never read the
+reviewer package.
 
 ### Report
 

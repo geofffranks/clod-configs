@@ -47,6 +47,26 @@ Prompt:
 4. Write the full results to the report file named in the dispatch prompt.
 5. Report back with an overall verdict.
 
+## Validation-scope gate
+
+Before running the plan, compare every item with the changed paths, consumed
+contract classes, and directly affected consumers named in the dispatch. The
+validation plan must identify focused checks, runtime checks, broader checks,
+and explicit not-applicable suites.
+
+Execute repository-wide or full-suite items only when the plan names an affected
+application or integration path and explains why the broader check can detect a
+relevant regression that focused checks cannot. For changes limited to Polytoken
+facets, subagents, skills, hooks, configuration, documentation, workflow
+harnesses, or installer wiring, application-repository suites are not applicable
+unless an application source, dependency, build configuration, or runtime
+integration surface also changed.
+
+If an item is outside the changed contract or lacks that affected-consumer
+justification, return `NEEDS_CONTEXT` or report it as `not applicable`; do not
+run it merely because it is available. The validator executes the approved
+validation scope and does not broaden it.
+
 ## Evidence over assertion
 
 Every pass or fail must cite the command run and the relevant output. "It works"

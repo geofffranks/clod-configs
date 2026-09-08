@@ -18,9 +18,9 @@ command -v sha256sum >/dev/null || { echo "sha256sum is required" >&2; exit 1; }
 # rather than per-role special cases.
 subagent_manifest=(
   'implementer|codex/gpt-5.6-luna|Implement a single plan task via TDD — writes code, runs focused then full tests, commits, self-reviews, and reports status. Dispatch one per task with its task-brief file path and report-file path.|zai/glm-5.3-flash|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|brainstorming,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|status,summary|commits,concerns,report_file,status,summary,test_summary|status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT|'
-  'reviewer|zai/glm-5.3-flash|Review a code diff against its requirements and quality standards — returns a spec-compliance verdict and a quality verdict with severity-classified findings. Read-only with no write or shell tools. Handles task-scoped and whole-branch review.|codex/gpt-5.6-luna,minime/google_gemma-4-26b-a4b-it|file_read,glob,grep|file_read,glob,grep||verdict,summary|report_file,spec_compliance,summary,verdict|verdict=approved,needs_fixes;spec_compliance=compliant,issues_found|'
+  'reviewer|zai/glm-5.3-flash|Review a code diff against its requirements and quality standards — returns a spec-compliance verdict and a quality verdict with severity-classified findings. Read-only with no write or shell tools. Handles task-scoped and whole-branch review.|codex/gpt-5.6-luna,minime/google_gemma-4-26b-a4b-it|file_read,glob,grep,skill|file_read,glob,grep,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|verdict,summary|report_file,spec_compliance,summary,verdict|verdict=approved,needs_fixes;spec_compliance=compliant,issues_found|'
   'validator|zai/glm-5.3-flash|Execute a validation plan end-to-end — runs each validation item, captures command output as evidence, judges pass/fail, and reports an overall verdict. Does not fix issues; reports them.|codex/gpt-5.6-luna,minime/google_gemma-4-26b-a4b-it|file_read,glob,grep,shell_exec,file_write,skill|file_read,glob,grep,shell_exec,file_write,skill|systematic-debugging,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|verdict,summary|report_file,summary,verdict|verdict=pass,fail,partial|'
-  'researcher|minime/google_gemma-4-26b-a4b-it|Investigate a research question against the local codebase, the internet, or both, and return evidence-grounded findings.|codex/gpt-5.6-luna,zai/glm-5.3-flash|file_read,grep,glob,web_search,web_fetch,skill|grep,glob,web_search,web_fetch,skill|tag!research,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|summary,files,sources|files,sources,summary||'
+  'researcher|minime/google_gemma-4-26b-a4b-it|Investigate a research question against the local codebase, the internet, or both, and return evidence-grounded findings.|codex/gpt-5.6-luna,zai/glm-5.3-flash|file_read,grep,glob,web_search,web_fetch|grep,glob,web_search,web_fetch|tag!research,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|summary,files,sources|files,sources,summary||'
   'abstraction-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes for leaky abstractions, boundary violations, boilerplate caused by poor interfaces, and low-level concepts leaking toward product or UI surfaces.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|d65dd096d3f6431735753b6d52ebfb5f8441423b28c234f0e872708bca964abe'
   'completeness-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes for placeholders, deferred layers, mocked production paths, missing wiring, unsupported errors, and partial end-to-end behavior.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|2bafd5009404d3b3bb082bebfdbfa88be0cbd614779ee00126ffe557c0174380'
   'correctness-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes for crashes, races, deadlocks, corruption, lifecycle and state-machine defects, unsafe cancellation, and recovery failures.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|b430ea4778866ccf8b5785e1188478dfda22ad8aac9268c9309122cdfea3f4d4'
@@ -46,119 +46,6 @@ manifest_entry() {
     fi
   done
   return 1
-}
-
-assert_contract() {
-  label="$1"
-  path="$2"
-  shift 2
-  passed=true
-  for required_text in "$@"; do
-    if ! grep -Fq -- "$required_text" "$path"; then
-      echo "$label: missing contract: $required_text" >&2
-      CONTRACT_FAILURES=1
-      passed=false
-    fi
-  done
-  [[ "$passed" == false ]] || echo "$label"
-}
-
-assert_absent() {
-  label="$1"
-  path="$2"
-  shift 2
-  passed=true
-  for stale_text in "$@"; do
-    if grep -Fq -- "$stale_text" "$path"; then
-      echo "$label: stale or contradictory wording: $stale_text" >&2
-      CONTRACT_FAILURES=1
-      passed=false
-    fi
-  done
-  [[ "$passed" == false ]] || echo "$label"
-}
-
-validate_persona_contracts() {
-  implementer=polytoken/subagents/implementer.md
-  reviewer=polytoken/subagents/reviewer.md
-  CONTRACT_FAILURES=0
-
-  assert_contract persona_implementer_orient_red_green_verify_report "$implementer" \
-    'Orient → RED/GREEN → Verify → Report'
-  assert_contract persona_implementer_path_dispatch "$implementer" \
-    'The dispatch supplies paths to the manifest, task brief, and report file.'
-  assert_contract persona_implementer_targeted_exploration_then_needs_context "$implementer" \
-    'Start with the named files and their direct dependencies.' \
-    'Before any out-of-scope read, state one unresolved question and perform one targeted lookup.' \
-    'After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT` rather than guessing.'
-  assert_contract persona_implementer_self_reviews_changed_hunks_only "$implementer" \
-    'Self-review only the files and hunks you changed.' \
-    'Never read the reviewer package.'
-  assert_contract persona_reviewer_path_dispatch "$reviewer" \
-    'The dispatch supplies paths to the review index, task brief, diff shards, and' \
-    'report file.'
-  assert_contract persona_reviewer_has_four_exact_modes "$reviewer" \
-    'The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integration`, or `final-incremental-rereview`.'
-  [[ "$(grep -oE '`(initial-task|incremental-rereview|final-integration|final-incremental-rereview)`' "$reviewer" | sort -u | wc -l)" == 4 ]] || { echo 'persona_reviewer_has_four_exact_modes: expected exactly four unique mode names' >&2; CONTRACT_FAILURES=1; }
-  assert_contract persona_reviewer_reads_index_and_all_mode_required_shards "$reviewer" \
-    'Read the review index first, then read every shard required by the selected mode; never sample required shards.'
-  assert_contract persona_reviewer_limits_unchanged_source_to_named_risk "$reviewer" \
-    'Read unchanged source only once for each named concrete risk.'
-  assert_contract persona_bounded_grep_and_ranged_read "$implementer" \
-    'Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact.'
-  assert_contract persona_bounded_grep_and_ranged_read "$reviewer" \
-    'Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact.'
-  assert_contract persona_recovers_from_oversized_result "$implementer" \
-    'If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims.'
-  assert_contract persona_recovers_from_oversized_result "$reviewer" \
-    'If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims.'
-  assert_contract persona_reports_concise_test_evidence "$implementer" \
-    'For test evidence, report the command, status, counts or summary, warnings, and only the relevant failure excerpt; put raw output in a named path.'
-  assert_contract persona_uses_rtk_only_for_broad_text_and_supported_commands "$implementer" \
-    'Use RTK only for broader plain-text searches and supported test or build commands, never for ordinary targeted reads.'
-  assert_absent persona_negative_stale_or_contradictory_wording "$implementer" \
-    'Read the entire repository before starting' \
-    'Self-review the reviewer package'
-  assert_absent persona_negative_stale_or_contradictory_wording "$reviewer" \
-    'Review the entire repository before starting' \
-    'Read the diff file once' \
-    'do not re-derive it'
-  workflow_architect=polytoken/subagents/agent-workflow-architect.md
-  workflow_engineer=polytoken/subagents/agent-workflow-engineer.md
-
-  assert_contract persona_workflow_architect_requires_dispatch_context "$workflow_architect" \
-    'The dispatch names the phase, scope ID, source revision, requested' \
-    'these is missing, return `blocked` and name the gap; do not guess.'
-  assert_contract persona_workflow_architect_is_read_only "$workflow_architect" \
-    'You are read-only. You never edit files, run shell commands, fix your own' \
-    'findings, or spawn subagents — not even for a defect you just found.'
-  assert_contract persona_workflow_architect_evidence_and_severity "$workflow_architect" \
-    'Separate observed evidence from inference; cite paths with line numbers or' \
-    'URLs for every claim. Classify each finding by severity; state limitations.'
-  assert_contract persona_workflow_architect_second_review_triggers "$workflow_architect" \
-    'Mark `second_review_required` true when the work touches permissions,' \
-    'authority, approval gates, delegation, autonomous behavior, MCP routing,'
-  assert_contract persona_workflow_architect_ratatoskr_routing "$workflow_architect" \
-    'all MCP through ratatoskr with inspect-before-execute behavior;'
-  assert_contract persona_workflow_architect_final_compliance "$workflow_architect" \
-    'verify final source-revision compliance against the approved'
-
-  assert_contract persona_workflow_engineer_requires_dispatch_context "$workflow_engineer" \
-    'required checks, prohibited actions, and report expectations. If the' \
-    'approved design is insufficient, stop and return `NEEDS_CONTEXT`; never'
-  assert_contract persona_workflow_engineer_risk_based_test_policy "$workflow_engineer" \
-    '- Declarative facet, subagent, and config work: no forced RED/GREEN;' \
-    '- Executable script, hook, code, or MCP behavior: RED/GREEN TDD, then'
-  assert_contract persona_workflow_engineer_tool_discipline "$workflow_engineer" \
-    'use LSP for symbol navigation, and `shell_exec` only for real commands.'
-  assert_contract persona_workflow_engineer_ratatoskr_only "$workflow_engineer" \
-    'Use ratatoskr for all MCP: list servers, inspect a tool schema, then' \
-    'execute. Reconnect only on auth or token expiry. Never set up or'
-  assert_contract persona_workflow_engineer_evidence_boundaries "$workflow_engineer" \
-    'Report every check labeled container-local, ratatoskr-mediated host, or'
-  assert_contract persona_workflow_engineer_stays_bounded "$workflow_engineer" \
-    'Stay bounded: no remote writes, no destructive actions, and no nested'
-  return "$CONTRACT_FAILURES"
 }
 
 validate_implementer_model_contract() {
@@ -337,7 +224,11 @@ if [[ "${1:-}" == --model-contract ]]; then
 fi
 
 if [[ "${1:-}" == --persona-contracts ]]; then
-  validate_persona_contracts
+  validate_inventory
+  while IFS= read -r persona; do
+    validate_persona "$persona"
+  done < <(manifest_names)
+  echo "all machine-consumed persona contracts passed"
   exit 0
 fi
 
@@ -614,10 +505,9 @@ if [[ "${1:-}" == --inventory ]]; then
 fi
 
 validate_implementer_model_contract
-validate_persona_contracts
 validate_inventory
 while IFS= read -r persona; do
   validate_persona "$persona"
 done < <(manifest_names)
 echo "${#subagent_manifest[@]} model assignments verified"
-echo "all persona contract assertions passed"
+echo "all machine-consumed persona contracts passed; Markdown content review is manual"
