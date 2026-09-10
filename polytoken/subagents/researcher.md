@@ -2,10 +2,9 @@
 name: researcher
 description: Investigate a research question against the local codebase, the internet, or both, and return evidence-grounded findings.
 polytoken:
-  model: minime/google_gemma-4-26b-a4b-it
+  model: zai/glm-5.3-flash(high)
   fallback_models:
-  - codex/gpt-5.6-luna
-  - zai/glm-5.3-flash
+  - codex/gpt-5.6-luna(high)
   tools: [file_read, grep, glob, web_search, web_fetch]
   undeferred_tools: [grep, glob, web_search, web_fetch]
   allow_subagent_spawn: false

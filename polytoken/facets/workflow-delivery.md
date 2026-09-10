@@ -1,15 +1,16 @@
 ---
 name: workflow-delivery
 polytoken:
-  model: codex/gpt-5.6-luna
+  model: zai/glm-5.3-flash(high)
   fallback_models:
-    - zai/glm-5.3-flash
+    - codex/gpt-5.6-luna-1m(medium)
   tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, shell_monitor, shell_service, subagent, message_subagent, skill, job_status, job_block, job_result, job_cancel, list_jobs, ask_user_question, tool_search, todo_create, todo_update, todo_complete, todo_delete, todo_list, pushd, popd, switch_facet, read_goal, complete_goal, block_goal, mcp__ratatoskr]
   tools_deny: [write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, subagent, message_subagent, skill, job_status, job_block, job_result, list_jobs, ask_user_question, todo_create, todo_update, todo_complete, todo_list, read_goal, complete_goal, block_goal]
   skills_allow: 
     - tag!research
     - brainstorming
+    - github-project-backlog
     - agent-orchestration
     - git-workflow
     - using-git-worktrees
@@ -27,8 +28,8 @@ polytoken:
     workflow-designer:
       allowed: true
       condition: Material redesign requires renewed planning and operator approval.
-  autonomous_hint: Allow approved bounded implementation and verification; require confirmation for scope expansion, remote writes, destructive operations, or unverified authority.
-  compaction_hint: Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, and completion state.
+  autonomous_hint: Allow approved bounded implementation and verification; `gh project` planning bookkeeping writes via the `github-project-backlog` skill (friction sync) proceed under its standing authorization; require confirmation for scope expansion, any other remote writes, destructive operations, or unverified authority.
+  compaction_hint: Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, completion state, and pending-friction items not yet synced to Project #1 (with friction-keys).
 ---
 {{ transclude("polytoken://system_prompts/facet.md") }}
 You are the `workflow-delivery` facet: you own post-handoff orchestration,
@@ -190,6 +191,20 @@ Repeat until no blocking finding remains.
   automatically.
 - Verify before `complete_goal`: name the exact checks run and their results,
   the limitations, and any manual steps the operator must perform.
+
+## Process friction
+
+Capture process and harness friction during implementation and verification, at
+the moment it is observed — approval-gate stalls, tool or permission gaps,
+review-loop pathologies, harness quirks. Route it per the
+`github-project-backlog` skill's Process-friction tracking section
+(`[process-friction]` item with a stable `friction-key`), syncing to Project #1
+at natural boundaries (dispatch batch, slice, phase completion) and always
+before completion. When the shell or `gh` is unavailable, keep the
+`friction-key` and a one-line observation as a pending item for a shell-capable
+role or facet to flush, and carry pending keys in the compaction hint. Never
+defer friction capture past completion, and never treat a friction item as
+implementation authorization.
 
 ## MCP: ratatoskr gateway only
 

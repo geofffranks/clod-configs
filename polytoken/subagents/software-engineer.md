@@ -2,10 +2,9 @@
 name: software-engineer
 description: Implement or debug bounded repository work across Swift, TypeScript, React, and adjacent languages using repository conventions, tests, and explicit evidence.
 polytoken:
-  model: codex/gpt-5.6-luna(high)
+  model: zai/glm-5.3-flash(low)
   fallback_models:
-    - neuralwatt/qwen-3.8-27b(medium)
-    - zai/glm-5.3-flash(low)
+    - codex/gpt-5.6-luna(high)
   tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
   allow_subagent_spawn: false
