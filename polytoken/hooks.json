@@ -44,5 +44,19 @@
     "handler": {
       "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/container-awareness.sh\""
     }
+  },
+  {
+    "name": "agent-notify",
+    "event": "notification",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/agent-notify.sh\" polytoken"
+    }
+  },
+  {
+    "name": "agent-notify-cancel",
+    "event": "pre_user_prompt",
+    "handler": {
+      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/agent-notify.sh\" polytoken"
+    }
   }
 ]

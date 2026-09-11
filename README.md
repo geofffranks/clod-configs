@@ -55,6 +55,23 @@ Each target reads its own TTY override for interactive prompts:
 `CLAUDE_CONFIG_TTY` (Claude) and `POLYTOKEN_CONFIG_TTY` (Polytoken); both
 default to `/dev/tty`.
 
+### Optional Pushover attention notifications
+
+The recommended Claude and Polytoken hooks share one fail-open Pushover notifier.
+Configure credentials in the environment of the host Claude process:
+
+```bash
+export PUSHOVER_APP_TOKEN=your-application-token
+export PUSHOVER_USER_KEY=your-user-key
+```
+
+The notifier consolidates attention events per session, and a submitted prompt
+cancels only that session's pending notification. For Polytoken running in the
+Docker/container environment, pass the same variables through to the container
+(for example, with Docker Compose `environment:` entries or `docker run -e`);
+do not commit the credentials to this repository. Unset credentials simply
+disable notifications without affecting hook outcomes.
+
 ### Requirements
 
 | Dependency | Used by | Notes |

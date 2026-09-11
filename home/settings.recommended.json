@@ -130,6 +130,14 @@
             "command": "~/.claude/agent-join/hook.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/agent-notify.sh\" claude"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -146,6 +154,26 @@
           {
             "type": "command",
             "command": "~/.claude/agent-join/hook.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/agent-notify.sh\" claude",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/agent-notify.sh\" claude",
+            "async": true
           }
         ]
       }
