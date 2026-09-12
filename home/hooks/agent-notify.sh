@@ -117,29 +117,53 @@ case "$EVENT" in
   *) CATEGORY="agent attention"; TITLE="Agent attention" ;;
 esac
 sanitize() {
-  # Keep only bounded, printable identity metadata; event payload text is never used.
-  printf '%s' "$1" | tr '\r\n\t' '   ' | tr -cd '[:alnum:] ._/@:-' | cut -c1-64
+  # Keep only bounded, printable identity metadata; $2 caps the length (default 64).
+  printf '%s' "$1" | tr '\r\n\t' '   ' | tr -cd '[:alnum:] ._/@:-' | cut -c1-"${2:-64}"
 }
 SAFE_SESSION="$(sanitize "$SESSION_RAW")"; [ -n "$SAFE_SESSION" ] || SAFE_SESSION="unknown"
-PROJECT_RAW="$(jq -r '.cwd // .project // empty' <<<"$INPUT" 2>/dev/null || true)"
+PROJECT_RAW="${POLYTOKEN_PROJECT_PATH:-$(jq -r '.cwd // .project // empty' <<<"$INPUT" 2>/dev/null || true)}"
 PROJECT="$(sanitize "${PROJECT_RAW##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
-# Polytoken's hook payload carries neither the project nor a session title;
-# read the live session metadata from disk instead. The label falls back to
-# the session id only when no readable title/preview exists.
-LABEL=""
-if [ "$HARNESS" = polytoken ]; then
-  SESSIONS_DIR="${POLYTOKEN_SESSIONS_DIR:-${AGENT_NOTIFY_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}}"
-  SESS_FILE_ID="${SAFE_SESSION//\//_}"
-  if [ "$PROJECT" = unknown ]; then
-    P="$(jq -r '.project_path // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
-    PROJECT="$(sanitize "${P##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
+# Notification body: the agent's final visible response says far more about
+# "what was it doing?" than a session id. Sources, best first:
+#   claude Notification -> payload .message (harness-authored notice text)
+#   claude Stop         -> last assistant text block in transcript_path
+#   polytoken           -> last assistant text block in the session transcript
+# Fallbacks: polytoken session.json preview/title, then the raw session id.
+RESP=""
+case "$EVENT" in
+  Notification|notification|post_model_turn|post_tool_use)
+    if [ "$HARNESS" = claude ]; then
+      RESP="$(sanitize "$(jq -r '.message // empty' <<<"$INPUT" 2>/dev/null || true)" 160)"
+    fi
+    ;;
+esac
+SESSIONS_DIR=""
+SESS_FILE_ID="${SAFE_SESSION//\//_}"
+if [ -z "$RESP" ]; then
+  TRANSCRIPT=""
+  if [ "$HARNESS" = claude ]; then
+    TRANSCRIPT="$(jq -r '.transcript_path // empty' <<<"$INPUT" 2>/dev/null || true)"
+  elif [ "$HARNESS" = polytoken ]; then
+    SESSIONS_DIR="${POLYTOKEN_SESSIONS_DIR:-${AGENT_NOTIFY_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}}"
+    TRANSCRIPT="$SESSIONS_DIR/$SESS_FILE_ID/log.jsonl"
   fi
+  if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+    L="$(grep '"type":"assistant"' "$TRANSCRIPT" 2>/dev/null | tail -5 |
+         jq -r '[(.blocks // .message.content // [])[] | select(.type=="text") | .text] | last // empty' 2>/dev/null | tail -1)"
+    RESP="$(sanitize "$L" 160)"
+  fi
+fi
+if [ -z "$RESP" ] && [ "$HARNESS" = polytoken ]; then
   L="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
   [ -n "$L" ] || L="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
-  LABEL="$(sanitize "$L")"
+  RESP="$(sanitize "$L" 160)"
 fi
-if [ -n "$LABEL" ]; then
-  MESSAGE="$CATEGORY [$HARNESS project=$PROJECT] $LABEL"
+if [ "$PROJECT" = unknown ] && [ "$HARNESS" = polytoken ]; then
+  P="$(jq -r '.project_path // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
+  PROJECT="$(sanitize "${P##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
+fi
+if [ -n "$RESP" ]; then
+  MESSAGE="$CATEGORY [$HARNESS project=$PROJECT] $RESP"
 else
   MESSAGE="$CATEGORY [$HARNESS session=$SAFE_SESSION project=$PROJECT]"
 fi
