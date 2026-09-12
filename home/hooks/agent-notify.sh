@@ -123,7 +123,26 @@ sanitize() {
 SAFE_SESSION="$(sanitize "$SESSION_RAW")"; [ -n "$SAFE_SESSION" ] || SAFE_SESSION="unknown"
 PROJECT_RAW="$(jq -r '.cwd // .project // empty' <<<"$INPUT" 2>/dev/null || true)"
 PROJECT="$(sanitize "${PROJECT_RAW##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
-MESSAGE="$CATEGORY [$HARNESS session=$SAFE_SESSION project=$PROJECT]"
+# Polytoken's hook payload carries neither the project nor a session title;
+# read the live session metadata from disk instead. The label falls back to
+# the session id only when no readable title/preview exists.
+LABEL=""
+if [ "$HARNESS" = polytoken ]; then
+  SESSIONS_DIR="${POLYTOKEN_SESSIONS_DIR:-${AGENT_NOTIFY_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}}"
+  SESS_FILE_ID="${SAFE_SESSION//\//_}"
+  if [ "$PROJECT" = unknown ]; then
+    P="$(jq -r '.project_path // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
+    PROJECT="$(sanitize "${P##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
+  fi
+  L="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
+  [ -n "$L" ] || L="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
+  LABEL="$(sanitize "$L")"
+fi
+if [ -n "$LABEL" ]; then
+  MESSAGE="$CATEGORY [$HARNESS project=$PROJECT] $LABEL"
+else
+  MESSAGE="$CATEGORY [$HARNESS session=$SAFE_SESSION project=$PROJECT]"
+fi
 lock || exit 0
 printf '%s\n' "$GEN" > "$STATE.gen.tmp" && mv -f "$STATE.gen.tmp" "$STATE.gen"
 unlock
@@ -138,5 +157,8 @@ unlock
     --data-urlencode "title=$TITLE" --data-urlencode "message=$MESSAGE" >/dev/null 2>&1 || { unlock; exit 0; }
   [ "$(cat "$STATE.gen" 2>/dev/null || true)" = "$GEN" ] && rm -f "$STATE.gen" "$STATE.cancel"
   unlock
-) &
+) </dev/null >/dev/null 2>&1 &
+# Detached stdio is load-bearing: harnesses (Polytoken daemon, Claude Code)
+# read the hook's stdout/stderr until EOF. An inherited pipe would keep the
+# hook "running" for the whole DELAY+send and trip the ~30s hook timeout.
 exit 0
