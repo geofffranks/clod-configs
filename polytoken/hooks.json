@@ -1,62 +1,97 @@
 [
   {
-    "name": "grep-guard",
     "event": "pre_tool_use",
-    "matcher": "Grep",
     "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" grep-guard/hook.sh grep"
-    }
-  },
-  {
-    "name": "git-safe",
-    "event": "pre_tool_use",
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" git-safe/hook.sh shell"
+    },
     "matcher": "shell_exec",
-    "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" git-safe/hook.sh shell"
-    }
+    "name": "git-safe"
   },
   {
-    "name": "read-once",
     "event": "pre_tool_use",
-    "matcher": "file_read",
     "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" read-once/hook.sh read"
-    }
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" read-once/hook.sh read"
+    },
+    "matcher": "file_read",
+    "name": "read-once"
   },
   {
-    "name": "large-read-guard",
-    "event": "pre_tool_use",
-    "matcher": "file_read",
-    "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" large-read-guard/hook.sh read"
-    }
-  },
-  {
-    "name": "read-once-reset",
     "event": "post_compaction",
     "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/adapter.sh\" read-once/compact.sh compact"
-    }
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" read-once/compact.sh compact"
+    },
+    "name": "read-once-reset"
   },
   {
-    "name": "container-awareness",
     "event": "session_start",
     "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/container-awareness.sh\""
-    }
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/container-awareness.sh\""
+    },
+    "name": "container-awareness"
   },
   {
-    "name": "agent-notify",
-    "event": "notification",
+    "event": "pre_tool_use",
     "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/agent-notify.sh\" polytoken"
-    }
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" grep-guard/hook.sh grep"
+    },
+    "matcher": "Grep",
+    "name": "grep-guard"
   },
   {
-    "name": "agent-notify-cancel",
+    "event": "pre_tool_use",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" large-read-guard/hook.sh read"
+    },
+    "matcher": "file_read",
+    "name": "large-read-guard"
+  },
+  {
+    "event": "post_model_turn",
+    "handler": {
+      "bash": "exec '/home/dev/.local/bin/polytoken-quota' notice-hook --notice '/home/dev/.local/polytoken-quota/notice.json'"
+    },
+    "name": "polytoken-quota-reload"
+  },
+  {
     "event": "pre_user_prompt",
     "handler": {
-      "bash": "bash \"__POLYTOKEN_CONFIG_DIR__/hooks/agent-notify.sh\" polytoken"
-    }
+      "bash": "exec '/home/dev/.local/bin/polytoken-quota' notice-hook --notice '/home/dev/.local/polytoken-quota/notice.json'"
+    },
+    "name": "polytoken-quota-drift"
+  },
+  {
+    "event": "session_start",
+    "handler": {
+      "bash": "exec bash \"$HOME/.config/polytoken/superpowers/session-start-polytoken\""
+    },
+    "name": "superpowers-session-start"
+  },
+  {
+    "event": "post_compaction",
+    "handler": {
+      "bash": "exec bash \"$HOME/.config/polytoken/superpowers/session-start-polytoken\""
+    },
+    "name": "superpowers-post-compaction"
+  },
+  {
+    "event": "notification",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/agent-notify.sh\" polytoken"
+    },
+    "name": "agent-notify"
+  },
+  {
+    "event": "pre_user_prompt",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/agent-notify.sh\" polytoken"
+    },
+    "name": "agent-notify-cancel"
+  },
+  {
+    "event": "stop",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/agent-notify.sh\" polytoken"
+    },
+    "name": "agent-notify-stop"
   }
 ]

@@ -16,7 +16,9 @@ INPUT="$(cat 2>/dev/null || true)"
 
 # pre_user_prompt must always allow, even when optional dependencies are absent.
 if printf '%s' "$INPUT" | grep -Eq '"(event|hook_event_name)"[[:space:]]*:[[:space:]]*"(pre_user_prompt|UserPromptSubmit)"'; then
-  printf '%s\n' '{"outcome":"allow"}'
+  # Exit 0 with empty stdout = the event's proceed outcome in both harnesses
+  # (Polytoken: accept; Claude Code: allow). Never print outcome JSON here:
+  # Polytoken rejects unknown variants and logs the hook as malformed.
   [ -n "$HARNESS" ] || exit 0
   EVENT=pre_user_prompt
 else
@@ -29,7 +31,9 @@ fi
 [ -n "$HARNESS" ] || exit 0
 [ -n "$APP_TOKEN" ] && [ -n "$USER_KEY" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
-SESSION_RAW="$(jq -r '.session_id // .sessionId // empty' <<<"$INPUT" 2>/dev/null || true)"
+# Polytoken passes the session id via POLYTOKEN_SESSION_ID, not the stdin payload;
+# Claude Code passes it in the JSON. Try env first, fall back to payload.
+SESSION_RAW="${POLYTOKEN_SESSION_ID:-$(jq -r '.session_id // .sessionId // empty' <<<"$INPUT" 2>/dev/null || true)}"
 [ -n "$SESSION_RAW" ] || exit 0
 case "$EVENT" in
   UserPromptSubmit|pre_user_prompt) ;;
