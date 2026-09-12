@@ -33,10 +33,10 @@ wait_until wait_count 2 && ok "same-harness distinct-session isolation" || no "s
 AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Notification","session_id":"same","message":"first"}'
 K="$(key claude same)"; wait_until test -s "$TMP/state/$K.gen"
 AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Notification","session_id":"same","message":"latest"}'
-wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -q 'agent attention' "$LOG" && ok "same-session consolidation delivers latest category" || no "same-session consolidation delivers latest category"
+wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -q 'Needs Input' "$LOG" && ok "same-session consolidation delivers latest category" || no "same-session consolidation delivers latest category"
 # Cross-harness namespace isolation and payload identity/title.
 : > "$LOG"; run claude '{"hook_event_name":"Stop","session_id":"cross","message":"claude"}' & p1=$!; run polytoken '{"event":"notification","session_id":"cross","message":"poly"}' & p2=$!; wait $p1 $p2
-wait_until wait_count 2 && grep -q -- '--data-urlencode title=Agent attention' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
+wait_until wait_count 2 && grep -q -- '--data-urlencode title=Agent Needs Input' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
 # Prompt cancellation is synchronous and prevents the delayed worker from sending.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
 out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude)"; [ -z "$out" ] || no "cancellation prevents delivery"
@@ -58,26 +58,26 @@ AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"liv
 : > "$LOG"; K="$(key claude locked)"; mkdir -p "$TMP/state/$K.lock"; (exit 0) & dead_pid=$!; wait "$dead_pid"; printf '%s\n' "$dead_pid" > "$TMP/state/$K.lock/pid"; printf '%s\n' fixture > "$TMP/state/$K.lock/token"; printf '%s\n' "1" > "$TMP/state/$K.lock/heartbeat"
 touch -t 200001010000 "$TMP/state/$K.lock/heartbeat" "$TMP/state/$K.lock"
 AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"locked","message":"recovered"}'
-wait_until wait_count 1 && grep -q 'agent stopped' "$LOG" && ok "crashed-owner lock recovery" || no "crashed-owner lock recovery"
+wait_until wait_count 1 && grep -q 'Needs Input' "$LOG" && ok "crashed-owner lock recovery" || no "crashed-owner lock recovery"
 # A partial/legacy lock with a live PID but missing token is never reclaimed.
 : > "$LOG"; K="$(key claude partial-live)"; mkdir -p "$TMP/state/$K.lock"; printf '%s\n' "$$" > "$TMP/state/$K.lock/pid"; printf '%s\n' "1" > "$TMP/state/$K.lock/heartbeat"
 AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"partial-live","message":"must-not-steal"}'
 ! wait_until wait_text must-not-steal && ok "live partial lock protection" || no "live partial lock protection"
 # Partial initialization is reclaimable: an unowned directory is not permanent.
 : > "$LOG"; K="$(key claude partial)"; mkdir -p "$TMP/state/$K.lock"; AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"partial","message":"recover"}'
-wait_until wait_text 'agent stopped' && ok "partial lock recovery" || no "partial lock recovery"
+wait_until wait_text 'Needs Input' && ok "partial lock recovery" || no "partial lock recovery"
 # Delimiter-like IDs remain isolated under length-prefixed keying.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"a\u0001b","message":"x"}'; AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"a","message":"y"}'; wait_until wait_count 2 && ok "adversarial session isolation" || no "adversarial session isolation"
 # Payload text the harness does not define as notice content stays private; fixed category and safe metadata only.
 # Unknown payload junk fields are never forwarded; fixed category and safe metadata only.
-: > "$LOG"; run claude '{"hook_event_name":"Notification","session_id":"safe/../id","cwd":"/tmp/proj\u0009name","notification":"leak","reason":"also-leak"}'; wait_until wait_count 1 && ! grep -Eq 'leak' "$LOG" && grep -q 'agent attention' "$LOG" && ok "payload junk never forwarded" || no "payload junk never forwarded"
+: > "$LOG"; run claude '{"hook_event_name":"Notification","session_id":"safe/../id","cwd":"/tmp/proj\u0009name","notification":"leak","reason":"also-leak"}'; wait_until wait_count 1 && ! grep -Eq 'leak' "$LOG" && grep -q 'Needs Input' "$LOG" && ok "payload junk never forwarded" || no "payload junk never forwarded"
 # Claude Notification: harness-authored .message is the body; transcript text is not sent on notice events.
 LEAK="$TMP/leak.jsonl"; printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"TRANSCRIPT SECRET=from-transcript"}]}}' > "$LEAK"
 : > "$LOG"; run claude "{\"hook_event_name\":\"Notification\",\"session_id\":\"notice\",\"transcript_path\":\"$LEAK\",\"message\":\"Claude needs your permission\"}"
 wait_until wait_text 'Claude needs your permission' && ! grep -q 'from-transcript' "$LOG" && ok "claude notice text forwarded; transcript not" || no "claude notice text forwarded; transcript not"
 # Claude Stop: summarize the transcript's last assistant text; project from payload cwd.
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"clstop\",\"transcript_path\":\"$LEAK\",\"cwd\":\"/tmp/claudeproj\"}"
-wait_until wait_text 'from-transcript' && grep -q 'project=claudeproj' "$LOG" && ok "claude stop summarizes transcript" || no "claude stop summarizes transcript"
+wait_until wait_text 'from-transcript' && grep -q 'claudeproj:' "$LOG" && ok "claude stop summarizes transcript" || no "claude stop summarizes transcript"
 # The delayed worker must not hold the hook's stdout/stderr: a reader blocked on
 # EOF (how both harnesses wait) must see the hook exit well before DELAY elapses.
 : > "$LOG"; start="$SECONDS"
@@ -89,11 +89,11 @@ reader_s=$((SECONDS - start))
 PSDIR="$TMP/psessions"; mkdir -p "$PSDIR/enr1"
 printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user_message_preview":"fix the stop hook timeout"}' > "$PSDIR/enr1/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr1"}'
-wait_until wait_text 'fix the stop hook timeout' && grep -q 'project=claude-config' "$LOG" && ! grep -q 'session=enr1' "$LOG" && ok "polytoken notification carries project and preview" || no "polytoken notification carries project and preview"
+wait_until wait_text 'fix the stop hook timeout' && grep -q 'claude-config/' "$LOG" && ! grep -q 'session=enr1' "$LOG" && ok "polytoken notification carries project and preview" || no "polytoken notification carries project and preview"
 # record.json title is the fallback when session.json has no preview.
 mkdir -p "$PSDIR/enr2"; printf '%s' '{"session_title":"enr-two-title"}' > "$PSDIR/enr2/record.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"notification","session_id":"enr2"}'
-wait_until wait_text 'enr-two-title' && grep -q 'agent attention' "$LOG" && ok "record.json title fallback" || no "record.json title fallback"
+wait_until wait_text 'enr-two-title' && grep -q 'Needs Input' "$LOG" && ok "record.json title fallback" || no "record.json title fallback"
 # Slash-bearing session ids cannot escape the sessions dir when reading metadata.
 mkdir -p "$TMP/enr3"; printf '%s' '{"last_user_message_preview":"pwned"}' > "$TMP/enr3/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"../enr3"}'
@@ -103,10 +103,20 @@ mkdir -p "$PSDIR/enr4"
 printf '%s\n' '{"type":"assistant","blocks":[{"type":"thinking","thinking":"internal"}]}' '{"type":"assistant","blocks":[{"type":"text","text":"rewrote the notifier summary"}]}' > "$PSDIR/enr4/log.jsonl"
 printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user_message_preview":"stale preview"}' > "$PSDIR/enr4/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr4"}'
-wait_until wait_text 'rewrote the notifier summary' && ! grep -q 'stale preview' "$LOG" && ok "polytoken stop summarizes transcript over preview" || no "polytoken stop summarizes transcript over preview"
+wait_until wait_text 'rewrote the notifier summary' && grep -q -- '--data-urlencode title=stale preview Needs Input' "$LOG" && ok "polytoken stop summarizes transcript over preview" || no "polytoken stop summarizes transcript over preview"
 # POLYTOKEN_PROJECT_PATH (exported by the daemon env) names the project directly.
 : > "$LOG"; printf '%s' '{"event":"stop","session_id":"envproj"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_PATH="/tmp/envproj" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
-wait_until wait_text 'project=envproj' && ok "project env override" || no "project env override"
+wait_until wait_text 'envproj: session=envproj' && ok "project env override" || no "project env override"
+# Title prefers the session's own naming: record.json title for polytoken,
+# transcript summary for claude.
+mkdir -p "$PSDIR/enr5"
+printf '%s' '{"session_title":"billing refactor"}' > "$PSDIR/enr5/record.json"
+printf '%s' '{"last_user_message_preview":"stale preview"}' > "$PSDIR/enr5/session.json"
+: > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr5"}'
+wait_until wait_text 'billing refactor' && grep -q -- '--data-urlencode title=billing refactor Needs Input' "$LOG" && ok "polytoken title from session_title" || no "polytoken title from session_title"
+LEAK2="$TMP/leak2.jsonl"; printf '%s\n' '{"type":"summary","summary":"Fixing the notifier"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"all done"}]}}' > "$LEAK2"
+: > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"cltitle\",\"transcript_path\":\"$LEAK2\",\"cwd\":\"/tmp/claudeproj\"}"
+wait_until wait_text 'Fixing the notifier Needs Input' && grep -q ': all done' "$LOG" && ok "claude title from transcript summary" || no "claude title from transcript summary"
 # Harness defaults and explicit overrides choose independent config roots.
 for h in claude polytoken; do
   base="$TMP/default-$h"; mkdir -p "$base"; : > "$LOG"

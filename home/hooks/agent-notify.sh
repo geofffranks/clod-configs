@@ -111,11 +111,6 @@ if [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = pre_user_prompt ]; then
 fi
 
 GEN="$(date +%s%N 2>/dev/null || date +%s)-$$"
-case "$EVENT" in
-  Stop|stop) CATEGORY="agent stopped"; TITLE="Agent stopped" ;;
-  Notification|notification|post_model_turn|post_tool_use) CATEGORY="agent attention"; TITLE="Agent attention" ;;
-  *) CATEGORY="agent attention"; TITLE="Agent attention" ;;
-esac
 sanitize() {
   # Keep only bounded, printable identity metadata; $2 caps the length (default 64).
   printf '%s' "$1" | tr '\r\n\t' '   ' | tr -cd '[:alnum:] ._/@:-' | cut -c1-"${2:-64}"
@@ -123,12 +118,20 @@ sanitize() {
 SAFE_SESSION="$(sanitize "$SESSION_RAW")"; [ -n "$SAFE_SESSION" ] || SAFE_SESSION="unknown"
 PROJECT_RAW="${POLYTOKEN_PROJECT_PATH:-$(jq -r '.cwd // .project // empty' <<<"$INPUT" 2>/dev/null || true)}"
 PROJECT="$(sanitize "${PROJECT_RAW##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
-# Notification body: the agent's final visible response says far more about
-# "what was it doing?" than a session id. Sources, best first:
-#   claude Notification -> payload .message (harness-authored notice text)
-#   claude Stop         -> last assistant text block in transcript_path
-#   polytoken           -> last assistant text block in the session transcript
-# Fallbacks: polytoken session.json preview/title, then the raw session id.
+# Push content. Title names the conversation; body says where and what.
+#   body:  <repo>[/<branch>]: <claude notice text | last assistant transcript
+#          text | polytoken session.json preview/title | session id>
+#   title: <claude transcript summary | polytoken record.json session_title |
+#           polytoken session.json preview | "Agent"> Needs Input
+SESSIONS_DIR=""
+SESS_FILE_ID="${SAFE_SESSION//\//_}"
+TRANSCRIPT=""
+if [ "$HARNESS" = claude ]; then
+  TRANSCRIPT="$(jq -r '.transcript_path // empty' <<<"$INPUT" 2>/dev/null || true)"
+elif [ "$HARNESS" = polytoken ]; then
+  SESSIONS_DIR="${POLYTOKEN_SESSIONS_DIR:-${AGENT_NOTIFY_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}}"
+  TRANSCRIPT="$SESSIONS_DIR/$SESS_FILE_ID/log.jsonl"
+fi
 RESP=""
 case "$EVENT" in
   Notification|notification|post_model_turn|post_tool_use)
@@ -137,35 +140,40 @@ case "$EVENT" in
     fi
     ;;
 esac
-SESSIONS_DIR=""
-SESS_FILE_ID="${SAFE_SESSION//\//_}"
-if [ -z "$RESP" ]; then
-  TRANSCRIPT=""
-  if [ "$HARNESS" = claude ]; then
-    TRANSCRIPT="$(jq -r '.transcript_path // empty' <<<"$INPUT" 2>/dev/null || true)"
-  elif [ "$HARNESS" = polytoken ]; then
-    SESSIONS_DIR="${POLYTOKEN_SESSIONS_DIR:-${AGENT_NOTIFY_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}}"
-    TRANSCRIPT="$SESSIONS_DIR/$SESS_FILE_ID/log.jsonl"
-  fi
-  if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-    L="$(grep '"type":"assistant"' "$TRANSCRIPT" 2>/dev/null | tail -5 |
-         jq -r '[(.blocks // .message.content // [])[] | select(.type=="text") | .text] | last // empty' 2>/dev/null | tail -1)"
-    RESP="$(sanitize "$L" 160)"
-  fi
-fi
-if [ -z "$RESP" ] && [ "$HARNESS" = polytoken ]; then
-  L="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
-  [ -n "$L" ] || L="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
+if [ -z "$RESP" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  L="$(grep '"type":"assistant"' "$TRANSCRIPT" 2>/dev/null | tail -5 |
+       jq -r '[(.blocks // .message.content // [])[] | select(.type=="text") | .text] | last // empty' 2>/dev/null | tail -1)"
   RESP="$(sanitize "$L" 160)"
 fi
-if [ "$PROJECT" = unknown ] && [ "$HARNESS" = polytoken ]; then
-  P="$(jq -r '.project_path // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
-  PROJECT="$(sanitize "${P##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
+TITLE_PART=""
+if [ "$HARNESS" = polytoken ]; then
+  [ -z "$RESP" ] && {
+    L="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
+    [ -n "$L" ] || L="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
+    RESP="$(sanitize "$L" 160)"
+  }
+  TITLE_PART="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
+  [ -n "$TITLE_PART" ] || TITLE_PART="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
+elif [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  TITLE_PART="$(grep '"type":"summary"' "$TRANSCRIPT" 2>/dev/null | tail -1 | jq -r '.summary // empty' 2>/dev/null || true)"
 fi
-if [ -n "$RESP" ]; then
-  MESSAGE="$CATEGORY [$HARNESS project=$PROJECT] $RESP"
+PROJECT_DIR="${PROJECT_RAW:-}"
+BRANCH=""
+if [ "$HARNESS" = polytoken ] && [ -z "$PROJECT_DIR" ]; then
+  PROJECT_DIR="$(jq -r '.project_path // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
+fi
+if [ -n "$PROJECT_DIR" ] && command -v git >/dev/null 2>&1; then
+  BRANCH="$(sanitize "$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)" 64)"
+fi
+if [ "$PROJECT" = unknown ] && [ -n "$PROJECT_DIR" ]; then
+  PROJECT="$(sanitize "${PROJECT_DIR##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
+fi
+TITLE="$(sanitize "${TITLE_PART:-Agent}" 48) Needs Input"
+PREVIEW="${RESP:-session=$SAFE_SESSION}"
+if [ -n "$BRANCH" ]; then
+  MESSAGE="$PROJECT/$BRANCH: $PREVIEW"
 else
-  MESSAGE="$CATEGORY [$HARNESS session=$SAFE_SESSION project=$PROJECT]"
+  MESSAGE="$PROJECT: $PREVIEW"
 fi
 lock || exit 0
 printf '%s\n' "$GEN" > "$STATE.gen.tmp" && mv -f "$STATE.gen.tmp" "$STATE.gen"
