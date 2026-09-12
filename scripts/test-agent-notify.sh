@@ -35,7 +35,7 @@ K="$(key claude same)"; wait_until test -s "$TMP/state/$K.gen"
 AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Notification","session_id":"same","message":"latest"}'
 wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -q 'Needs Input' "$LOG" && ok "same-session consolidation delivers latest category" || no "same-session consolidation delivers latest category"
 # Cross-harness namespace isolation and payload identity/title.
-: > "$LOG"; run claude '{"hook_event_name":"Stop","session_id":"cross","message":"claude"}' & p1=$!; run polytoken '{"event":"notification","session_id":"cross","message":"poly"}' & p2=$!; wait $p1 $p2
+: > "$LOG"; run claude '{"hook_event_name":"Stop","session_id":"cross","message":"claude"}' & p1=$!; run polytoken '{"event":"stop","session_id":"cross","message":"poly"}' & p2=$!; wait $p1 $p2
 wait_until wait_count 2 && grep -q -- '--data-urlencode title=Agent Needs Input' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
 # Prompt cancellation is synchronous and prevents the delayed worker from sending.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
@@ -92,7 +92,7 @@ printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user
 wait_until wait_text 'fix the stop hook timeout' && grep -q 'claude-config/' "$LOG" && ! grep -q 'session=enr1' "$LOG" && ok "polytoken notification carries project and preview" || no "polytoken notification carries project and preview"
 # record.json title is the fallback when session.json has no preview.
 mkdir -p "$PSDIR/enr2"; printf '%s' '{"session_title":"enr-two-title"}' > "$PSDIR/enr2/record.json"
-: > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"notification","session_id":"enr2"}'
+: > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr2"}'
 wait_until wait_text 'enr-two-title' && grep -q 'Needs Input' "$LOG" && ok "record.json title fallback" || no "record.json title fallback"
 # Slash-bearing session ids cannot escape the sessions dir when reading metadata.
 mkdir -p "$TMP/enr3"; printf '%s' '{"last_user_message_preview":"pwned"}' > "$TMP/enr3/session.json"
@@ -114,6 +114,38 @@ printf '%s' '{"session_title":"billing refactor"}' > "$PSDIR/enr5/record.json"
 printf '%s' '{"last_user_message_preview":"stale preview"}' > "$PSDIR/enr5/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr5"}'
 wait_until wait_text 'billing refactor' && grep -q -- '--data-urlencode title=billing refactor Needs Input' "$LOG" && ok "polytoken title from session_title" || no "polytoken title from session_title"
+# Polytoken notification events are ambient (background job / subagent
+# completions), never "needs input": nothing is scheduled, nothing is sent.
+: > "$LOG"; run polytoken '{"event":"notification","session_id":"ambient","message":"job done"}'
+K="$(key polytoken ambient)"; sleep 0.3
+[ ! -e "$TMP/state/$K.gen" ] && [ "$(count)" = 0 ] && ok "polytoken ambient notification never schedules" || no "polytoken ambient notification never schedules"
+# A goal-less polytoken stop still schedules...
+: > "$LOG"; POLYTOKEN_GOAL_ACTIVE=false run polytoken '{"event":"stop","session_id":"goalfalse"}'
+K="$(key polytoken goalfalse)"; wait_until test -s "$TMP/state/$K.gen" && wait_until wait_count 1 && ok "polytoken goal-inactive stop schedules" || no "polytoken goal-inactive stop schedules"
+# ...but with a saved-session goal active the driver re-prompts itself after
+# stop, so a "Needs Input" notice would be a false positive.
+: > "$LOG"; POLYTOKEN_GOAL_ACTIVE=true run polytoken '{"event":"stop","session_id":"goalon"}'
+sleep 0.3; [ ! -e "$TMP/state/$(key polytoken goalon).gen" ] && [ "$(count)" = 0 ] && ok "polytoken goal-active stop never schedules" || no "polytoken goal-active stop never schedules"
+# Worktree sessions report the branch of the worktree they run in, with the
+# repo (not the worktree) as the project name; the main repo's branch must not leak.
+WR="$TMP/wtrepo"; git init -q -b main "$WR" 2>/dev/null; git -C "$WR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init; git -C "$WR" worktree add -q -b probe-branch "$WR/.worktrees/probe" main
+mkdir -p "$PSDIR/wtenr"; printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"check the probe\"}" > "$PSDIR/wtenr/session.json"
+: > "$LOG"; printf '%s' '{"event":"stop","session_id":"wtenr"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_DIR="$WR/.worktrees/probe" POLYTOKEN_PROJECT_PATH="$WR" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
+wait_until wait_text 'wtrepo/probe-branch: check the probe' && ok "polytoken worktree branch and repo name" || no "polytoken worktree branch and repo name"
+# Claude sessions carry cwd in the payload; a worktree cwd reports its own branch.
+: > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"clwt\",\"transcript_path\":\"$LEAK\",\"cwd\":\"$WR/.worktrees/probe\"}"
+wait_until wait_text 'wtrepo/probe-branch:' && ok "claude worktree branch from payload cwd" || no "claude worktree branch from payload cwd"
+# A main-repo session still reports repo/branch as before.
+mkdir -p "$PSDIR/mrenr"; printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"main line\"}" > "$PSDIR/mrenr/session.json"
+: > "$LOG"; printf '%s' '{"event":"stop","session_id":"mrenr"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_DIR="$WR" POLYTOKEN_PROJECT_PATH="$WR" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
+wait_until wait_text 'wtrepo/main: main line' && ok "main-repo session branch unchanged" || no "main-repo session branch unchanged"
+# A polytoken session that moved into a worktree after start reports the branch
+# of its most recent working directory, taken from the session log's cwd trail.
+mkdir -p "$PSDIR/mvenr"
+printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"moved mid-session\"}" > "$PSDIR/mvenr/session.json"
+printf '%s\n' '{"type":"tool_use","cwd":"'"$WR"'"}' '{"type":"tool_use","cwd":"'"$WR/.worktrees/probe"'"}' > "$PSDIR/mvenr/log.jsonl"
+: > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"mvenr"}'
+wait_until wait_text 'wtrepo/probe-branch: moved mid-session' && ok "moved session branch from session log cwd" || no "moved session branch from session log cwd"
 LEAK2="$TMP/leak2.jsonl"; printf '%s\n' '{"type":"summary","summary":"Fixing the notifier"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"all done"}]}}' > "$LEAK2"
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"cltitle\",\"transcript_path\":\"$LEAK2\",\"cwd\":\"/tmp/claudeproj\"}"
 wait_until wait_text 'Fixing the notifier Needs Input' && grep -q ': all done' "$LOG" && ok "claude title from transcript summary" || no "claude title from transcript summary"

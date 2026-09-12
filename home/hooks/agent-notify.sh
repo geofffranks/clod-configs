@@ -41,6 +41,14 @@ case "$EVENT" in
   SubagentStop|subagent_stop) exit 0 ;;
   *) exit 0 ;;
 esac
+# Polytoken: ambient notifications (background job and subagent completions)
+# are not requests for input, and while a saved-session goal is active the
+# goal driver re-prompts on its own after `stop` — neither is "needs input".
+# Only a goal-less end of turn may schedule a notice.
+if [ "$HARNESS" = polytoken ]; then
+  if [ "$EVENT" = notification ]; then exit 0; fi
+  if [ "$EVENT" = stop ] && [ "${POLYTOKEN_GOAL_ACTIVE:-}" = true ]; then exit 0; fi
+fi
 
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 KEY_INPUT="${#HARNESS}:$HARNESS${#SESSION_RAW}:$SESSION_RAW"
@@ -116,8 +124,14 @@ sanitize() {
   printf '%s' "$1" | tr '\r\n\t' '   ' | tr -cd '[:alnum:] ._/@:-' | cut -c1-"${2:-64}"
 }
 SAFE_SESSION="$(sanitize "$SESSION_RAW")"; [ -n "$SAFE_SESSION" ] || SAFE_SESSION="unknown"
-PROJECT_RAW="${POLYTOKEN_PROJECT_PATH:-$(jq -r '.cwd // .project // empty' <<<"$INPUT" 2>/dev/null || true)}"
-PROJECT="$(sanitize "${PROJECT_RAW##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
+# Session working directory. Precedence: payload cwd (Claude Code passes it;
+# Polytoken does not), then the Polytoken session working-dir env, then the
+# registered project path. Branch and repo name are derived from it below.
+PROJECT_DIR="$(jq -r '.cwd // .project // empty' <<<"$INPUT" 2>/dev/null || true)"
+if [ -z "$PROJECT_DIR" ] && [ "$HARNESS" = polytoken ]; then
+  PROJECT_DIR="${POLYTOKEN_PROJECT_DIR:-}"
+fi
+[ -n "$PROJECT_DIR" ] || PROJECT_DIR="${POLYTOKEN_PROJECT_PATH:-}"
 # Push content. Title names the conversation; body says where and what.
 #   body:  <repo>[/<branch>]: <claude notice text | last assistant transcript
 #          text | polytoken session.json preview/title | session id>
@@ -157,17 +171,27 @@ if [ "$HARNESS" = polytoken ]; then
 elif [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
   TITLE_PART="$(grep '"type":"summary"' "$TRANSCRIPT" 2>/dev/null | tail -1 | jq -r '.summary // empty' 2>/dev/null || true)"
 fi
-PROJECT_DIR="${PROJECT_RAW:-}"
-BRANCH=""
-if [ "$HARNESS" = polytoken ] && [ -z "$PROJECT_DIR" ]; then
+# A polytoken session may have moved into a worktree after start; the session
+# log's cwd trail is where the agent most recently worked, so prefer it over
+# any start-of-session project directories.
+if [ "$HARNESS" = polytoken ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  LOG_CWD="$(grep -o '"cwd":"[^"]*"' "$TRANSCRIPT" 2>/dev/null | tail -1 | cut -d'"' -f4)"
+  case "$LOG_CWD" in /*) [ -d "$LOG_CWD" ] && PROJECT_DIR="$LOG_CWD" ;; esac
+fi
+if [ -z "$PROJECT_DIR" ] && [ "$HARNESS" = polytoken ]; then
   PROJECT_DIR="$(jq -r '.project_path // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
 fi
+BRANCH=""
+REPO_NAME=""
 if [ -n "$PROJECT_DIR" ] && command -v git >/dev/null 2>&1; then
   BRANCH="$(sanitize "$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)" 64)"
+  # Name the repo after its common (main) checkout, so a session running in a
+  # linked worktree still displays the repo it belongs to — with its own branch.
+  COMMON_DIR="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  COMMON_DIR="${COMMON_DIR%.git}"; COMMON_DIR="${COMMON_DIR%/}"
+  [ -n "$COMMON_DIR" ] && REPO_NAME="${COMMON_DIR##*/}"
 fi
-if [ "$PROJECT" = unknown ] && [ -n "$PROJECT_DIR" ]; then
-  PROJECT="$(sanitize "${PROJECT_DIR##*/}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
-fi
+PROJECT="$(sanitize "${REPO_NAME:-${PROJECT_DIR##*/}}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
 TITLE="$(sanitize "${TITLE_PART:-Agent}" 48) Needs Input"
 PREVIEW="${RESP:-session=$SAFE_SESSION}"
 if [ -n "$BRANCH" ]; then
