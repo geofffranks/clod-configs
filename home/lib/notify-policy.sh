@@ -32,8 +32,8 @@ policy_discontinuity(){ local now="$1" dir="$2" old; mkdir -p "$dir"; old="$(cat
 policy_episode_key(){ local j="$1"; jq -r '
   def scalar($x): ($x | type == "string" and length > 0 and length <= 128);
   if (.event.transition? == "cleared") then "diagnostic:cleared"
-  elif scalar(.event.interrogative_id?) then "interrogative:\(.event.interrogative_id)"
   elif scalar(.event.prompt_id?) then "prompt:\(.event.prompt_id)"
+  elif scalar(.event.interrogative_id?) then "interrogative:\(.event.interrogative_id)"
   elif scalar(.event.goal.id?) then "goal:\(.event.goal.id):\(.event.transition // "")"
   else "diagnostic:missing-id" end' <<<"$j" 2>/dev/null; }
 

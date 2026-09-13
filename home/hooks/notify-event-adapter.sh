@@ -12,56 +12,78 @@ startup="${1:-${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/startup.json}"; p
 # Clock is injectable for tests (file may be rewritten between frames).
 clock_read(){ if [ -n "${AGENT_NOTIFY_TEST_CLOCK_FILE:-}" ] && [ -f "$AGENT_NOTIFY_TEST_CLOCK_FILE" ]; then cat "$AGENT_NOTIFY_TEST_CLOCK_FILE" 2>/dev/null; elif [ -n "${AGENT_NOTIFY_TEST_NOW:-}" ]; then printf '%s\n' "$AGENT_NOTIFY_TEST_NOW"; else date +%s; fi; }
 tolerance=5; maxage=120; base="${AGENT_NOTIFY_ADAPTER_URL:-http://127.0.0.1:$port/events}"; state_dir="${AGENT_NOTIFY_ADAPTER_STATE_DIR:-${AGENT_NOTIFY_STATE_DIR:-$HOME/.local/share/polytoken/notify-state}/$sid}"; mkdir -p "$state_dir"
-clock="$(clock_read)"
 # Baseline is per-connection. The watermark is decided-event state: it is only
 # created when absent and never lowered by a restart or a clock jump.
+clock="$(clock_read)"
 if [ "${AGENT_NOTIFY_PRESERVE_STATE:-}" != 1 ]; then printf '%s\n' "$clock" > "$state_dir/connect-clock"; fi
 [[ "$(cat "$state_dir/watermark" 2>/dev/null || true)" =~ ^[0-9]+$ ]] || printf '%s\n' "$clock" > "$state_dir/watermark"
+# Scalar string extraction; non-string, oversized, or absent -> empty.
+jstr(){ printf '%s' "$line" | jq -r "if (.event.$1? | type == \"string\" and length > 0 and length <= 128) then .event.$1 else empty end" 2>/dev/null || true; }
 process(){
-  local line="$1" emitted emitted_epoch id typ interrogative_type trans reason key decision envelope now marker
+  local line="$1" emitted emitted_epoch eff pid iid typ interrogative_type trans reason key decision envelope now baseline watermark
   now="$(clock_read)"
   if ! policy_discontinuity "$now" "$state_dir" >/dev/null 2>&1; then
+    # Declared jump: every persisted unclaimed candidate is pre-jump evidence.
     for c in "$state_dir"/candidate-*; do
       [ -f "$c" ] || continue
       log "decision=would-suppress reason=discontinuity-stale candidate=${c##*/candidate-}"
       rm -f "$c"
     done
-    printf '%s\n' "$now" > "$state_dir/discontinuity-marker"; printf '%s\n' 1 > "$state_dir/discontinuity-active"
+    printf '%s\n' "$now" > "$state_dir/discontinuity-marker"
     log "decision=would-suppress reason=clock-discontinuity buffered-unclaimed=true watermark-rebaselined=decided-only"
     return
   fi
   envelope="$(printf '%s' "$line" | jq -r '.session_id // empty' 2>/dev/null || true)"
   [ "$envelope" = "$sid" ] || { log "decision=diagnostic-skip reason=envelope-session-mismatch"; return; }
-  # Note: frames already buffered in the stream when a jump is declared are
-  # protected by the baseline/watermark/future checks below (their pre-jump
-  # emitted_at cannot pass under the rolled-back clock), so no suppression
-  # window is needed and none is claimed here.
   emitted="$(printf '%s' "$line" | jq -r '.emitted_at // empty' 2>/dev/null || true)"
-  id="$(printf '%s' "$line" | jq -r '[(.event.interrogative_id?), (.event.prompt_id?), (.event.goal.id?)] | map(select(type == "string" and length > 0 and length <= 128)) | .[0] // empty' 2>/dev/null || true)"
-  typ="$(printf '%s' "$line" | jq -r '.event.type // "unknown"' 2>/dev/null || echo unknown)"
-  interrogative_type="$(printf '%s' "$line" | jq -r 'if (.event.interrogative_type? | type == "string") then .event.interrogative_type else empty end' 2>/dev/null || true)"
-  trans="$(printf '%s' "$line" | jq -r 'if (.event.transition? | type == "string") then .event.transition else empty end' 2>/dev/null || true)"
-  reason="$(printf '%s' "$line" | jq -r 'if (.event.reason? | type == "string") then .event.reason else empty end' 2>/dev/null || true)"
-  [ -n "$id" ] || { log "decision=diagnostic-skip reason=missing-or-invalid-event-id family=$typ"; return; }
+  typ="$(jstr type)"; iid="$(jstr interrogative_id)"; pid="$(jstr prompt_id)"
+  interrogative_type="$(jstr interrogative_type)"; trans="$(jstr transition)"; reason="$(jstr reason)"
+  # Family-required ID validation: each family must present its own required
+  # ID as a string scalar. Falling back to another family's ID is forbidden;
+  # when both are present the prompt_id is the verified cross-family alias.
   case "$typ" in
-    turn_cancelled|model_error|ask_user_question) ;;
-    interrogative) case "$interrogative_type" in plan_handoff|goal_proposal) ;; *) log "decision=silent reason=unsupported-event family=$typ interrogative_type=$interrogative_type"; return;; esac ;;
+    turn_cancelled|model_error) id="$pid" ;;
+    ask_user_question|interrogative) id="$iid" ;;
     goal_driver_update) log "decision=silent reason=non-attention-transition family=$typ"; return;;
     *) log "decision=silent reason=unsupported-event family=$typ"; return;;
   esac
+  [ -n "$id" ] || { log "decision=diagnostic-skip reason=missing-or-invalid-event-id family=$typ"; return; }
+  case "$typ" in
+    interrogative) case "$interrogative_type" in plan_handoff|goal_proposal) ;; *) log "decision=silent reason=unsupported-event family=$typ interrogative_type=$interrogative_type"; return;; esac ;;
+  esac
   emitted_epoch="$(policy_epoch "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=unparseable-emitted_at family=$typ id=$id"; return; }
-  local baseline watermark
+  # Discontinuity boundary: pending stream evidence emitted before the declare
+  # marker is pre-jump and suppressed; evidence at/after the marker clears the
+  # boundary and is evaluated normally.
+  if [ -f "$state_dir/discontinuity-marker" ]; then
+    marker="$(cat "$state_dir/discontinuity-marker" 2>/dev/null || echo 0)"
+    if [ "$emitted_epoch" -lt "$marker" ]; then log "decision=would-suppress reason=discontinuity-stale family=$typ id=$id"; return; fi
+    rm -f "$state_dir/discontinuity-marker"
+  fi
   baseline="$(cat "$state_dir/connect-clock" 2>/dev/null || true)"; watermark="$(cat "$state_dir/watermark" 2>/dev/null || true)"
-  [[ "$baseline" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -le "$baseline" ] && { log "decision=diagnostic-skip reason=pre-connect-baseline family=$typ id=$id"; return; }
-  [[ "$watermark" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -lt "$watermark" ] && { log "decision=diagnostic-skip reason=stale-watermark family=$typ id=$id"; return; }
-  key="$(policy_episode_key "$line")"; if [ "$trans" = cleared ]; then log "decision=diagnostic-keyed reason=cleared-transition family=$typ id=$id"; return; fi
-  if [ "${AGENT_NOTIFY_TWO_PHASE:-}" = process ]; then printf '%s\n' "$emitted" > "$state_dir/candidate-$key"; log "decision=claim-candidate age-at-process=$((now-emitted_epoch)) family=$typ id=$id"; return; fi
+  key="$(policy_episode_key "$line")"
+  if [ "$trans" = cleared ]; then log "decision=diagnostic-keyed reason=cleared-transition family=$typ id=$id"; return; fi
   if [ "${AGENT_NOTIFY_TWO_PHASE:-}" = decide ]; then
-    emitted="$(cat "$state_dir/candidate-$key" 2>/dev/null || true)"; [ -n "$emitted" ] || return
+    # Decide the persisted candidate: the incoming frame's timestamps are not
+    # the episode's evidence and must not validate in its place.
+    emitted="$(cat "$state_dir/candidate-$key" 2>/dev/null || true)"; [ -n "$emitted" ] || { log "decision=diagnostic-skip reason=missing-candidate family=$typ id=$id"; return; }
     emitted_epoch="$(policy_epoch "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=unparseable-candidate family=$typ id=$id"; return; }
   fi
-  # Send-time freshness recheck: a fresh clock read at the decision point,
-  # on the ordinary path and in decide mode alike.
+  [[ "$baseline" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -le "$baseline" ] && { log "decision=diagnostic-skip reason=pre-connect-baseline family=$typ id=$id"; return; }
+  [[ "$watermark" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -lt "$watermark" ] && { log "decision=diagnostic-skip reason=stale-watermark family=$typ id=$id"; return; }
+  if [ "${AGENT_NOTIFY_TWO_PHASE:-}" != decide ]; then
+    # Processing-time freshness gate (decide mode already gated at staging).
+    decision="$(policy_age_decision "$now" "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=age-decision-failed family=$typ id=$id"; return; }
+    case "$decision" in
+      stale) log "decision=would-suppress reason=stale-processing family=$typ id=$id"; return;;
+      future) log "decision=would-suppress reason=future-emitted_at family=$typ id=$id"; return;;
+      ok) ;;
+      *) log "decision=diagnostic-skip reason=age-decision-unknown family=$typ id=$id"; return;;
+    esac
+  fi
+  if [ "${AGENT_NOTIFY_TWO_PHASE:-}" = process ]; then printf '%s\n' "$emitted" > "$state_dir/candidate-$key"; log "decision=claim-candidate age-at-process=$((now-emitted_epoch)) family=$typ id=$id"; return; fi
+  # Send-time freshness recheck on every path: fresh clock read at the
+  # decision point, applied to the timestamp actually being decided.
   now="$(clock_read)"
   decision="$(policy_age_decision "$now" "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=age-decision-failed family=$typ id=$id"; return; }
   case "$decision" in
