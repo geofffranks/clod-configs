@@ -67,6 +67,8 @@ d2(){ printf '#!/usr/bin/env bash\nprintf '\''%%s\\n'\'' %q\n' "data: {\"session
 d2 "" process
 d2 1704067290 decide
 grep -q 'clock-discontinuity-final' "$D2/logs/notify.log" && ! grep -q 'would-send' "$D2/logs/notify.log" && ok 'final-read rollback suppresses decision' || no 'final-read rollback suppresses decision'
+d2 1704067200 decide
+grep -q 'missing-candidate' "$D2/logs/notify.log" && [ ! -f "$D2/state/candidate-prompt:fr" ] && ! grep -q 'would-send' "$D2/logs/notify.log" && ok 'post-rollback repeated decision cannot reclaim candidate' || no 'post-rollback repeated decision cannot reclaim candidate'
 R3D="$T/r3"; mkdir -p "$R3D"; printf '%s' '{"port":1,"session_id":"sid","credential_file_path":""}' > "$R3D/startup.json"
 mkframe(){ printf '#!/usr/bin/env bash\nprintf '\''%%s\\n'\'' %q\n' "data: $1" > "$R3D/curl"; chmod +x "$R3D/curl"; }
 ra(){ PATH="$R3D:$PATH" AGENT_NOTIFY_ADAPTER_STATE_DIR="$R3D/state" AGENT_NOTIFY_ADAPTER_LOG_DIR="$R3D/logs" AGENT_NOTIFY_PRESERVE_STATE=${2:-} AGENT_NOTIFY_TEST_NOW="$3" AGENT_NOTIFY_TWO_PHASE=${4:-} bash "$ADAPTER" "$R3D/startup.json" >/dev/null 2>&1; }

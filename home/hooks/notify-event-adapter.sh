@@ -93,8 +93,16 @@ process(){
     *) log "decision=diagnostic-skip reason=age-decision-unknown family=$typ id=$id"; return;;
   esac
   # Backward movement between clock observations is a discontinuity at the
-  # decision point too: suppress rather than trust the apparent age.
+  # decision point too: apply the same declaration disposition as entry-stage
+  # (suppress persisted candidates, persist the marker) so the next decision
+  # cannot treat the reset clock as normal.
   if ! policy_discontinuity "$now" "$state_dir" >/dev/null 2>&1; then
+    for c in "$state_dir"/candidate-*; do
+      [ -f "$c" ] || continue
+      log "decision=would-suppress reason=discontinuity-stale candidate=${c##*/candidate-}"
+      rm -f "$c"
+    done
+    printf '%s\n' "$now" > "$state_dir/discontinuity-marker"
     log "decision=would-suppress reason=clock-discontinuity-final family=$typ id=$id"
     return
   fi
