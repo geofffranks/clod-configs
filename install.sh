@@ -68,6 +68,7 @@ for f in statusline.sh usage-fetch.sh bash-guard/hook.sh branch-guard/hook.sh gi
          read-once/hook.sh read-once/compact.sh read-once/read-once \
          skill-once/hook.sh skill-once/compact.sh \
          hooks/no-remote-writes.sh hooks/agent-state.sh hooks/agent-notify.sh \
+         session-watchdog.sh \
          agent-join/hook.sh; do
   [ -f "$DEST/$f" ] && chmod +x "$DEST/$f"
 done
