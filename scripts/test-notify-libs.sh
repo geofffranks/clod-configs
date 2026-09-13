@@ -28,6 +28,7 @@ PATH="$TMP:$PATH" CALLS="$CALLS" AGENT_NOTIFY_LOG_DIR="$LOGDIR" PUSHOVER_APP_TOK
 for _ in 1 2 3 4 5; do [ -s "$CALLS" ] && break; sleep .05; done
 assert_eq "$(wc -l < "$CALLS" | tr -d ' ')" 1 "one failed curl attempt"
 grep -Eq -- --max-time home/lib/notify-send.sh && grep -Eq -- '--max-time 10' home/lib/notify-send.sh && ok "curl timeout bounded" || no "curl timeout bounded"
+if grep -Eq -- 'curl .*--fail' home/lib/notify-send.sh && grep -q 'notify_diag rejected' home/lib/notify-send.sh; then ok "HTTP failure flag and rejected result"; else no "HTTP failure flag and rejected result"; fi
 AGENT_NOTIFY_LOG_DIR="$LOGDIR" source "$REPO/home/lib/notify-send.sh"
 LOG_MAX=64
 notify_source="$(printf 's%.0s' $(seq 1 300))" notify_event="$(printf 'e%.0s' $(seq 1 300))" notify_session="$(printf 'i%.0s' $(seq 1 300))" notify_diag failed 500

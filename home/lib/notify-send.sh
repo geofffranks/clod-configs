@@ -31,11 +31,11 @@ notify_send() {
   local url="${AGENT_NOTIFY_PUSHOVER_URL:-https://api.pushover.net/1/messages.json}"
   (
     local status_file="${TMPDIR:-/tmp}/notify-status.$$.tmp"
-    curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST "$url" \
+    curl -sS --fail --max-time 10 -o /dev/null -w '%{http_code}' -X POST "$url" \
       --data-urlencode "token=$PUSHOVER_APP_TOKEN" --data-urlencode "user=$PUSHOVER_USER_KEY" \
       --data-urlencode "title=${notify_title:-}" --data-urlencode "message=${notify_body:-}" >"$status_file" 2>/dev/null
     local rc=$? status="$(cat "$status_file" 2>/dev/null || true)"; rm -f "$status_file"
-    [ "$rc" -eq 0 ] && notify_diag sent "$status" || notify_diag failed "${status:-unknown}"
+    [ "$rc" -eq 0 ] && notify_diag sent "$status" || notify_diag rejected "${status:-unknown}"
   ) </dev/null >/dev/null 2>&1 &
 }
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then notify_send; exit 0; fi
