@@ -2,19 +2,19 @@
 # Pure notification identity/body formatting helpers.
 set -u
 
-_notify_clean_controls() { printf '%s' "$1" | tr '\r\n\t' '   '; }
+_notify_clean_controls() { LC_ALL=C printf '%s' "$1" | tr '[:cntrl:]' ' '; }
 notify_identity_title() {
-  local session_id="${1:-}" repo="${2:-}" branch="${3:-}" session_title="${4:-}" base
+  local session_id="${1:-}" repo="${2:-}" branch="${3:-}" session_title="${4:-}" base has_component=false
   [ -n "$session_id" ] || return 2
   session_id="$(_notify_clean_controls "$session_id")"
   repo="$(_notify_clean_controls "$repo")"; branch="$(_notify_clean_controls "$branch")"
   session_title="$(_notify_clean_controls "$session_title")"
   [ -n "$session_id" ] || return 2
   base=""
-  [ -n "$repo" ] && base="$repo"
-  [ -n "$branch" ] && { [ -n "$base" ] && base="$base/$branch" || base="$branch"; }
+  [ -n "$repo" ] && { base="$repo"; has_component=true; }
+  [ -n "$branch" ] && { [ -n "$base" ] && base="$base/$branch" || base="$branch"; has_component=true; }
   [ -n "$base" ] || base="($session_id)"
-  [ "$base" = "($session_id)" ] || base="$base ($session_id)"
+  [ "$has_component" = true ] && base="$base ($session_id)"
   [ -n "$session_title" ] && base="$base - $session_title"
   [ "${#base}" -le "${AGENT_NOTIFY_MAX_LENGTH:-1024}" ] || return 3
   printf '%s\n' "$base"
