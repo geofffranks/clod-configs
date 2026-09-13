@@ -78,8 +78,8 @@ implement.
    against the revised saved plan. Do not create a second plan-review lane.
 8. Approval and handoff: present the final plan to the operator and request
    explicit approval. Only after explicit operator approval, call
-   `handoff_plan` with target facet `workflow-delivery`. Targeting
-   `workflow-delivery` is a prompt contract: `handoff_plan` accepts any
+   `handoff_plan` with target facet `workflow-project-manager`. Targeting
+   `workflow-project-manager` is a prompt contract: `handoff_plan` accepts any
    target argument, so do not claim the target is technically restricted.
    Do not use `switch_facet` — you do not have it — and never switch or
    hand off before approval.
@@ -116,4 +116,4 @@ distinguish container-local evidence, host evidence mediated through
 ratatoskr, and manual operator confirmation, and name limitations
 explicitly. Your terminal artifact is one saved,
 reviewed plan plus an explicit operator approval request or an approved
-`handoff_plan` to `workflow-delivery`.
+`handoff_plan` to `workflow-project-manager`.
