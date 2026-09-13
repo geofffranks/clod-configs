@@ -8,7 +8,7 @@ mkdir -p "$LOG_DIR" 2>/dev/null || exit 0
 mkdir "$LOCK" 2>/dev/null || { log "decision=would-suppress reason=claim-exists"; exit 0; }; trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 startup="${1:-${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/startup.json}"; port="$(jq -r '.port // empty' "$startup" 2>/dev/null || true)"; cred="$(jq -r '.credential_file_path // empty' "$startup" 2>/dev/null || true)"; sid="$(jq -r '.session_id // empty' "$startup" 2>/dev/null || true)"
 [ -n "$port" ] && [ -n "$sid" ] || { log "decision=diagnostic-skip reason=missing-session-or-port"; exit 0; }
-clock="${AGENT_NOTIFY_TEST_NOW:-$(date +%s)}"; tolerance=5; maxage=120; base="${AGENT_NOTIFY_ADAPTER_URL:-http://127.0.0.1:$port/events}"; state_dir="${AGENT_NOTIFY_ADAPTER_STATE_DIR:-${AGENT_NOTIFY_STATE_DIR:-$HOME/.local/share/polytoken/notify-state}/$sid}"; mkdir -p "$state_dir"; printf '%s\n' "$clock" > "$state_dir/connect-clock"; printf '%s\n' "$clock" > "$state_dir/watermark"
+clock="${AGENT_NOTIFY_TEST_NOW:-$(date +%s)}"; tolerance=5; maxage=120; base="${AGENT_NOTIFY_ADAPTER_URL:-http://127.0.0.1:$port/events}"; state_dir="${AGENT_NOTIFY_ADAPTER_STATE_DIR:-${AGENT_NOTIFY_STATE_DIR:-$HOME/.local/share/polytoken/notify-state}/$sid}"; mkdir -p "$state_dir"; if [ "${AGENT_NOTIFY_PRESERVE_STATE:-}" != 1 ]; then printf '%s\n' "$clock" > "$state_dir/connect-clock"; printf '%s\n' "$clock" > "$state_dir/watermark"; fi
 process(){
   local line="$1" emitted emitted_epoch id typ interrogative_type trans reason key decision envelope
   clock="${AGENT_NOTIFY_TEST_NOW:-$(date +%s)}"
@@ -27,16 +27,20 @@ process(){
   reason="$(printf '%s' "$line" | jq -r '.event.reason // empty' 2>/dev/null || true)"
   [ -n "$id" ] || { log "decision=diagnostic-skip reason=missing-event-id family=$typ"; return; }
   case "$typ" in
-    turn|provider|ask_user_question) ;;
+    turn_cancelled|model_error|ask_user_question) ;;
     interrogative) case "$interrogative_type" in plan_handoff|goal_proposal) ;; *) log "decision=silent reason=unsupported-event family=$typ interrogative_type=$interrogative_type"; return;; esac ;;
+    goal_driver_update) log "decision=silent reason=non-attention-transition family=$typ"; return;;
     *) log "decision=silent reason=unsupported-event family=$typ"; return;;
   esac
   emitted_epoch="$(policy_epoch "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=unparseable-emitted_at family=$typ id=$id"; return; }
+  baseline="$(cat "$state_dir/connect-clock" 2>/dev/null || true)"; watermark="$(cat "$state_dir/watermark" 2>/dev/null || true)"
+  [[ "$baseline" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -le "$baseline" ] && { log "decision=diagnostic-skip reason=pre-connect-baseline family=$typ id=$id"; return; }
+  [[ "$watermark" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -lt "$watermark" ] && { log "decision=diagnostic-skip reason=stale-watermark family=$typ id=$id"; return; }
   decision="$(policy_age_decision "$clock" "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=age-decision-failed family=$typ id=$id"; return; }
   case "$decision" in stale) log "decision=would-suppress reason=stale-processing family=$typ id=$id"; return;; future) log "decision=would-suppress reason=future-emitted_at family=$typ id=$id"; return;; ok) ;; *) log "decision=diagnostic-skip reason=age-decision-unknown family=$typ id=$id"; return;; esac
   key="$(policy_episode_key "$line")"; if [ "$trans" = cleared ]; then log "decision=diagnostic-keyed reason=cleared-transition family=$typ id=$id"; return; fi
-  if [ "$typ" = turn_cancelled ] || [ "$typ" = cancellation ] || [ "$reason" = user_cancelled ]; then log "decision=would-suppress reason=shutdown-evidence-unverified family=$typ id=$id"; return; fi
-  printf '%s\n' "$emitted_epoch" > "$state_dir/watermark"
+  if [ "$typ" = turn_cancelled ] && [ "$reason" = user_cancelled ]; then log "decision=would-send reason=diagnostic-only family=$typ id=$id"; return; fi
+  if ! [[ "$watermark" =~ ^[0-9]+$ ]] || [ "$emitted_epoch" -gt "$watermark" ]; then printf '%s\n' "$emitted_epoch" > "$state_dir/watermark"; fi
   policy_claim "$state_dir" "$key" || { log "decision=would-suppress reason=claim-loser family=$typ id=$id"; return; }
   log "decision=would-send reason=diagnostic-only family=$typ id=$id"
 }
