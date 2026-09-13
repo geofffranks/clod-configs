@@ -92,6 +92,12 @@ for f in "$LOG_DIR"/*.liveness.jsonl; do
     : > "$tomb"          # daemon died while the session was already idle
     continue
   fi
+  # A session that never received a prompt leaves no unanswered human
+  # behind: any exit, however abrupt, is tombstoned silently.
+  grep -q '"type":"user"' "$SESSIONS_DIR/$sess/log.jsonl" 2>/dev/null || {
+    : > "$tomb"
+    continue
+  }
   printf '%s %s\n' "$sess" "$idle" >> "$QUEUE"
 done
 
@@ -127,7 +133,8 @@ send_ping() {  # $1 session, $2 idle seconds
   [ -n "$body" ] || body="session=$sess"
   project="$(jq -r '.project_path // ""' "$sf" 2>/dev/null || true)"
   project="$(sanitize "${project##*/}" 64)"; [ -n "$project" ] || project="unknown"
-  title="$(sanitize "${title_part:-Agent}" 48) Agent Died"
+  t="$(sanitize "${title_part:-}" 48)"
+  title="${t:+$t }Agent Died"
   message="$(printf '%s: %s (last activity %dm ago)' "$project" "$(sanitize "$body" 160)" "$((idle / 60))")"
   # Claim the episode before delivering: a concurrent scanner sharing this
   # state must not double-ping the same death. Release the claim on failure
@@ -200,6 +207,11 @@ for f in "$LOG_DIR"/*tui.crash.log; do
   fi
   sess="$(sanitize "$(sed -n 's/^Session:[[:space:]]*//p' "$f" 2>/dev/null | head -1)" 96)"
   [ -n "$sess" ] || { : > "$STATE_DIR/crash-$stem"; continue; }
+  # Never-prompted sessions have no work to lose: stay silent.
+  grep -q '"type":"user"' "$SESSIONS_DIR/$sess/log.jsonl" 2>/dev/null || {
+    : > "$STATE_DIR/crash-$stem"
+    continue
+  }
   send_crash_ping "$sess" "$stem" "$f" "$age"
 done
 

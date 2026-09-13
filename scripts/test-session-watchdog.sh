@@ -38,6 +38,7 @@ mksession(){
   mkdir -p "$TMP/sess/$1"
   printf '%s' "{\"project_path\":\"/Users/gfranks/workspace/projx\",\"last_user_message_preview\":\"${3:-do the thing}\"}" > "$TMP/sess/$1/session.json"
   : > "$TMP/sess/$1/log.jsonl"
+  printf '%s\n' '{"type":"user","content":"hi"}' >> "$TMP/sess/$1/log.jsonl"
   if [ "$2" = idle ]; then touch -t 200001010000 "$TMP/sess/$1/log.jsonl"; fi
 }
 run(){
@@ -205,4 +206,27 @@ WATCHDOG_ENV_FILE="$TMP/envf/wd.env" WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LI
 PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=envtoken PUSHOVER_USER_KEY=envuser \
 bash "$HOOK"
 grep -q 'token=envtoken' "$LOG" && ! grep -q 'FILETOKEN' "$LOG" && ok "env credentials beat watchdog.env" || no "env credentials beat watchdog.env"
+
+# 15. A session that never received a prompt has nothing to wait for: any
+# daemon exit, however abrupt, is tombstoned silently.
+newworld
+mkdaemon n1 sessN1 stale; mksession sessN1 active
+: > "$TMP/sess/sessN1/log.jsonl"
+run
+[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-sessN1" ] && ok "never-prompted session never pings" || no "never-prompted session never pings"
+
+# 16. A TUI crash in a never-prompted session stays silent too.
+newworld
+mksession sessN2 active; : > "$TMP/sess/sessN2/log.jsonl"
+mkcrash 2026-09-13T17-00-00Z sessN2 fresh
+run
+[ "$(count)" = 0 ] && [ -f "$TMP/state/crash-2026-09-13T17-00-00Z-tui.crash" ] && ok "crash in never-prompted session stays silent" || no "crash in never-prompted session stays silent"
+
+# 17. An empty title part does not duplicate "Agent": "Agent Died", once.
+newworld
+mkdaemon g1 sessG fresh
+mkdir -p "$TMP/sess/sessG"; : > "$TMP/sess/sessG/log.jsonl"; printf '%s\n' '{"type":"user"}' >> "$TMP/sess/sessG/log.jsonl"
+touch -t 200001010000 "$TMP/logs/g1.liveness.jsonl"
+run
+grep -q -- '--data-urlencode title=Agent Died ' "$LOG" && ! grep -q 'Agent Agent' "$LOG" && ok "empty title part does not duplicate Agent" || no "empty title part does not duplicate Agent"
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"
