@@ -53,12 +53,11 @@ process(){
   esac
   emitted_epoch="$(policy_epoch "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=unparseable-emitted_at family=$typ id=$id"; return; }
   # Discontinuity boundary: pending stream evidence emitted before the declare
-  # marker is pre-jump and suppressed; evidence at/after the marker clears the
-  # boundary and is evaluated normally.
+  # marker is pre-jump and suppressed. The marker is NOT cleared here — it is
+  # cleared only after a frame passes every validation (verified resync).
   if [ -f "$state_dir/discontinuity-marker" ]; then
     marker="$(cat "$state_dir/discontinuity-marker" 2>/dev/null || echo 0)"
     if [ "$emitted_epoch" -lt "$marker" ]; then log "decision=would-suppress reason=discontinuity-stale family=$typ id=$id"; return; fi
-    rm -f "$state_dir/discontinuity-marker"
   fi
   baseline="$(cat "$state_dir/connect-clock" 2>/dev/null || true)"; watermark="$(cat "$state_dir/watermark" 2>/dev/null || true)"
   key="$(policy_episode_key "$line")"
@@ -85,6 +84,7 @@ process(){
   # Send-time freshness recheck on every path: fresh clock read at the
   # decision point, applied to the timestamp actually being decided.
   now="$(clock_read)"
+  if [ -n "${AGENT_NOTIFY_TEST_FINAL_NOW:-}" ]; then now="$AGENT_NOTIFY_TEST_FINAL_NOW"; fi
   decision="$(policy_age_decision "$now" "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=age-decision-failed family=$typ id=$id"; return; }
   case "$decision" in
     stale) log "decision=stale-at-send family=$typ id=$id"; rm -f "$state_dir/candidate-$key" 2>/dev/null || true; return;;
@@ -92,6 +92,13 @@ process(){
     ok) ;;
     *) log "decision=diagnostic-skip reason=age-decision-unknown family=$typ id=$id"; return;;
   esac
+  # Backward movement between clock observations is a discontinuity at the
+  # decision point too: suppress rather than trust the apparent age.
+  if ! policy_discontinuity "$now" "$state_dir" >/dev/null 2>&1; then
+    log "decision=would-suppress reason=clock-discontinuity-final family=$typ id=$id"
+    return
+  fi
+  rm -f "$state_dir/discontinuity-marker"
   # Cancellation episodes are gated on verified non-shutdown evidence at the
   # shared decision boundary; without it they are suppressed, never sent.
   if [ "$typ" = turn_cancelled ]; then
