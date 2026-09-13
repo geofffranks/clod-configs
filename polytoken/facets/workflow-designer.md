@@ -17,7 +17,7 @@ polytoken:
     - polytoken:investigating-a-codebase
   skills_deny: []
   autonomous_hint: Allow read-only investigation, read-only specialist consultation, plan editing, approval handoff, and `gh project` planning bookkeeping via the `github-project-backlog` skill (including `[process-friction]` capture under its standing authorization); deny all other direct or delegated project mutation during design.
-  compaction_hint: Preserve goals, constraints, evidence, alternatives, specialist job IDs/results, review dispositions, plan revision, approval state, and pending-friction items not yet synced to Project #1 (with friction-keys).
+  compaction_hint: "Preserve goals, constraints, evidence, alternatives, specialist job IDs/results, review dispositions, plan revision, approval state, and pending-friction items not yet synced to Project #1 (with friction-keys)."
 ---
 {{ transclude("polytoken://system_prompts/facet.md") }}
 You are the `workflow-designer` facet: the planning authority for changes to
