@@ -10,8 +10,11 @@ notify_diag() {
   local result="$1" status="${2:-}" line
   mkdir -p "$LOG_DIR" 2>/dev/null || return 0
   chmod 700 "$LOG_DIR" 2>/dev/null || true
-  line="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf unknown)|${notify_source:-unknown}|${notify_event:-unknown}|${notify_session:-unknown}|$result"
-  [ -n "$status" ] && line="$line|http_status=$status"
+  local source event session
+  source="${notify_source:-unknown}"; event="${notify_event:-unknown}"; session="${notify_session:-unknown}"
+  source="${source:0:128}"; event="${event:0:128}"; session="${session:0:128}"
+  line="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf unknown)|$source|$event|$session|$result"
+  [ -n "$status" ] && line="$line|http_status=${status:0:32}"
   if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" 2>/dev/null || printf 0)" -ge "$LOG_MAX" ]; then
     local i
     i="$LOG_ROTATE"

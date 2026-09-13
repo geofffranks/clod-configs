@@ -45,7 +45,8 @@ out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.5 run claude '{"hook_event_name":"Stop","session_id":"stale","message":"old"}' & p1=$!
 K="$(key claude stale)"; wait_until test -s "$TMP/state/$K.gen"
 printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"stale"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude >/dev/null; wait "$p1"
-! wait_until wait_text old && ok "stale worker cancellation proven" || no "stale worker cancellation proven"
+wait_until wait_count 0 && ! grep -q 'session=stale' "$LOG" && ok "stale worker cancellation proven" || no "stale worker cancellation proven"
+run claude '{"hook_event_name":"Stop","session_id":"positive-control","message":"control"}'; wait_until wait_count 1 && grep -q 'session=positive-control' "$LOG" && ok "delivery assertion positive control" || no "delivery assertion positive control"
 # Successful delivery clears state and permits a later delivery.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"rearm","message":"again"}'; wait_until wait_count 1
 AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"rearm","message":"again2"}'; wait_until wait_count 2 && ok "delivery clears and rearms state" || no "delivery clears and rearms state"
@@ -53,7 +54,7 @@ AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":
 : > "$LOG"; K="$(key claude live-lock)"; mkdir -p "$TMP/state/$K.lock"; printf '%s\n' "$$" > "$TMP/state/$K.lock/pid"; printf '%s\n' fixture > "$TMP/state/$K.lock/token"; printf '%s\n' "1" > "$TMP/state/$K.lock/heartbeat"
 touch -t 200001010000 "$TMP/state/$K.lock/heartbeat" "$TMP/state/$K.lock"
 AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"live-lock","message":"must-not-steal"}'
-! wait_until wait_text must-not-steal && ok "live owner lock is not reclaimed" || no "live owner lock is not reclaimed"
+wait_until wait_count 0 && ! grep -q 'session=live-lock' "$LOG" && ok "live owner lock is not reclaimed" || no "live owner lock is not reclaimed"
 # A crashed owner is reclaimed after the bounded wait; timestamp setup is portable.
 : > "$LOG"; K="$(key claude locked)"; mkdir -p "$TMP/state/$K.lock"; (exit 0) & dead_pid=$!; wait "$dead_pid"; printf '%s\n' "$dead_pid" > "$TMP/state/$K.lock/pid"; printf '%s\n' fixture > "$TMP/state/$K.lock/token"; printf '%s\n' "1" > "$TMP/state/$K.lock/heartbeat"
 touch -t 200001010000 "$TMP/state/$K.lock/heartbeat" "$TMP/state/$K.lock"
@@ -62,7 +63,7 @@ wait_until wait_count 1 && grep -q 'Needs Input' "$LOG" && ok "crashed-owner loc
 # A partial/legacy lock with a live PID but missing token is never reclaimed.
 : > "$LOG"; K="$(key claude partial-live)"; mkdir -p "$TMP/state/$K.lock"; printf '%s\n' "$$" > "$TMP/state/$K.lock/pid"; printf '%s\n' "1" > "$TMP/state/$K.lock/heartbeat"
 AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"partial-live","message":"must-not-steal"}'
-! wait_until wait_text must-not-steal && ok "live partial lock protection" || no "live partial lock protection"
+wait_until wait_count 0 && ! grep -q 'session=partial-live' "$LOG" && ok "live partial lock protection" || no "live partial lock protection"
 # Partial initialization is reclaimable: an unowned directory is not permanent.
 : > "$LOG"; K="$(key claude partial)"; mkdir -p "$TMP/state/$K.lock"; AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"partial","message":"recover"}'
 wait_until wait_text 'Needs Input' && ok "partial lock recovery" || no "partial lock recovery"
