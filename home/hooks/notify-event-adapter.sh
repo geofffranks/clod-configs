@@ -13,8 +13,12 @@ process(){
   local line="$1" emitted emitted_epoch id typ interrogative_type trans reason key decision envelope
   clock="${AGENT_NOTIFY_TEST_NOW:-$(date +%s)}"
   if ! policy_discontinuity "$clock" "$state_dir" >/dev/null 2>&1; then
-    log "decision=would-suppress reason=clock-discontinuity buffered-unclaimed=true watermark-rebaselined=true"
-    printf '%s\n' "$clock" > "$state_dir/watermark"
+    for c in "$state_dir"/candidate-*; do
+      [ -f "$c" ] || continue
+      log "decision=would-suppress reason=discontinuity-stale candidate=${c##*/candidate-}"
+      rm -f "$c"
+    done
+    log "decision=would-suppress reason=clock-discontinuity buffered-unclaimed=true watermark-rebaselined=decided-only"
     return
   fi
   envelope="$(printf '%s' "$line" | jq -r '.session_id // empty' 2>/dev/null || true)"
@@ -34,11 +38,17 @@ process(){
   esac
   emitted_epoch="$(policy_epoch "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=unparseable-emitted_at family=$typ id=$id"; return; }
   baseline="$(cat "$state_dir/connect-clock" 2>/dev/null || true)"; watermark="$(cat "$state_dir/watermark" 2>/dev/null || true)"
-  [[ "$baseline" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -le "$baseline" ] && { log "decision=diagnostic-skip reason=pre-connect-baseline family=$typ id=$id"; return; }
-  [[ "$watermark" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -lt "$watermark" ] && { log "decision=diagnostic-skip reason=stale-watermark family=$typ id=$id"; return; }
-  decision="$(policy_age_decision "$clock" "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=age-decision-failed family=$typ id=$id"; return; }
-  case "$decision" in stale) log "decision=would-suppress reason=stale-processing family=$typ id=$id"; return;; future) log "decision=would-suppress reason=future-emitted_at family=$typ id=$id"; return;; ok) ;; *) log "decision=diagnostic-skip reason=age-decision-unknown family=$typ id=$id"; return;; esac
+  if [ "${AGENT_NOTIFY_TWO_PHASE:-}" != decide ]; then
+    [[ "$baseline" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -le "$baseline" ] && { log "decision=diagnostic-skip reason=pre-connect-baseline family=$typ id=$id"; return; }
+    [[ "$watermark" =~ ^[0-9]+$ ]] && [ "$emitted_epoch" -lt "$watermark" ] && { log "decision=diagnostic-skip reason=stale-watermark family=$typ id=$id"; return; }
+  fi
+  if [ "${AGENT_NOTIFY_TWO_PHASE:-}" != decide ]; then
+    decision="$(policy_age_decision "$clock" "$emitted" 2>/dev/null)" || { log "decision=diagnostic-skip reason=age-decision-failed family=$typ id=$id"; return; }
+    case "$decision" in stale) log "decision=would-suppress reason=stale-processing family=$typ id=$id"; return;; future) log "decision=would-suppress reason=future-emitted_at family=$typ id=$id"; return;; ok) ;; *) log "decision=diagnostic-skip reason=age-decision-unknown family=$typ id=$id"; return;; esac
+  fi
   key="$(policy_episode_key "$line")"; if [ "$trans" = cleared ]; then log "decision=diagnostic-keyed reason=cleared-transition family=$typ id=$id"; return; fi
+  if [ "${AGENT_NOTIFY_TWO_PHASE:-}" = process ]; then printf '%s\n' "$emitted" > "$state_dir/candidate-$key"; log "decision=claim-candidate age-at-process=$((clock-emitted_epoch)) family=$typ id=$id"; return; fi
+  if [ "${AGENT_NOTIFY_TWO_PHASE:-}" = decide ]; then emitted="$(cat "$state_dir/candidate-$key" 2>/dev/null || true)"; [ -n "$emitted" ] || return; clock="${AGENT_NOTIFY_TEST_NOW:-$(date +%s)}"; decision="$(policy_age_decision "$clock" "$emitted" 2>/dev/null)"; [ "$decision" = ok ] || { log "decision=stale-at-send family=$typ id=$id"; rm -f "$state_dir/candidate-$key"; return; }; fi
   if [ "$typ" = turn_cancelled ] && [ "$reason" = user_cancelled ]; then log "decision=would-send reason=diagnostic-only family=$typ id=$id"; return; fi
   if ! [[ "$watermark" =~ ^[0-9]+$ ]] || [ "$emitted_epoch" -gt "$watermark" ]; then printf '%s\n' "$emitted_epoch" > "$state_dir/watermark"; fi
   policy_claim "$state_dir" "$key" || { log "decision=would-suppress reason=claim-loser family=$typ id=$id"; return; }

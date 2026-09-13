@@ -30,4 +30,19 @@ eq "$(policy_episode_key '{"event":{"type":"goal","transition":"cleared","goal":
 eq "$(policy_episode_key '{"event":{"type":"turn"}}')" diagnostic:missing-id 'missing id diagnostic key'
 rm -f "$S/claims/race"; (policy_claim "$S" race; echo $? > "$T/a") & pa=$!; (policy_claim "$S" race; echo $? > "$T/b") & pb=$!; wait "$pa" "$pb"; wins=0; [ "$(cat "$T/a")" = 0 ] && wins=$((wins+1)); [ "$(cat "$T/b")" = 0 ] && wins=$((wins+1)); [ "$wins" = 1 ] && ok 'exclusive concurrent claim' || no 'exclusive concurrent claim'
 policy_shutdown_gate verified-non-shutdown >/dev/null && ok 'shutdown verified allows' || no 'shutdown verified allows'; ! policy_shutdown_gate absent >/dev/null && ok 'shutdown absent suppresses' || no 'shutdown absent suppresses'
+# R2 two-phase adapter: process at T, decide at T+130 must stale-at-send.
+TP="$T/two-phase"; mkdir -p "$TP"; printf '%s' '{"port":1,"session_id":"sid","credential_file_path":""}' > "$TP/startup.json"; printf '#!/usr/bin/env bash\nprintf '\''%%s\\n'\'' %q\n' 'data: {"session_id":"sid","emitted_at":"2024-01-01T00:00:10Z","event":{"type":"model_error","prompt_id":"r2"}}' > "$TP/curl"; chmod +x "$TP/curl"; PATH="$TP:$PATH" AGENT_NOTIFY_ADAPTER_STATE_DIR="$TP/state" AGENT_NOTIFY_ADAPTER_LOG_DIR="$TP/logs" AGENT_NOTIFY_TEST_NOW=1704067208 AGENT_NOTIFY_TWO_PHASE=process bash "$ADAPTER" "$TP/startup.json" >/dev/null 2>&1; PATH="$TP:$PATH" AGENT_NOTIFY_ADAPTER_STATE_DIR="$TP/state" AGENT_NOTIFY_ADAPTER_LOG_DIR="$TP/logs" AGENT_NOTIFY_PRESERVE_STATE=1 AGENT_NOTIFY_TEST_NOW=1704067340 AGENT_NOTIFY_TWO_PHASE=decide bash "$ADAPTER" "$TP/startup.json" >/dev/null 2>&1; grep -q 'stale-at-send' "$TP/logs/notify.log" && ! grep -q 'would-send' "$TP/logs/notify.log" && ok 'two-phase stale-at-send' || no 'two-phase stale-at-send'
+# R3 multi-frame: A decided pre-jump; B buffered candidate and C suppressed at jump; D post-resync normal.
+R3D="$T/r3"; mkdir -p "$R3D"; printf '%s' '{"port":1,"session_id":"sid","credential_file_path":""}' > "$R3D/startup.json"
+mkframe(){ printf '#!/usr/bin/env bash\nprintf '\''%%s\\n'\'' %q\n' "data: $1" > "$R3D/curl"; chmod +x "$R3D/curl"; }
+ra(){ PATH="$R3D:$PATH" AGENT_NOTIFY_ADAPTER_STATE_DIR="$R3D/state" AGENT_NOTIFY_ADAPTER_LOG_DIR="$R3D/logs" AGENT_NOTIFY_PRESERVE_STATE=${2:-} AGENT_NOTIFY_TEST_NOW="$3" AGENT_NOTIFY_TWO_PHASE=${4:-} bash "$ADAPTER" "$R3D/startup.json" >/dev/null 2>&1; }
+mkframe '{"session_id":"sid","emitted_at":"2024-01-01T00:00:03Z","event":{"type":"model_error","prompt_id":"a"}}'; ra x "" 1704067200
+mkframe '{"session_id":"sid","emitted_at":"2024-01-01T00:00:04Z","event":{"type":"model_error","prompt_id":"b"}}'; ra x 1 1704067205 process
+mkframe '{"session_id":"sid","emitted_at":"2024-01-01T00:00:07Z","event":{"type":"model_error","prompt_id":"c"}}'; ra x 1 1704067100
+grep -q 'discontinuity-stale candidate=prompt:b' "$R3D/logs/notify.log" && ok 'R3 buffered candidate suppressed on discontinuity' || no 'R3 buffered candidate suppressed on discontinuity'
+[ "$(cat "$R3D/state/watermark" 2>/dev/null)" = 1704067203 ] && ok 'R3 watermark survives as newest decided event' || no 'R3 watermark survives as newest decided event'
+! grep -q 'would-send.*id=b' "$R3D/logs/notify.log" && ! grep -q 'would-send.*id=c' "$R3D/logs/notify.log" && ok 'R3 suppressed frames never would-send' || no 'R3 suppressed frames never would-send'
+mkframe '{"session_id":"sid","emitted_at":"2024-01-01T00:00:08Z","event":{"type":"model_error","prompt_id":"d"}}'; ra x 1 1704067210
+grep -q 'would-send reason=diagnostic-only family=model_error id=d' "$R3D/logs/notify.log" && ok 'R3 post-resync frame evaluates normally' || no 'R3 post-resync frame evaluates normally'
+[ "$(cat "$R3D/state/watermark" 2>/dev/null)" = 1704067208 ] && ok 'R3 post-resync decision advances watermark' || no 'R3 post-resync decision advances watermark'
 [ "$P" -gt 0 ] && [ "$F" -eq 0 ] && echo "PASS: $P" || echo "FAILURES: $F/$((P+F))"; exit "$F"
