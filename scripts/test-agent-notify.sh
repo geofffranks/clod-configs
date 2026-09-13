@@ -119,6 +119,13 @@ wait_until wait_text 'billing refactor' && grep -q -- '--data-urlencode title=bi
 : > "$LOG"; run polytoken '{"event":"notification","session_id":"ambient","message":"job done"}'
 K="$(key polytoken ambient)"; sleep 0.3
 [ ! -e "$TMP/state/$K.gen" ] && [ "$(count)" = 0 ] && ok "polytoken ambient notification never schedules" || no "polytoken ambient notification never schedules"
+# A stop-scheduled send is cancelled by a later ambient notification: the
+# subagent/background completion resumes the session without the user, so a
+# "Needs Input" push would fire while the agent is working again.
+: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=2 run polytoken '{"event":"stop","session_id":"ambcancel"}'
+K="$(key polytoken ambcancel)"; wait_until test -s "$TMP/state/$K.gen"
+run polytoken '{"event":"notification","session_id":"ambcancel","message":"job done"}'
+! wait_until wait_text ambcancel && ok "ambient notification cancels pending stop send" || no "ambient notification cancels pending stop send"
 # A goal-less polytoken stop still schedules...
 : > "$LOG"; POLYTOKEN_GOAL_ACTIVE=false run polytoken '{"event":"stop","session_id":"goalfalse"}'
 K="$(key polytoken goalfalse)"; wait_until test -s "$TMP/state/$K.gen" && wait_until wait_count 1 && ok "polytoken goal-inactive stop schedules" || no "polytoken goal-inactive stop schedules"

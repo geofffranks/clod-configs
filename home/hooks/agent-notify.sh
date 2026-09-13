@@ -44,9 +44,11 @@ esac
 # Polytoken: ambient notifications (background job and subagent completions)
 # are not requests for input, and while a saved-session goal is active the
 # goal driver re-prompts on its own after `stop` — neither is "needs input".
-# Only a goal-less end of turn may schedule a notice.
+# Only a goal-less end of turn may schedule a notice. An ambient notification
+# is routed to the cancel path below: the session resumed without the user,
+# so any send a prior `stop` scheduled (a turn that ended with work still in
+# flight) would fire mid-work and is a false alarm.
 if [ "$HARNESS" = polytoken ]; then
-  if [ "$EVENT" = notification ]; then exit 0; fi
   if [ "$EVENT" = stop ] && [ "${POLYTOKEN_GOAL_ACTIVE:-}" = true ]; then exit 0; fi
 fi
 
@@ -110,7 +112,10 @@ unlock() {
   LOCK_OWNER=""
 }
 
-if [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = pre_user_prompt ]; then
+# A user prompt means the human is back; a polytoken ambient notification
+# means the session resumed on its own. Both invalidate a pending send.
+if [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = pre_user_prompt ] ||
+   { [ "$HARNESS" = polytoken ] && [ "$EVENT" = notification ]; }; then
   lock || exit 0
   rm -f "$STATE.gen" "$STATE.cancel"
   printf '%s\n' "$(date +%s%N 2>/dev/null || date +%s)" > "$STATE.cancel.tmp" && mv -f "$STATE.cancel.tmp" "$STATE.cancel"
