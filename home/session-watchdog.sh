@@ -16,9 +16,13 @@
 #   fresh liveness   -> daemon alive; clears that session's death tombstone
 #   stale liveness   -> daemon gone; ping once per episode when the session's
 #                       log advanced within WATCHDOG_IDLE_LIMIT of the death
+#   fresh *tui.crash.log -> TUI panic; ping once per crash log when the named
+#                       session was recently active (a crash kills the process
+#                       that would run hooks, so the scan is the only sensor)
 # Suppressions: boot grace (first scan only tombstones), mass staleness
 # (>= WATCHDOG_MASS new deaths in one scan reads as a host/container event,
-# not per-session deaths), idle deaths, and a 3-attempt retry cap.
+# not per-session deaths), idle deaths, crash logs older than the idle limit,
+# and a 3-attempt retry cap.
 set -u
 
 ENV_FILE="${WATCHDOG_ENV_FILE:-$HOME/.config/polytoken/watchdog.env}"
@@ -123,6 +127,35 @@ send_ping() {  # $1 session, $2 idle seconds
   fi
 }
 
+send_crash_ping() {  # $1 session, $2 crash-log stem, $3 crash-log path, $4 age seconds
+  local sess="$1" stem="$2" crash="$3" age="$4" sessfile att n sf rf preview title_part msg project title message
+  att="$STATE_DIR/att-crash-$stem"
+  n="$(cat "$att" 2>/dev/null || echo 0)"
+  if [ "${n:-0}" -ge 3 ]; then
+    : > "$STATE_DIR/crash-$stem"; rm -f "$att"; return 0
+  fi
+  sf="$SESSIONS_DIR/$sess/session.json"
+  rf="$SESSIONS_DIR/$sess/record.json"
+  preview="$(jq -r '.last_user_message_preview // ""' "$sf" 2>/dev/null || true)"
+  title_part="$(jq -r '.session_title // ""' "$rf" 2>/dev/null || true)"
+  [ -n "$title_part" ] || title_part="$preview"
+  # The panic line says what died; session metadata says where.
+  msg="$(sed -n 's/^Message:[[:space:]]*//p' "$crash" 2>/dev/null | head -1)"
+  [ -n "$msg" ] || msg="$preview"
+  [ -n "$msg" ] || msg="session=$sess"
+  project="$(jq -r '.project_path // ""' "$sf" 2>/dev/null || true)"
+  project="$(sanitize "${project##*/}" 64)"; [ -n "$project" ] || project="unknown"
+  title="$(sanitize "${title_part:-Agent}" 48) TUI Crashed"
+  message="$(printf '%s: %s (last activity %dm ago)' "$project" "$(sanitize "$msg" 160)" "$((age / 60))")"
+  if curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
+    --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
+    --data-urlencode "title=$title" --data-urlencode "message=$message" >/dev/null 2>&1; then
+    : > "$STATE_DIR/crash-$stem"; rm -f "$att"
+  else
+    echo $((n + 1)) > "$att"
+  fi
+}
+
 if [ "$BOOT" = 1 ]; then
   # First scan after install: record the world as-is, ping nothing.
   while read -r sess _; do : > "$STATE_DIR/tomb-$(sanitize "$sess" 96)"; done < "$QUEUE"
@@ -131,6 +164,24 @@ elif [ "$mass" -ge "$MASS" ]; then
 else
   while read -r sess idle; do send_ping "$sess" "$idle"; done < "$QUEUE"
 fi
+
+# TUI crash logs are scanned regardless of daemon liveness: the panic kills
+# the TUI mid-turn without any hook firing. One ping per crash log; crashes
+# older than the idle limit, or naming no session, tombstone silently.
+for f in "$LOG_DIR"/*tui.crash.log; do
+  [ -e "$f" ] || continue
+  stem="$(basename "$f" .log)"
+  [ -f "$STATE_DIR/crash-$stem" ] && continue
+  m="$(mtime_of "$f")"
+  age=$((now - m))
+  if [ "$age" -gt "$IDLE_LIMIT" ]; then
+    : > "$STATE_DIR/crash-$stem"
+    continue
+  fi
+  sess="$(sanitize "$(sed -n 's/^Session:[[:space:]]*//p' "$f" 2>/dev/null | head -1)" 96)"
+  [ -n "$sess" ] || { : > "$STATE_DIR/crash-$stem"; continue; }
+  send_crash_ping "$sess" "$stem" "$f" "$age"
+done
 
 rm -f "$QUEUE"
 : > "$STATE_DIR/.bootstrapped"

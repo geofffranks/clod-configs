@@ -30,6 +30,13 @@
     "name": "container-awareness"
   },
   {
+    "event": "session_start",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/watchdog-keepalive.sh\""
+    },
+    "name": "session-watchdog-keepalive"
+  },
+  {
     "event": "pre_tool_use",
     "handler": {
       "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" grep-guard/hook.sh grep"

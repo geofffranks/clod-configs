@@ -14,6 +14,7 @@ cat > "$CURL" <<'EOF'
 printf '%s\n' "$*" >> "${MOCK_LOG:?}"
 EOF
 chmod +x "$CURL"
+cp "$CURL" "$TMP/curl-good"   # restorable good mock: $TMP/curl gets relinked by retry tests
 FAILCURL="$TMP/failcurl"
 cat > "$FAILCURL" <<'EOF'
 #!/usr/bin/env bash
@@ -105,15 +106,66 @@ mkdaemon r1 sessR fresh; mksession sessR active "retry me"
 run
 touch -t 200001010000 "$TMP/logs/r1.liveness.jsonl"
 total=0; last=0
-for mock in "$FAILCURL" "$FAILCURL" "$FAILCURL" "$CURL"; do
-  ln -sf "$mock" "$TMP/livecurl"
+# The mock is relinked per scan; the cap scan needs no send, but the good
+# mock is restored so later tests deliver. (Never point $TMP/curl at $CURL —
+# it IS $TMP/curl, and a self-referential link poisons later scans with ELOOP.)
+for scan in 1 2 3 4; do
+  if [ "$scan" -lt 4 ]; then ln -sf "$FAILCURL" "$TMP/curl"; else ln -sf "$TMP/curl-good" "$TMP/curl"; fi
   WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
   WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
   PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
-  bash -c "ln -sf '$TMP/livecurl' '$TMP/curl'; bash '$HOOK'"
+  bash "$HOOK"
 done
 # The mock log is append-only across scans: exactly three failing attempts,
 # then the cap tombstones the episode and the fourth scan sends nothing.
 [ "$(count)" = 3 ] && [ -f "$TMP/state/tomb-sessR" ] && ok "failed sends retry 3 times then tombstone" || no "failed sends retry 3 times then tombstone (calls=$(count) tomb=$([ -f "$TMP/state/tomb-sessR" ] && echo y || echo n))"
+
+# mkcrash <stem> <session> fresh|stale [message] — a TUI crash log naming its session
+mkcrash(){
+  local msg="${4:-panicked at rs/polytoken-cli/src/tui/reducer/mod.rs:706:55: index out of bounds}"
+  {
+    echo "polytoken TUI crash log"
+    echo "======================="
+    echo "Timestamp: x"
+    echo "Session: $2"
+    echo
+    echo "Reason: panic"
+    echo "Location: rs/polytoken-cli/src/tui/reducer/mod.rs:706:55"
+    echo "Message: $msg"
+  } > "$TMP/logs/$1-tui.crash.log"
+  if [ "$3" = stale ]; then touch -t 200001010000 "$TMP/logs/$1-tui.crash.log"; fi
+  return 0
+}
+
+# 10. A fresh TUI crash in an active session pings once, enriched like a death.
+newworld
+mksession sessK active "chasing the tui panic"
+mkcrash 2026-09-13T15-27-09Z sessK fresh "panicked at rs/tui.rs:706: index out of bounds"
+run
+[ "$(count)" = 1 ] && grep -q -- '--data-urlencode title=chasing the tui panic TUI Crashed' "$LOG" \
+  && grep -q -- '--data-urlencode message=projx: panicked at rs/tui.rs:706: index out of bounds (last activity 0m ago)' "$LOG" \
+  && ok "fresh TUI crash pings once, enriched" || no "fresh TUI crash pings once, enriched"
+run
+[ "$(count)" = 0 ] && [ -f "$TMP/state/crash-2026-09-13T15-27-09Z-tui.crash" ] && ok "crash pings only once per crash log" || no "crash pings only once per crash log"
+
+# 11. A crash log older than the idle limit is tombstoned silently.
+newworld
+mksession sessL active
+mkcrash 2026-08-01T00-00-00Z sessL stale
+run
+[ "$(count)" = 0 ] && [ -f "$TMP/state/crash-2026-08-01T00-00-00Z-tui.crash" ] && ok "stale crash tombstoned silently" || no "stale crash tombstoned silently"
+
+# 12. Crash send failures retry up to 3 attempts, then tombstone silently.
+newworld
+mksession sessM active "crash retry"
+mkcrash 2026-09-13T16-00-00Z sessM fresh
+for scan in 1 2 3 4; do
+  if [ "$scan" -lt 4 ]; then ln -sf "$FAILCURL" "$TMP/curl"; else ln -sf "$TMP/curl-good" "$TMP/curl"; fi
+  WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
+  WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
+  PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
+  bash "$HOOK"
+done
+[ "$(count)" = 3 ] && [ -f "$TMP/state/crash-2026-09-13T16-00-00Z-tui.crash" ] && ok "crash send failures retry 3 then tombstone" || no "crash send failures retry 3 then tombstone (calls=$(count))"
 
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"

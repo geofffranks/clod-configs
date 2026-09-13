@@ -30,6 +30,8 @@ EXEC_SCRIPTS=(
   hooks/adapter.sh
   hooks/container-awareness.sh
   hooks/agent-notify.sh
+  hooks/session-watchdog.sh
+  hooks/watchdog-keepalive.sh
   compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh
   compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once
   compat/grep-guard/hook.sh compat/large-read-guard/hook.sh
@@ -500,6 +502,8 @@ copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
 copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
 copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/container-awareness.sh"
 copy_managed_file "$ROOT/home/hooks/agent-notify.sh" "$DEST/hooks/agent-notify.sh"
+copy_managed_file "$ROOT/home/session-watchdog.sh" "$DEST/hooks/session-watchdog.sh"
+copy_managed_file "$ROOT/home/hooks/watchdog-keepalive.sh" "$DEST/hooks/watchdog-keepalive.sh"
 for d in "${COMPAT_DIRS[@]}"; do
   if [ -d "$ROOT/home/$d" ]; then
     while IFS= read -r -d '' src; do
