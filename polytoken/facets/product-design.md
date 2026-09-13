@@ -8,7 +8,7 @@ polytoken:
   color_light: "#dbeafe"
   color_dark: "#1e3a8a"
   compaction_hint: Preserve the outcome, constraints, the operator-approved git target (branch, worktree, disposition), consultation matrix, unresolved decisions, alternatives, recommendation, approval status, delegated job IDs/results, and pending-friction items not yet synced (with friction-keys); keep evidence separate from inference.
-  tools: [file_read, glob, grep, shell_exec, lsp, web_search, web_fetch, subagent, message_subagent, skill, job_status, job_block, job_result, job_cancel, list_jobs, ask_user_question, tool_search, todo_create, todo_update, todo_complete, todo_delete, todo_list, write_plan, edit_plan, handoff_plan, read_goal, block_goal, tag!ALL_MCP]
+  tools: [file_read, glob, grep, shell_exec, lsp, web_search, web_fetch, subagent, message_subagent, skill, job_status, job_block, job_result, job_cancel, list_jobs, ask_user_question, tool_search, todo_create, todo_update, todo_complete, todo_delete, todo_list, write_plan, edit_plan, handoff_plan, read_goal, block_goal, mcp_list_resources, mcp_read_resource, tag!ALL_MCP]
   tools_deny: [file_write, file_edit_search_replace, file_edit_hashline, patch_edit, shell_monitor, shell_service, switch_facet, tool_flow, complete_goal]
   undeferred_tools: [file_read, glob, grep, shell_exec, subagent, message_subagent, skill, job_status, job_block, job_result, list_jobs, ask_user_question, write_plan, edit_plan, handoff_plan, mcp_list_resources, mcp_read_resource]
   skills_allow: [tag!research, brainstorming, github-project-backlog, agent-orchestration, lappie-workflow-coordination, lappie-review-convergence]
