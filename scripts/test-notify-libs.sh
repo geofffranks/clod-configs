@@ -28,7 +28,7 @@ PATH="$TMP:$PATH" CALLS="$CALLS" AGENT_NOTIFY_LOG_DIR="$LOGDIR" PUSHOVER_APP_TOK
 for _ in 1 2 3 4 5; do [ -s "$CALLS" ] && break; sleep .05; done
 assert_eq "$(wc -l < "$CALLS" | tr -d ' ')" 1 "one failed curl attempt"
 grep -Eq -- --max-time home/lib/notify-send.sh && grep -Eq -- '--max-time 10' home/lib/notify-send.sh && ok "curl timeout bounded" || no "curl timeout bounded"
-source "$REPO/home/lib/notify-send.sh"
+AGENT_NOTIFY_LOG_DIR="$LOGDIR" source "$REPO/home/lib/notify-send.sh"
 LOG_MAX=64
 notify_source="$(printf 's%.0s' $(seq 1 300))" notify_event="$(printf 'e%.0s' $(seq 1 300))" notify_session="$(printf 'i%.0s' $(seq 1 300))" notify_diag failed 500
 [ "$(wc -c < "$LOGDIR/notify.log")" -le 8192 ] && ok "caller metadata bounded" || no "caller metadata bounded"
