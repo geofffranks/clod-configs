@@ -26,9 +26,14 @@
 set -u
 
 ENV_FILE="${WATCHDOG_ENV_FILE:-$HOME/.config/polytoken/watchdog.env}"
+# Explicit process environment wins over the env file: a seeded file must
+# never override credentials a caller (or a test mock) passed in.
+_app="${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}"
+_user="${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}"
 [ -f "$ENV_FILE" ] && . "$ENV_FILE"
-APP_TOKEN="${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}"
-USER_KEY="${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}"
+APP_TOKEN="${_app:-${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}}"
+USER_KEY="${_user:-${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}}"
+unset _app _user
 LOG_DIR="${WATCHDOG_LOG_DIR:-$HOME/.local/share/polytoken/logs}"
 SESSIONS_DIR="${WATCHDOG_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}"
 STATE_DIR="${WATCHDOG_STATE_DIR:-$HOME/.local/share/polytoken/.session-watchdog}"
@@ -76,6 +81,12 @@ for f in "$LOG_DIR"/*.liveness.jsonl; do
     continue
   fi
   [ -f "$tomb" ] && continue
+  # A journal whose last line disarms ended cleanly (TUI closed, session
+  # replaced): the agent didn't die, it was retired. Tombstone silently.
+  if tail -n 1 "$f" 2>/dev/null | grep -q '"type":"disarmed"'; then
+    : > "$tomb"
+    continue
+  fi
   idle=$((now - "$(mtime_of "$SESSIONS_DIR/$sess/log.jsonl")"))
   if [ "$idle" -gt "$IDLE_LIMIT" ]; then
     : > "$tomb"          # daemon died while the session was already idle
@@ -118,11 +129,16 @@ send_ping() {  # $1 session, $2 idle seconds
   project="$(sanitize "${project##*/}" 64)"; [ -n "$project" ] || project="unknown"
   title="$(sanitize "${title_part:-Agent}" 48) Agent Died"
   message="$(printf '%s: %s (last activity %dm ago)' "$project" "$(sanitize "$body" 160)" "$((idle / 60))")"
+  # Claim the episode before delivering: a concurrent scanner sharing this
+  # state must not double-ping the same death. Release the claim on failure
+  # so the retry can run.
+  : > "$STATE_DIR/tomb-$sessfile"
   if curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
     --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
     --data-urlencode "title=$title" --data-urlencode "message=$message" >/dev/null 2>&1; then
-    : > "$STATE_DIR/tomb-$sessfile"; rm -f "$att"
+    rm -f "$att"
   else
+    rm -f "$STATE_DIR/tomb-$sessfile"
     echo $((n + 1)) > "$att"
   fi
 }
@@ -147,11 +163,15 @@ send_crash_ping() {  # $1 session, $2 crash-log stem, $3 crash-log path, $4 age 
   project="$(sanitize "${project##*/}" 64)"; [ -n "$project" ] || project="unknown"
   title="$(sanitize "${title_part:-Agent}" 48) TUI Crashed"
   message="$(printf '%s: %s (last activity %dm ago)' "$project" "$(sanitize "$msg" 160)" "$((age / 60))")"
+  # Claim the crash episode before delivering (same anti-double-ping rule
+  # as daemon deaths); release the claim on failure so the retry can run.
+  : > "$STATE_DIR/crash-$stem"
   if curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
     --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
     --data-urlencode "title=$title" --data-urlencode "message=$message" >/dev/null 2>&1; then
-    : > "$STATE_DIR/crash-$stem"; rm -f "$att"
+    rm -f "$att"
   else
+    rm -f "$STATE_DIR/crash-$stem"
     echo $((n + 1)) > "$att"
   fi
 }

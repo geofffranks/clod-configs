@@ -168,4 +168,41 @@ for scan in 1 2 3 4; do
 done
 [ "$(count)" = 3 ] && [ -f "$TMP/state/crash-2026-09-13T16-00-00Z-tui.crash" ] && ok "crash send failures retry 3 then tombstone" || no "crash send failures retry 3 then tombstone (calls=$(count))"
 
+# A send claims the episode (tombstone) BEFORE delivering: concurrent
+# scanners sharing this state must not double-ping the same death.
+newworld
+mkdaemon c9 sessC9 fresh; mksession sessC9 active "claim check"
+touch -t 200001010000 "$TMP/logs/c9.liveness.jsonl"
+cat > "$TMP/claimcurl" <<'EOF'
+#!/usr/bin/env bash
+if [ -f "$WATCHDOG_STATE_DIR/tomb-sessC9" ]; then
+  printf '%s\n' 'CLAIMED-DURING-SEND' >> "${MOCK_LOG:?}"
+fi
+EOF
+chmod +x "$TMP/claimcurl"; ln -sf "$TMP/claimcurl" "$TMP/curl"
+run
+grep -q 'CLAIMED-DURING-SEND' "$LOG" && ok "send claims the episode before delivering" || no "send claims the episode before delivering"
+ln -sf "$TMP/curl-good" "$TMP/curl"
+
+# 13. A daemon that disarmed cleanly (TUI closed, session replaced) ended on
+# purpose: nobody died. Only a journal that stops mid-stream is a death.
+newworld
+mkdaemon d1 sessD1 fresh; mksession sessD1 active "still alive"
+printf '{"type":"disarmed","reason":"serve_exited"}\n' >> "$TMP/logs/d1.liveness.jsonl"
+touch -t 200001010000 "$TMP/logs/d1.liveness.jsonl"
+run
+[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-sessD1" ] && ok "clean disarm is not a death" || no "clean disarm is not a death"
+
+# 14. Explicit process env credentials beat watchdog.env: a seeded file must
+# never leak real credentials into a context that passed its own.
+newworld
+mkdir -p "$TMP/envf"; printf 'PUSHOVER_APP_TOKEN=FILETOKEN\nPUSHOVER_USER_KEY=FILEUSER\n' > "$TMP/envf/wd.env"
+mkdaemon f1 sessF fresh; mksession sessF active "env wins"
+touch -t 200001010000 "$TMP/logs/f1.liveness.jsonl"
+ln -sf "$TMP/curl-good" "$TMP/curl"
+WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
+WATCHDOG_ENV_FILE="$TMP/envf/wd.env" WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
+PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=envtoken PUSHOVER_USER_KEY=envuser \
+bash "$HOOK"
+grep -q 'token=envtoken' "$LOG" && ! grep -q 'FILETOKEN' "$LOG" && ok "env credentials beat watchdog.env" || no "env credentials beat watchdog.env"
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"
