@@ -172,11 +172,12 @@ The second workflow pair is `product-design`, which plans the product approval
 lifecycle and hands off via an approved plan to `project-manager`, which
  delivers it. These four are the global facets claude-config ships.
 
-Both facets pin `codex/gpt-5.6-luna` with `zai/glm-5.3-flash` fallback. Their MCP
-surface is limited to the Ratatoskr gateway: discover available servers, inspect
-the selected tool schema, then execute through `mcp__ratatoskr`; they do not
-connect directly to upstream MCP servers. The gateway itself runs on the Mac,
-including when Polytoken runs in the Linux container.
+All four facets pin `zai/glm-5.3-flash(high)` with fallback
+`codex/gpt-5.6-luna-1m(medium)`. The workflow pair uses Ratatoskr-gateway-only
+MCP (`mcp__ratatoskr`); the product pair uses `tag!ALL_MCP` per configured
+upstream server, with `product-design` also exposing `mcp_list_resources` and
+`mcp_read_resource`. The gateway itself runs on the Mac, including when
+Polytoken runs in the Linux container.
 
 #### MCP: everything behind the ratatoskr gateway
 
