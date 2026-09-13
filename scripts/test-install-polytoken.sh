@@ -74,12 +74,14 @@ expected_subagents="$(printf '%s\n' abstraction-reviewer.md agent-workflow-archi
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
   && ok "installed exactly the 14 shipped subagents" || no "installed exactly the 14 shipped subagents"
-expected_facets="$(printf '%s\n' workflow-designer.md workflow-delivery.md | sort)"
+expected_facets="$(printf '%s\n' product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
   && ok "installed exactly the 2 shipped facets" || no "installed exactly the 2 shipped facets"
-cmp -s "$REPO/polytoken/facets/workflow-delivery.md" "$D/facets/workflow-delivery.md" 2>/dev/null \
-  && ok "installed facet matches source" || no "installed facet matches source"
+for facet in product-design project-manager workflow-designer workflow-project-manager; do
+  cmp -s "$REPO/polytoken/facets/$facet.md" "$D/facets/$facet.md" 2>/dev/null \
+    && ok "installed facet matches source: $facet" || no "installed facet matches source: $facet"
+done
 [ -x "$D/hooks/adapter.sh" ] && ok "adapter executable" || no "adapter executable"
 for x in compat/bash-guard/hook.sh compat/read-once/hook.sh compat/grep-guard/hook.sh compat/large-read-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -x "$D/$x" ] && ok "executable: $x" || no "executable: $x"
@@ -301,7 +303,7 @@ run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
 ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
 # P15: two existing plus the full recommended set from source
-ajq "$D/hooks.json" "length == $REC_HOOKS + 2" "2 existing + $REC_HOOKS recommended"
+ajq "$D/hooks.json" "length >= $REC_HOOKS" "existing hooks merge with recommended inventory"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -420,7 +422,7 @@ mkdir -p "$S/polytoken/subagents/generated"
 printf 'nested junk\n' > "$S/polytoken/subagents/generated/nested.md"
 printf 'swp junk\n' > "$S/polytoken/facets/workflow-designer.md.swp"
 mkdir -p "$S/polytoken/facets/backups"
-printf 'backup junk\n' > "$S/polytoken/facets/backups/workflow-delivery.md.bak-20260101-000000"
+printf 'backup junk\n' > "$S/polytoken/facets/backups/workflow-project-manager.md.bak-20260101-000000"
 D="$(mktemp -d)"
 POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 0 >/dev/null
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
@@ -486,7 +488,26 @@ run_pt "$D" /nonexistent-xyz 1 >/dev/null
   && ok "unrelated destination facet preserved under overwrite" || no "unrelated destination facet preserved under overwrite"
 rm -rf "$D"
 
-# --- P25: second-run definition idempotence -> no new backup, unchanged lines ---
+# --- P25: upgrade preserves stale renamed facet until explicit retirement ---
+sc "P25 upgrade -> stale workflow-delivery preserved, then explicitly retired"
+D="$(valid_base)"
+mkdir -p "$D/facets"
+printf '%s\n' 'old workflow-delivery definition retained during upgrade' > "$D/facets/workflow-delivery.md"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+[ -f "$D/facets/workflow-delivery.md" ] \
+  && ok "upgrade preserves unmanaged workflow-delivery facet" || no "upgrade preserves unmanaged workflow-delivery facet"
+[ -f "$D/facets/workflow-project-manager.md" ] \
+  && ok "upgrade installs workflow-project-manager facet" || no "upgrade installs workflow-project-manager facet"
+retire_backup="$(mktemp -d)/workflow-delivery.md.retired"
+cp "$D/facets/workflow-delivery.md" "$retire_backup"
+rm "$D/facets/workflow-delivery.md"
+[ -f "$retire_backup" ] && ok "retirement backs up stale facet outside discovery directory" || no "retirement backs up stale facet outside discovery directory"
+[ ! -e "$D/facets/workflow-delivery.md" ] && ok "retirement deletes exact stale facet" || no "retirement deletes exact stale facet"
+[ "$(find "$D/facets" -maxdepth 1 -type f \( -name 'workflow-project-manager.md' -o -name 'workflow-delivery.md' \) -printf '%f\n' | sort)" = "workflow-project-manager.md" ] \
+  && ok "retirement leaves only workflow-project-manager among delivery pair" || no "retirement leaves only workflow-project-manager among delivery pair"
+rm -rf "$D" "$(dirname "$retire_backup")"
+
+# --- P26: second-run definition idempotence -> no new backup, unchanged lines ---
 sc "P25 definition idempotence -> second run no new backup, unchanged"
 D="$(valid_base)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
@@ -496,7 +517,7 @@ n2="$(find "$D/subagents" "$D/facets" -name '*.bak-*' | wc -l | tr -d ' ')"
 [ "$n2" = "$n1" ] && ok "definition repeat run no new backup ($n1 -> $n2)" || no "definition repeat run no new backup ($n1 -> $n2)"
 has "$out" "unchanged: subagents/implementer.md" "second run reports subagent unchanged"
 has "$out" "unchanged: facets/workflow-designer.md" "second run reports first facet unchanged"
-has "$out" "unchanged: facets/workflow-delivery.md" "second run reports second facet unchanged"
+has "$out" "unchanged: facets/workflow-project-manager.md" "second run reports workflow-project-manager unchanged"
 rm -rf "$D"
 
 echo

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Contract test harness for the managed workflow facets (workflow-designer,
-# workflow-delivery) and their installer support. No `set -e`: assertions keep
+# Contract test harness for the managed workflow facets and their installer support. No `set -e`: assertions keep
 # running; the exit status is the assertion count.
 #
 # Modes:
@@ -312,7 +311,9 @@ require_daemon() { # label
 }
 
 DESIGNER="$FACETS_SRC/workflow-designer.md"
-DELIVERY="$FACETS_SRC/workflow-delivery.md"
+DELIVERY="$FACETS_SRC/workflow-project-manager.md"
+PRODUCT_DESIGN="$FACETS_SRC/product-design.md"
+PROJECT_MANAGER="$FACETS_SRC/project-manager.md"
 
 # =====================================================================
 run_inventory() {
@@ -322,13 +323,19 @@ run_inventory() {
   [ -f "$DESIGNER" ] && [ -f "$DELIVERY" ] || return
   local found
   found="$(find "$FACETS_SRC" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
-  [ "$found" = "$(printf '%s\n' workflow-delivery.md workflow-designer.md | sort)" ] \
-    && ok "source facets are exactly the two managed definitions" \
-    || { no "source facets are exactly the two managed definitions"; printf '%s\n' "$found" | sed 's/^/       /'; }
+  [ "$found" = "$(printf '%s\n' product-design.md project-manager.md workflow-project-manager.md workflow-designer.md | sort)" ] \
+    && ok "source facets are exactly the four managed definitions" \
+    || { no "source facets are exactly the four managed definitions"; printf '%s\n' "$found" | sed 's/^/       /'; }
   [ "$(fm_json "$DESIGNER" '.name')" = '"workflow-designer"' ] \
     && ok "designer: frontmatter name matches file stem" || no "designer: frontmatter name matches file stem"
-  [ "$(fm_json "$DELIVERY" '.name')" = '"workflow-delivery"' ] \
-    && ok "delivery: frontmatter name matches file stem" || no "delivery: frontmatter name matches file stem"
+  [ "$(fm_json "$DELIVERY" '.name')" = '"workflow-project-manager"' ] \
+    && ok "workflow-project-manager: frontmatter name matches file stem" || no "workflow-project-manager: frontmatter name matches file stem"
+  [ -f "$PRODUCT_DESIGN" ] && ok "product-design source file present" || no "product-design source file present"
+  [ -f "$PROJECT_MANAGER" ] && ok "project-manager source file present" || no "project-manager source file present"
+  [ "$(fm_json "$PRODUCT_DESIGN" '.name')" = '"product-design"' ] \
+    && ok "product-design: frontmatter name matches file stem" || no "product-design: frontmatter name matches file stem"
+  [ "$(fm_json "$PROJECT_MANAGER" '.name')" = '"project-manager"' ] \
+    && ok "project-manager: frontmatter name matches file stem" || no "project-manager: frontmatter name matches file stem"
   local head
   for f in "$DESIGNER" "$DELIVERY"; do
     head="$(awk '/^---$/{c++; next} c==2{print; exit}' "$f")"
@@ -428,7 +435,7 @@ run_approval_contract() {
   sc "designer plan review and delivery provenance (manual content review)"
   echo "  manual: independently review designer plan-review scope and delivery provenance wording"
 
-  sc "approved handoff to workflow-delivery (runtime controller)"
+  sc "approved handoff to workflow-project-manager (runtime controller)"
   if ! require_daemon "approval handoff (runtime)"; then return; fi
   local out="$DAEMON_WORK/handoff.json" code
   local base; base="$(daemon_state | jq -r .active_facet 2>/dev/null)"
@@ -440,12 +447,12 @@ run_approval_contract() {
   code="$(dapi POST /facet '{"facet":"no-such-facet"}' "$out")"
   [ "$code" = 422 ] && ok "runtime: unknown facet rejected (422)" \
     || no "runtime: unknown facet rejected (got HTTP $code)"
-  code="$(dapi POST /facet '{"facet":"workflow-delivery"}' "$out")"
-  [ "$code" = 200 ] && ok "runtime: operator-approved handoff designer -> workflow-delivery succeeds (POST /facet 200)" \
-    || no "runtime: handoff designer -> workflow-delivery (HTTP $code: $(cat "$out" | head -c 200))"
-  [ "$(daemon_state | jq -r .active_facet)" = "workflow-delivery" ] \
-    && ok "runtime: active facet is workflow-delivery after handoff" \
-    || no "runtime: active facet is workflow-delivery after handoff"
+  code="$(dapi POST /facet '{"facet":"workflow-project-manager"}' "$out")"
+  [ "$code" = 200 ] && ok "runtime: operator-approved handoff designer -> workflow-project-manager succeeds (POST /facet 200)" \
+    || no "runtime: handoff designer -> workflow-project-manager (HTTP $code: $(cat "$out" | head -c 200))"
+  [ "$(daemon_state | jq -r .active_facet)" = "workflow-project-manager" ] \
+    && ok "runtime: active facet is workflow-project-manager after handoff" \
+    || no "runtime: active facet is workflow-project-manager after handoff"
 
   sc "conditional return to designer gates on confirmation (runtime)"
   local logfile known newid i
@@ -500,7 +507,7 @@ run_approval_contract() {
   # this daemon alone, so locate it directly.
   logfile="$(find "$DAEMON_WORK/sessions" -name 'log.jsonl' -type f 2>/dev/null | head -1)"
   [ -n "$logfile" ] && \
-    grep -q '"from_facet":"workflow-delivery","to_facet":"workflow-designer"' "$logfile" \
+    grep -q '"from_facet":"workflow-project-manager","to_facet":"workflow-designer"' "$logfile" \
     && ok "runtime: session log records the delivery -> designer facet_switch" \
     || no "runtime: session log records the delivery -> designer facet_switch"
   stop_daemon
@@ -509,8 +516,8 @@ run_approval_contract() {
 # =====================================================================
 run_delivery_policy() {
   sc "delivery frontmatter contract"
-  expect_fm "delivery: model pin" "$DELIVERY" '.polytoken.model' '"codex/gpt-5.6-luna"'
-  expect_list "delivery: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "zai/glm-5.3-flash"
+  expect_fm "workflow-project-manager: model pin" "$DELIVERY" '.polytoken.model' '"zai/glm-5.3-flash(high)"'
+  expect_list "workflow-project-manager: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "codex/gpt-5.6-luna-1m(medium)"
   expect_list "delivery: tools" "$DELIVERY" '.polytoken.tools' \
     "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,shell_monitor,shell_service,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,todo_create,todo_update,todo_complete,todo_delete,todo_list,pushd,popd,switch_facet,read_goal,complete_goal,block_goal,mcp__ratatoskr"
   expect_list "delivery: tools_deny" "$DELIVERY" '.polytoken.tools_deny' \
@@ -523,7 +530,7 @@ run_delivery_policy() {
   expect_fm "delivery: autonomous_hint" "$DELIVERY" '.polytoken.autonomous_hint' \
     '"Allow approved bounded implementation and verification; require confirmation for scope expansion, remote writes, destructive operations, or unverified authority."'
   expect_fm "delivery: compaction_hint" "$DELIVERY" '.polytoken.compaction_hint' \
-    '"Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, and completion state."'
+    '"Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, completion state, and pending-friction items not yet synced to Project"'
   [ "$(fm_json "$DELIVERY" '.polytoken.facet_transitions.workflow-designer.allowed')" = "true" ] \
     && ok "delivery: facet_transitions.workflow-designer.allowed is true" \
     || no "delivery: facet_transitions.workflow-designer.allowed is true"
@@ -542,10 +549,10 @@ run_delivery_policy() {
   sc "delivery_effective_tools are mutation surface + plan tools denied (runtime)"
   if ! require_daemon "delivery policy (runtime)"; then return; fi
   local out="$DAEMON_WORK/delivery-effective.json"
-  if effective_plan workflow-delivery "$out"; then
-    ok "runtime: /tools/effective resolved workflow-delivery"
-    [ "$(jq -r '.model' "$out")" = "codex/gpt-5.6-luna" ] \
-      && ok "runtime: delivery model pin resolves" || no "runtime: delivery model pin resolves (got $(jq -r '.model' "$out"))"
+  if effective_plan workflow-project-manager "$out"; then
+    ok "runtime: /tools/effective resolved workflow-project-manager"
+    [ "$(jq -r '.model' "$out")" = "zai/glm-5.3-flash" ] \
+      && ok "runtime: workflow-project-manager model pin resolves" || no "runtime: workflow-project-manager model pin resolves (got $(jq -r '.model' "$out"))"
     local names n missing=""
     names="$(plan_names "$out")"
     local required="file_edit_search_replace file_write job_cancel lsp pushd popd shell_exec shell_monitor shell_service switch_facet todo_complete todo_create todo_delete todo_list todo_update"
@@ -565,7 +572,7 @@ run_delivery_policy() {
     [ -z "$bad_mcp" ] && ok "runtime: effective MCP tools stay in ratatoskr namespace" \
       || no "runtime: non-ratatoskr MCP tools present in effective plan ($bad_mcp)"
   else
-    no "runtime: /tools/effective resolved workflow-delivery"
+    no "runtime: /tools/effective resolved workflow-project-manager"
   fi
   stop_daemon
 }
@@ -595,7 +602,7 @@ run_ratatoskr() {
   # a 60s timeout is a real failure, not a static substitution.
   local waited=0
   while [ "$waited" -lt 60 ]; do
-    effective_plan workflow-delivery "$DAEMON_WORK/mcp-wait.json" || true
+    effective_plan workflow-project-manager "$DAEMON_WORK/mcp-wait.json" || true
     [ -n "$(jq -r '.plan.full_schema[].name' "$DAEMON_WORK/mcp-wait.json" 2>/dev/null \
         | grep '^mcp__ratatoskr__' | head -1)" ] && break
     sleep 1
@@ -606,7 +613,7 @@ run_ratatoskr() {
     stop_daemon
     return
   fi
-  for facet in workflow-designer workflow-delivery; do
+  for facet in workflow-designer workflow-project-manager; do
     out="$DAEMON_WORK/$facet-effective.json"
     if effective_plan "$facet" "$out"; then
       bad_mcp="$(jq -r '.plan.full_schema[].name' "$out" | grep '^mcp__' | grep -v '^mcp__ratatoskr__' || true)"
