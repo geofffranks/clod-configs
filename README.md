@@ -119,7 +119,7 @@ with Polytoken-native equivalents.
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
 | `hooks.json` | `polytoken/hooks.json` | Nine native hooks, including the metadata-only `large-read-guard`. Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
-| `facets/` | `polytoken/facets/` | The `workflow-designer` and `workflow-delivery` workflow facets described below. |
+| `facets/` | `polytoken/facets/` | The `workflow-designer`, `workflow-project-manager`, `product-design`, and `project-manager` workflow facets described below. |
 | `subagents/` | `polytoken/subagents/` | Managed built-in and workflow-specialist roles, including `agent-workflow-architect` and `agent-workflow-engineer`. |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
 | `compat/` | `home/{bash-guard,branch-guard,git-safe,grep-guard,large-read-guard,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
@@ -139,12 +139,12 @@ coherence and scope, authority, approval, delegation, MCP routing, host
 boundaries, usability, operational risks, and compliance with the requested
 design. Blocking findings are fixed or rebutted and the revised plan receives a
 fresh architect rereview before the designer presents it to the operator and
-waits for approval. After approval it hands the plan to `workflow-delivery`; it
-cannot switch facets itself. Directly invoking `workflow-delivery` is also
+waits for approval. After approval it hands the plan to `workflow-project-manager`; it
+cannot switch facets itself. Directly invoking `workflow-project-manager` is also
 supported and authorizes the requested execution, but it does not prove that a
 plan was reviewed or approved. Delivery reports that provenance honestly.
 
-`workflow-delivery` implements the approved scope, normally through the
+`workflow-project-manager` implements the approved scope, normally through the
 write-capable `agent-workflow-engineer`, with these gates:
 
 - material changes to scope, permissions, approval, delegation, or MCP routing
@@ -167,6 +167,10 @@ write-capable `agent-workflow-engineer`, with these gates:
 
 Reviewers are routed to one bounded question and named evidence. They identify
 risks and missing evidence rather than prescribing unit tests by default.
+
+The second workflow pair is `product-design`, which plans the product approval
+lifecycle and hands off via an approved plan to `project-manager`, which
+ delivers it. These four are the global facets claude-config ships.
 
 Both facets pin `codex/gpt-5.6-luna` with `zai/glm-5.3-flash` fallback. Their MCP
 surface is limited to the Ratatoskr gateway: discover available servers, inspect
