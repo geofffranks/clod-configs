@@ -193,4 +193,17 @@ else
   echo "SKIP: actual Polytoken installer requires mikefarah/yq v4" >&2
   no "actual Polytoken installer (yq v4 unavailable)"
 fi
+# ask_user_question: the question itself is a wait-for-user that fires no
+# stop, so pre_tool_use schedules a push carrying the question and the
+# answer (post_tool_use, same tool) cancels it like a prompt does.
+: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run polytoken '{"event":"pre_tool_use","tool_name":"ask_user_question","session_id":"askq","input":{"questions":[{"question":"which approach do you want?"}]}}'
+wait_until wait_text 'which approach do you want' && grep -q 'Needs Input' "$LOG" && ok "ask_user_question schedules a push with the question" || no "ask_user_question schedules a push with the question"
+: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=2 run polytoken '{"event":"pre_tool_use","tool_name":"ask_user_question","session_id":"answait","input":{"questions":[{"question":"pick one"}]}}'
+K="$(key polytoken answait)"; wait_until test -s "$TMP/state/$K.gen" && ok "ask_user_question schedules pending state" || no "ask_user_question schedules pending state"
+POLYTOKEN_HOOK_MATCHER_SUBJECT=ask_user_question run polytoken '{"event":"post_tool_use","tool_name":"ask_user_question","session_id":"answait"}'
+[ ! -e "$TMP/state/$K.gen" ] && ok "the answer cancels a pending question push" || no "the answer cancels a pending question push"
+: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.5 run polytoken '{"event":"stop","session_id":"no-cancel"}'
+K="$(key polytoken no-cancel)"; wait_until test -s "$TMP/state/$K.gen"
+POLYTOKEN_HOOK_MATCHER_SUBJECT=shell_exec run polytoken '{"event":"post_tool_use","tool_name":"shell_exec","session_id":"no-cancel"}'
+wait_until wait_text no-cancel && ok "post_tool_use for other tools never cancels" || no "post_tool_use for other tools never cancels"
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"

@@ -93,5 +93,21 @@
       "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/agent-notify.sh\" polytoken"
     },
     "name": "agent-notify-stop"
+  },
+  {
+    "event": "pre_tool_use",
+    "matcher": "ask_user_question",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/agent-notify.sh\" polytoken"
+    },
+    "name": "agent-notify-ask"
+  },
+  {
+    "event": "post_tool_use",
+    "matcher": "ask_user_question",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/agent-notify.sh\" polytoken"
+    },
+    "name": "agent-notify-answer"
   }
 ]

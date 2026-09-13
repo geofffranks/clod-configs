@@ -37,7 +37,7 @@ SESSION_RAW="${POLYTOKEN_SESSION_ID:-$(jq -r '.session_id // .sessionId // empty
 [ -n "$SESSION_RAW" ] || exit 0
 case "$EVENT" in
   UserPromptSubmit|pre_user_prompt) ;;
-  Stop|Notification|stop|notification|post_model_turn|post_tool_use) ;;
+  Stop|Notification|stop|notification|post_model_turn|post_tool_use|pre_tool_use) ;;
   SubagentStop|subagent_stop) exit 0 ;;
   *) exit 0 ;;
 esac
@@ -113,9 +113,12 @@ unlock() {
 }
 
 # A user prompt means the human is back; a polytoken ambient notification
-# means the session resumed on its own. Both invalidate a pending send.
+# means the session resumed on its own; the answer to an ask_user_question
+# (post_tool_use for that tool) means the blocking question was answered.
+# All three invalidate a pending send.
 if [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = pre_user_prompt ] ||
-   { [ "$HARNESS" = polytoken ] && [ "$EVENT" = notification ]; }; then
+   { [ "$HARNESS" = polytoken ] && [ "$EVENT" = notification ]; } ||
+   { [ "$EVENT" = post_tool_use ] && [ "${POLYTOKEN_HOOK_MATCHER_SUBJECT:-}" = ask_user_question ]; }; then
   lock || exit 0
   rm -f "$STATE.gen" "$STATE.cancel"
   printf '%s\n' "$(date +%s%N 2>/dev/null || date +%s)" > "$STATE.cancel.tmp" && mv -f "$STATE.cancel.tmp" "$STATE.cancel"
@@ -157,6 +160,10 @@ case "$EVENT" in
     if [ "$HARNESS" = claude ]; then
       RESP="$(sanitize "$(jq -r '.message // empty' <<<"$INPUT" 2>/dev/null || true)" 160)"
     fi
+    ;;
+  pre_tool_use)
+    # The pending question is the thing the human is being asked for.
+    RESP="$(sanitize "$(jq -r '.input.questions[0].question // empty' <<<"$INPUT" 2>/dev/null || true)" 160)"
     ;;
 esac
 if [ -z "$RESP" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
