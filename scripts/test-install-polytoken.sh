@@ -77,7 +77,7 @@ actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf
 expected_facets="$(printf '%s\n' product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
-  && ok "installed exactly the 2 shipped facets" || no "installed exactly the 2 shipped facets"
+  && ok "installed exactly the 4 shipped facets" || no "installed exactly the 4 shipped facets"
 for facet in product-design project-manager workflow-designer workflow-project-manager; do
   cmp -s "$REPO/polytoken/facets/$facet.md" "$D/facets/$facet.md" 2>/dev/null \
     && ok "installed facet matches source: $facet" || no "installed facet matches source: $facet"
@@ -303,7 +303,9 @@ run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ajq "$D/hooks.json" '[.[]|select(.name=="superpowers-session-start" and .event=="session_start")]|length == 1' "session_start hook preserved through merge"
 ajq "$D/hooks.json" '[.[]|select(.name=="herdle-gatekeeper")]|length == 1' "pre_tool_use hook preserved through merge"
 # P15: two existing plus the full recommended set from source
-ajq "$D/hooks.json" "length >= $REC_HOOKS" "existing hooks merge with recommended inventory"
+fixture_extra="$(jq --argjson recommended "$(jq '[.[].name]' "$RECOMMENDED_HOOKS")" '[.[].name | select(. as $name | ($recommended | index($name)) == null)] | length' "$D/hooks.json")"
+expected_hooks=$((REC_HOOKS + fixture_extra))
+ajq "$D/hooks.json" "length == $expected_hooks" "existing hooks merge with recommended inventory"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names"
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
@@ -499,16 +501,19 @@ run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ -f "$D/facets/workflow-project-manager.md" ] \
   && ok "upgrade installs workflow-project-manager facet" || no "upgrade installs workflow-project-manager facet"
 retire_backup="$(mktemp -d)/workflow-delivery.md.retired"
+retire_before="$(mktemp)"
+cp "$D/facets/workflow-delivery.md" "$retire_before"
 cp "$D/facets/workflow-delivery.md" "$retire_backup"
 rm "$D/facets/workflow-delivery.md"
-[ -f "$retire_backup" ] && ok "retirement backs up stale facet outside discovery directory" || no "retirement backs up stale facet outside discovery directory"
+cmp -s "$retire_before" "$retire_backup" \
+  && ok "retirement backup preserves stale facet bytes" || no "retirement backup preserves stale facet bytes"
 [ ! -e "$D/facets/workflow-delivery.md" ] && ok "retirement deletes exact stale facet" || no "retirement deletes exact stale facet"
 [ "$(find "$D/facets" -maxdepth 1 -type f \( -name 'workflow-project-manager.md' -o -name 'workflow-delivery.md' \) -printf '%f\n' | sort)" = "workflow-project-manager.md" ] \
   && ok "retirement leaves only workflow-project-manager among delivery pair" || no "retirement leaves only workflow-project-manager among delivery pair"
-rm -rf "$D" "$(dirname "$retire_backup")"
+rm -rf "$D" "$(dirname "$retire_backup")" "$retire_before"
 
 # --- P26: second-run definition idempotence -> no new backup, unchanged lines ---
-sc "P25 definition idempotence -> second run no new backup, unchanged"
+sc "P26 definition idempotence -> second run no new backup, unchanged"
 D="$(valid_base)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 n1="$(find "$D/subagents" "$D/facets" -name '*.bak-*' | wc -l | tr -d ' ')"

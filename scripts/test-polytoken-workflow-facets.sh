@@ -385,21 +385,21 @@ run_validate_definitions() {
 # =====================================================================
 run_designer_authority() {
   sc "designer frontmatter contract"
-  expect_fm "designer: model pin" "$DESIGNER" '.polytoken.model' '"codex/gpt-5.6-luna"'
-  expect_list "designer: fallback_models" "$DESIGNER" '.polytoken.fallback_models' "zai/glm-5.3-flash"
+  expect_fm "designer: model pin" "$DESIGNER" '.polytoken.model' '"zai/glm-5.3-flash(high)"'
+  expect_list "designer: fallback_models" "$DESIGNER" '.polytoken.fallback_models' "codex/gpt-5.6-luna-1m(medium)"
   expect_list "designer: tools" "$DESIGNER" '.polytoken.tools' \
-    "file_read,glob,grep,web_search,web_fetch,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,write_plan,edit_plan,handoff_plan,read_goal,block_goal,mcp__ratatoskr"
+    "file_read,glob,grep,shell_exec,web_search,web_fetch,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,write_plan,edit_plan,handoff_plan,read_goal,block_goal,mcp__ratatoskr"
   expect_list "designer: tools_deny" "$DESIGNER" '.polytoken.tools_deny' \
-    "file_write,file_edit_search_replace,shell_exec,shell_monitor,shell_service,lsp,switch_facet,complete_goal"
+    "file_write,file_edit_search_replace,shell_monitor,shell_service,lsp,switch_facet,complete_goal"
   expect_list "designer: undeferred_tools" "$DESIGNER" '.polytoken.undeferred_tools' \
-    "file_read,glob,grep,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,write_plan,edit_plan,handoff_plan"
+    "file_read,glob,grep,shell_exec,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,write_plan,edit_plan,handoff_plan"
   expect_list "designer: skills_allow" "$DESIGNER" '.polytoken.skills_allow' \
-    "tag!research,brainstorming,agent-orchestration,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
+    "tag!research,brainstorming,github-project-backlog,agent-orchestration,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
   expect_fm "designer: skills_deny empty" "$DESIGNER" '.polytoken.skills_deny' '[]'
   expect_fm "designer: autonomous_hint" "$DESIGNER" '.polytoken.autonomous_hint' \
-    '"Allow read-only investigation, read-only specialist consultation, plan editing, and approval handoff; deny direct or delegated project mutation during design."'
+    '"Allow read-only investigation, read-only specialist consultation, plan editing, approval handoff, and `gh project` planning bookkeeping via the `github-project-backlog` skill (including `[process-friction]` capture under its standing authorization); deny all other direct or delegated project mutation during design."'
   expect_fm "designer: compaction_hint" "$DESIGNER" '.polytoken.compaction_hint' \
-    '"Preserve goals, constraints, evidence, alternatives, specialist job IDs/results, review dispositions, plan revision, and approval state."'
+    '"Preserve goals, constraints, evidence, alternatives, specialist job IDs/results, review dispositions, plan revision, approval state, and pending-friction items not yet synced to Project #1 (with friction-keys)."'
   [ "$(fm_json "$DESIGNER" '.polytoken.facet_transitions')" = "null" ] \
     && ok "designer: no facet_transitions block" || no "designer: no facet_transitions block"
 
@@ -408,7 +408,7 @@ run_designer_authority() {
     local out="$DAEMON_WORK/designer-effective.json"
     if effective_plan workflow-designer "$out"; then
       ok "runtime: /tools/effective resolved workflow-designer"
-      [ "$(jq -r '.model' "$out")" = "codex/gpt-5.6-luna" ] \
+      [ "$(jq -r '.model' "$out")" = "zai/glm-5.3-flash" ] \
         && ok "runtime: designer model pin resolves" || no "runtime: designer model pin resolves (got $(jq -r .model "$out"))"
       local names n missing=""
       names="$(plan_names "$out")"
@@ -417,7 +417,7 @@ run_designer_authority() {
         grep -qx "$n" <<<"$names" || missing="$missing $n"
       done
       [ -z "$missing" ] && ok "runtime: required designer tools all exposed" || no "runtime: required designer tools present (missing:$missing)"
-      local forbidding="file_write file_edit_search_replace shell_exec shell_monitor shell_service lsp switch_facet complete_goal" absent=""
+      local forbidding="file_write file_edit_search_replace shell_monitor shell_service lsp switch_facet complete_goal" absent=""
       for n in $forbidding; do
         grep -qx "$n" <<<"$names" && absent="$absent $n"
       done
@@ -525,12 +525,12 @@ run_delivery_policy() {
   expect_list "delivery: undeferred_tools" "$DELIVERY" '.polytoken.undeferred_tools' \
     "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,todo_create,todo_update,todo_complete,todo_list,read_goal,complete_goal,block_goal"
   expect_list "delivery: skills_allow" "$DELIVERY" '.polytoken.skills_allow' \
-    "tag!research,brainstorming,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
+    "tag!research,brainstorming,github-project-backlog,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
   expect_fm "delivery: skills_deny empty" "$DELIVERY" '.polytoken.skills_deny' '[]'
   expect_fm "delivery: autonomous_hint" "$DELIVERY" '.polytoken.autonomous_hint' \
-    '"Allow approved bounded implementation and verification; require confirmation for scope expansion, remote writes, destructive operations, or unverified authority."'
+    '"Allow approved bounded implementation and verification; `gh project` planning bookkeeping writes via the `github-project-backlog` skill (friction sync) proceed under its standing authorization; require confirmation for scope expansion, any other remote writes, destructive operations, or unverified authority."'
   expect_fm "delivery: compaction_hint" "$DELIVERY" '.polytoken.compaction_hint' \
-    '"Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, completion state, and pending-friction items not yet synced to Project"'
+    '"Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, completion state, and pending-friction items not yet synced to Project #1 (with friction-keys)."'
   [ "$(fm_json "$DELIVERY" '.polytoken.facet_transitions.workflow-designer.allowed')" = "true" ] \
     && ok "delivery: facet_transitions.workflow-designer.allowed is true" \
     || no "delivery: facet_transitions.workflow-designer.allowed is true"
