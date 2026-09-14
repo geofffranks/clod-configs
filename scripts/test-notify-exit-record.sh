@@ -43,4 +43,22 @@ PATH="$W:$PATH" bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>
 [ "$st" = 137 ] && ok 'wrapper forwards SIGKILL as 137' || no 'wrapper forwards SIGKILL as 137'
 printf '%s' "$(tail -1 "$POLY_NOTIFY_EXIT_DIR/notify-exit.log")" | jq -e '.exit_status==137 and .signal=="KILL"' >/dev/null 2>&1 && ok 'SIGKILL record' || no 'SIGKILL record'
 
+# Diagnostic kill-timer (env-gated): wrapper self-SIGKILLs its child after N
+# seconds, so evidence collection never has to find processes by name.
+printf '#!/usr/bin/env bash\nsleep 5\n' > "$W/polytoken"; chmod +x "$W/polytoken"
+PATH="$W:$PATH" POLY_NOTIFY_KILL_AFTER=1 bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>&1; st=$?
+[ "$st" = 137 ] && ok 'kill-timer forwards 137' || no 'kill-timer forwards 137'
+printf '%s' "$(tail -1 "$POLY_NOTIFY_EXIT_DIR/notify-exit.log")" | jq -e '.exit_status==137 and .signal=="KILL"' >/dev/null 2>&1 && ok 'kill-timer record' || no 'kill-timer record'
+
+# Container launcher: POLY_CONTAINER_NAME must reach the main `podman run` so
+# evidence tooling can scope a kill to the exact container this run started.
+RSHOME="$T/rshome"; mkdir -p "$RSHOME/workspace" "$RSHOME/.config/polytoken" "$RSHOME/bin"
+RBIN="$T/rsbin"; mkdir -p "$RBIN"
+printf '#!/usr/bin/env bash\nprintf '"'"'%%s\n'"'"' "$*" >> "$PODMAN_LOG"\nexit 0\n' > "$RBIN/podman"; chmod +x "$RBIN/podman"
+PODMAN_LOG="$T/podman.log"; : > "$PODMAN_LOG"
+( cd "$RSHOME/workspace" && PATH="$RBIN:$PATH" HOME="$RSHOME" PODMAN_LOG="$PODMAN_LOG" POLY_ENV_FILE="$T/none.env" POLY_CONTAINER_NAME="pt-test-c3" bash "$R/polytoken-container/run.sh" new ) >/dev/null 2>&1; rst=$?
+[ "$rst" = 0 ] && ok 'run.sh completes under stub podman' || no 'run.sh completes under stub podman'
+[ -f "$RSHOME/.local/share/polytoken-dev/notify-exit/notify-exit.log" ] && ok 'run.sh writes exit record' || no 'run.sh writes exit record'
+tail -1 "$PODMAN_LOG" | grep -q -- '--name pt-test-c3' && ok 'POLY_CONTAINER_NAME reaches podman run' || no 'POLY_CONTAINER_NAME reaches podman run'
+
 [ "$P" -gt 0 ] && [ "$F" -eq 0 ] && echo "PASS: $P" || echo "FAILURES: $F/$((P+F))"; exit "$F"

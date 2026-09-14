@@ -13,8 +13,19 @@ unset _LIB
 command -v polytoken >/dev/null 2>&1 || { echo "polytoken-notify-wrapper: polytoken not on PATH" >&2; exit 127; }
 
 started="$(date +%s)"
-polytoken "$@"
-status=$?
+if [ -n "${POLY_NOTIFY_KILL_AFTER:-}" ]; then
+  # Diagnostics-only kill timer (Task 4 evidence scenarios): SIGKILL this
+  # launch's own child after N seconds, so collection never has to find
+  # processes by name. Unset keeps normal foreground behavior.
+  polytoken "$@" &
+  child=$!
+  sleep "$POLY_NOTIFY_KILL_AFTER" 2>/dev/null || true
+  kill -9 "$child" 2>/dev/null || true
+  wait "$child"; status=$?
+else
+  polytoken "$@"
+  status=$?
+fi
 ended="$(date +%s)"
 
 # Launch-scoped session identity: the newest session directory created or

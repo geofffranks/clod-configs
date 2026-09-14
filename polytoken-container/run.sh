@@ -220,7 +220,12 @@ fi
 set -u
 
 # shellcheck disable=SC2086  (ENV_FLAGS intentionally word-split)
+# Optional exact container name (evidence tooling scopes kills to the
+# container this launch created; never any other running container).
+NAME_FLAGS=()
+[[ -n "${POLY_CONTAINER_NAME:-}" ]] && NAME_FLAGS=(--name "$POLY_CONTAINER_NAME")
 podman run --rm -it --init \
+  ${NAME_FLAGS[@]+"${NAME_FLAGS[@]}"} \
   -e TERM="${TERM:-xterm-256color}" \
   -e COLORTERM=truecolor \
   $ENV_FLAGS \
