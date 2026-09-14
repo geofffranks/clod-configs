@@ -46,12 +46,26 @@ printf '#!/usr/bin/env bash\nr=0; for a in "$@"; do [ "$a" = "-r" ] && r=1; done
 PATH="$BSDSTUB:$PATH" POLY_NOTIFY_EXIT_DIR="$T/fidelity2" notify_exit_emit "l" "clean" 1 1704067200 1704067300 "" "" "" && ok 'emit with rendering date' || no 'emit with rendering date'
 [ "${NOTIFY_EXIT_TS_FIDELITY:-}" = "" ] && ok 'clean fidelity variable empty' || no 'clean fidelity variable empty'
 printf '%s' "$(tail -1 "$T/fidelity2/notify-exit.log")" | jq -e '(has("ts_fidelity") | not) and (.started_at=="2024-01-01T00:00:00Z") and (.ended_at=="2024-01-01T00:01:40Z")' >/dev/null 2>&1 && ok 'healthy record has no ts_fidelity and true epochs' || no 'healthy record has no ts_fidelity and true epochs'
-# Newest-session window resolution.
-S="$T/sessions"; mkdir -p "$S/older" "$S/newer"; touch -t 202401010000 "$S/older"; now_e=$(date +%s); touch -d "@$now_e" "$S/newer" 2>/dev/null || touch "$S/newer"
+# Newest-session correlation (F1, plan r3.7/r3.8): a session directory CREATED
+# (birthtime) inside [start, end + 5] wins; mtime is never consulted (the
+# mis-attribution class). Birthtime unavailable or unreliable (non-GNU stat
+# failure, Linux %W = 0) is ambiguity -> empty, never an mtime fallback.
+# Supersedes the previous newest-mtime-in-window tests.
+S="$T/sessions"; mkdir -p "$S/oldborn"; sleep 1; mkdir -p "$S/youngborn"; touch "$S/oldborn"
+young_birth="$(stat -c %W "$S/youngborn" 2>/dev/null || stat -f %B "$S/youngborn" 2>/dev/null || echo 0)"
+oldborn_birth="$(stat -c %W "$S/oldborn" 2>/dev/null || stat -f %B "$S/oldborn" 2>/dev/null || echo 0)"
+[ "$young_birth" -gt 0 ] 2>/dev/null && [ "$oldborn_birth" -gt 0 ] 2>/dev/null && ok 'fixture has birthtime' || { echo "fixture birthtimes=$young_birth/$oldborn_birth"; no 'fixture has birthtime'; }
 eq(){ [ "$1" = "$2" ] && ok "$3" || { echo "got=$1 want=$2"; no "$3"; }; }
-eq "$(notify_exit_newest_session "$S" $((now_e-10)) $((now_e)))" "$S/newer" 'newest session in window'
-eq "$(notify_exit_newest_session "$S" 1 2)" "" 'no session outside window'
+eq "$(notify_exit_newest_session "$S" "$young_birth" "$young_birth")" "$S/youngborn" 'birthtime-in-window beats old-born dir touched in window'
+eq "$(notify_exit_newest_session "$S" $((young_birth + 1)) $((young_birth + 100)))" "" 'born before window start excluded'
+eq "$(notify_exit_newest_session "$S" $((oldborn_birth - 100)) $((oldborn_birth - 6)))" "" 'born after end+5 excluded'
+eq "$(notify_exit_newest_session "$S" $((oldborn_birth - 100)) $((oldborn_birth - 5)))" "$S/oldborn" 'end+5 boundary inclusive'
+eq "$(notify_exit_newest_session "$S" "$young_birth" $((young_birth + 4)))" "$S/youngborn" 'start boundary inclusive'
 eq "$(notify_exit_newest_session "$T/nonexistent" 1 2)" "" 'missing root tolerated'
+NOSTAT="$T/nostat"; mkdir -p "$NOSTAT"; printf '#!/usr/bin/env bash\nexit 1\n' > "$NOSTAT/stat"; chmod +x "$NOSTAT/stat"
+eq "$(PATH="$NOSTAT:$PATH" notify_exit_newest_session "$S" "$young_birth" "$((young_birth + 5))")" "" 'stat failure is ambiguity, no mtime fallback'
+ZEROSTAT="$T/zerostat"; mkdir -p "$ZEROSTAT"; printf '#!/usr/bin/env bash\ncase " $* " in *" -c %%W "*) echo 0 ;; *) exit 1 ;; esac\n' > "$ZEROSTAT/stat"; chmod +x "$ZEROSTAT/stat"
+eq "$(PATH="$ZEROSTAT:$PATH" notify_exit_newest_session "$S" "$young_birth" "$((young_birth + 5))")" "" '%W=0 is ambiguity, no mtime fallback'
 
 # Wrapper integration: stub polytoken with controlled exit; wrapper forwards and records.
 # Restore the default log cap: the rotation test's small POLY_NOTIFY_EXIT_LOG_MAX_BYTES

@@ -55,15 +55,23 @@ notify_exit_emit(){
   return 0
 }
 
-# Newest session directory whose mtime falls inside [start_epoch, end_epoch].
-# Best effort: empty output means "no correlated session this window".
+# Launch-scoped session correlation (F1, plan r3.7/r3.8, binds both producers).
+# Prefers the session directory CREATED (birthtime) within the launch window
+# [start, end + 5]; newest birthtime wins when several qualify. Where the
+# birthtime is unavailable or unreliable (Linux `stat -c %W` = 0, non-GNU
+# stat failure), the directory is not attributable and is skipped — if none
+# qualify the result is empty, which consumers treat as diagnostic-skip. An
+# mtime fallback is PROHIBITED: mtime correlates touches, not launches, and
+# silently recreates the cross-session mis-attribution (F1 evidence).
 notify_exit_newest_session(){
-  local root="$1" start="$2" end="$3" d newest="" newest_m=0 m
+  local root="$1" start="$2" end="$3" d newest="" newest_b=0 b
   [ -d "$root" ] || return 0
   for d in "$root"/*/; do
     [ -d "$d" ] || continue
-    m=$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null || echo 0)
-    [ "$m" -ge "$start" ] && [ "$m" -le "$((end + 5))" ] && [ "$m" -gt "$newest_m" ] && { newest_m=$m; newest="$d"; }
+    b=$(stat -c %W "$d" 2>/dev/null) || b=$(stat -f %B "$d" 2>/dev/null) || b=0
+    case "$b" in ''|*[!0-9]*) b=0 ;; esac
+    [ "$b" -gt 0 ] || continue
+    [ "$b" -ge "$start" ] && [ "$b" -le "$((end + 5))" ] && [ "$b" -gt "$newest_b" ] && { newest_b=$b; newest="$d"; }
   done
   [ -n "$newest" ] && printf '%s\n' "${newest%/}"
   return 0
