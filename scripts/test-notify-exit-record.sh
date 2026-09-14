@@ -25,6 +25,27 @@ POLY_NOTIFY_EXIT_LOG_MAX_BYTES=256 notify_exit_emit "l" "rot" 1 1704067200 17040
 export POLY_NOTIFY_EXIT_LOG_MAX_BYTES=256
 for i in 1 2 3 4 5; do notify_exit_emit "l" "rot-fill-$i-with-padding-padding-padding" 1 1704067200 1704067201 "" "" ""; done
 [ "$(wc -c < "$POLY_NOTIFY_EXIT_DIR/notify-exit.log")" -le 256 ] && ok 'rotation caps size' || no 'rotation caps size'
+# Timestamp fidelity (r3.8 B2): when the host date cannot render `-r <epoch>`
+# (GNU date semantics), the record must carry the additive field
+# ts_fidelity:"degraded" instead of silently substituting emission time;
+# healthy hosts carry no marker. The side-effect variable drives the shipper.
+STUBD="$T/stubdate"; mkdir -p "$STUBD"; REAL_DATE="$(command -v date)"
+printf '#!/usr/bin/env bash\n[ "$1" = "-r" ] && exit 1\nexec %q "$@"\n' "$REAL_DATE" > "$STUBD/date"; chmod +x "$STUBD/date"
+PATH="$STUBD:$PATH" POLY_NOTIFY_EXIT_DIR="$T/fidelity" notify_exit_emit "l" "fid" 1 1704067200 1704067300 "" "" "" && ok 'emit under degraded date' || no 'emit under degraded date'
+dline="$(tail -1 "$T/fidelity/notify-exit.log")"
+printf '%s' "$dline" | jq -e '.ts_fidelity=="degraded"' >/dev/null 2>&1 && ok 'degraded date marks ts_fidelity' || no 'degraded date marks ts_fidelity'
+printf '%s' "$dline" | jq -e . >/dev/null 2>&1 && ok 'degraded record valid JSON' || no 'degraded record valid JSON'
+printf '%s' "$dline" | jq -e '(.ended_at | fromdateiso8601) >= 0 and (.started_at | fromdateiso8601) >= 0' >/dev/null 2>&1 && ok 'degraded timestamps still RFC3339' || no 'degraded timestamps still RFC3339'
+[ "${NOTIFY_EXIT_TS_FIDELITY:-}" = "degraded" ] && ok 'degraded fidelity variable set' || no 'degraded fidelity variable set'
+# Clean path: a date that really renders `-r <epoch>` (BSD semantics) must
+# produce a record with NO marker. Host-portable via a uname-switched stub:
+# GNU date cannot render `-r <epoch>` at all, and on such hosts "degraded"
+# is the contract-correct outcome for the real date.
+BSDSTUB="$T/bsddate"; mkdir -p "$BSDSTUB"
+printf '#!/usr/bin/env bash\nr=0; for a in "$@"; do [ "$a" = "-r" ] && r=1; done; [ "$r" = 1 ] || { exec %q "$@"; }\nwhile [ "$1" != "-r" ]; do shift; done; shift; ep="$1"; shift\ncase "$(uname -s)" in Darwin) exec %q -u -j -f %%s "$ep" "$@" ;; *) exec %q -u -d "@$ep" "$@" ;; esac\n' "$REAL_DATE" "$REAL_DATE" "$REAL_DATE" > "$BSDSTUB/date"; chmod +x "$BSDSTUB/date"
+PATH="$BSDSTUB:$PATH" POLY_NOTIFY_EXIT_DIR="$T/fidelity2" notify_exit_emit "l" "clean" 1 1704067200 1704067300 "" "" "" && ok 'emit with rendering date' || no 'emit with rendering date'
+[ "${NOTIFY_EXIT_TS_FIDELITY:-}" = "" ] && ok 'clean fidelity variable empty' || no 'clean fidelity variable empty'
+printf '%s' "$(tail -1 "$T/fidelity2/notify-exit.log")" | jq -e '(has("ts_fidelity") | not) and (.started_at=="2024-01-01T00:00:00Z") and (.ended_at=="2024-01-01T00:01:40Z")' >/dev/null 2>&1 && ok 'healthy record has no ts_fidelity and true epochs' || no 'healthy record has no ts_fidelity and true epochs'
 # Newest-session window resolution.
 S="$T/sessions"; mkdir -p "$S/older" "$S/newer"; touch -t 202401010000 "$S/older"; now_e=$(date +%s); touch -d "@$now_e" "$S/newer" 2>/dev/null || touch "$S/newer"
 eq(){ [ "$1" = "$2" ] && ok "$3" || { echo "got=$1 want=$2"; no "$3"; }; }
@@ -33,6 +54,9 @@ eq "$(notify_exit_newest_session "$S" 1 2)" "" 'no session outside window'
 eq "$(notify_exit_newest_session "$T/nonexistent" 1 2)" "" 'missing root tolerated'
 
 # Wrapper integration: stub polytoken with controlled exit; wrapper forwards and records.
+# Restore the default log cap: the rotation test's small POLY_NOTIFY_EXIT_LOG_MAX_BYTES
+# is still exported and would trim these records mid-line once fidelity fields lengthen them.
+unset POLY_NOTIFY_EXIT_LOG_MAX_BYTES
 W="$T/wrap"; mkdir -p "$W"; export POLY_NOTIFY_EXIT_DIR="$W/exit"; export POLY_SESSIONS_DIR="$T/nosessions"
 printf '#!/usr/bin/env bash\nexit 7\n' > "$W/polytoken"; chmod +x "$W/polytoken"
 PATH="$W:$PATH" bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>&1; st=$?
