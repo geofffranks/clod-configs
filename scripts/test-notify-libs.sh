@@ -37,4 +37,34 @@ ROT="$TMP/rotation"; mkdir -p "$ROT"; AGENT_NOTIFY_LOG_DIR="$ROT" bash -c 'sourc
 [ -f "$LOGDIR/notify.log" ] && [ "$(stat -c %a "$LOGDIR" 2>/dev/null || stat -f %Lp "$LOGDIR")" = 700 ] && ok "diagnostic log and dir permissions" || no "diagnostic log and dir permissions"
 [ -z "$(PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= AGENT_NOTIFY_LOG_DIR="$TMP/missing" bash "$REPO/home/lib/notify-send.sh" 2>&1)" ] && [ ! -e "$TMP/missing" ] && ok "missing credentials silent" || no "missing credentials silent"
 [ "$(wc -c < "$LOGDIR/notify.log")" -lt 10000 ] && ok "diagnostic bounded" || no "diagnostic bounded"
+# Claim library (notify-claim.sh): atomic exclusive-create claims, restrictive
+# perms, exactly one concurrent winner (r3.1/r3.7 claim-boundary contract).
+CLAIMS="$TMP/claims"
+if [ -f "$REPO/home/lib/notify-claim.sh" ]; then
+  # shellcheck source=../home/lib/notify-claim.sh
+  . "$REPO/home/lib/notify-claim.sh"
+  notify_claim_acquire "$CLAIMS" "k1" && ok "claim acquire succeeds" || no "claim acquire succeeds"
+  if notify_claim_acquire "$CLAIMS" "k1" 2>/dev/null; then no "double acquire fails"; else ok "double acquire fails"; fi
+  notify_claim_release "$CLAIMS" "k1" && notify_claim_acquire "$CLAIMS" "k1" && ok "release then re-acquire succeeds" || no "release then re-acquire succeeds"
+  notify_claim_release "$CLAIMS" "k1" >/dev/null 2>&1
+  [ "$(stat -c %a "$CLAIMS" 2>/dev/null || stat -f %Lp "$CLAIMS")" = 700 ] && ok "claims dir 700" || no "claims dir 700"
+  notify_claim_acquire "$CLAIMS" "permcheck"
+  [ "$(stat -c %a "$CLAIMS/claim.permcheck" 2>/dev/null || stat -f %Lp "$CLAIMS/claim.permcheck")" = 600 ] && ok "claim file 600" || no "claim file 600"
+  notify_claim_release "$CLAIMS" "permcheck"
+  # Hostile keys cannot escape the claims dir.
+  notify_claim_acquire "$CLAIMS" "../escape"
+  [ ! -e "$TMP/claim.escape" ] && [ ! -e "$TMP/escape" ] && [ -f "$CLAIMS/claim..._escape" ] && ok "hostile key contained" || no "hostile key contained"
+  notify_claim_release "$CLAIMS" "../escape"
+  # Concurrent acquirers: N racers, exactly one winner.
+  : > "$TMP/winners"
+  for i in 1 2 3 4 5 6; do ( notify_claim_acquire "$CLAIMS" race && printf 'w\n' >> "$TMP/winners" ) & done
+  wait
+  [ "$(wc -l < "$TMP/winners" | tr -d ' ')" = 1 ] && ok "concurrent claim has exactly one winner" || no "concurrent claim has exactly one winner"
+  notify_claim_release "$CLAIMS" race
+  # Empty arguments are refused, not treated as the default claim.
+  if notify_claim_acquire "$CLAIMS" "" 2>/dev/null; then no "empty key refused"; else ok "empty key refused"; fi
+  if notify_claim_acquire "" "k" 2>/dev/null; then no "empty dir refused"; else ok "empty dir refused"; fi
+else
+  no "claim library exists"
+fi
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"
