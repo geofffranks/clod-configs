@@ -18,6 +18,10 @@
 #
 set -euo pipefail
 
+# Lifecycle evidence (inert): launch window start for the exit record.
+RUN_STARTED_EPOCH="$(date +%s)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 IMAGE="${POLY_IMAGE:-polytoken-dev}"
 TAG="${POLY_TAG:-latest}"
 DEV_HOME="/home/dev"
@@ -136,6 +140,38 @@ restore_project_config() {
     mv "$BACKUP_DIR/config.yaml" "$GEN_CFG"
     rmdir "$BACKUP_DIR" 2>/dev/null || rm -rf "$BACKUP_DIR"
   fi
+  # Lifecycle evidence (inert diagnostics; never notifies). Best effort only:
+  # a failure here must never change the launcher's exit status or cleanup.
+  if [[ -f "$SCRIPT_DIR/../home/lib/notify-exit-record.sh" && -d "${HOST_PTDAT:-}" ]]; then
+    (
+      export POLY_NOTIFY_EXIT_DIR="$HOST_PTDAT/notify-exit"
+      # shellcheck source=../home/lib/notify-exit-record.sh
+      . "$SCRIPT_DIR/../home/lib/notify-exit-record.sh"
+      local sess sid="" title="" repo="" branch="" common now
+      now="$(date +%s)"
+      sess="$(notify_exit_newest_session "$HOST_PTDAT/sessions" "${RUN_STARTED_EPOCH:-0}" "$now")"
+      if [[ -n "$sess" ]]; then sid="$(basename "$sess")"; fi
+      if command -v git >/dev/null 2>&1; then
+        branch="$(git -C "$PWD" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+        common="$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+        case "$common" in *.git) common="${common%.git}";; esac
+        common="${common%/}"
+        if [[ -n "$common" ]]; then repo="${common##*/}"; fi
+      fi
+      if [[ -n "$sess" && -f "$sess/session.json" ]]; then
+        title="$(grep -o '"session_title"[[:space:]]*:[[:space:]]*"[^"]*"' "$sess/session.json" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//' || true)"
+      fi
+      notify_exit_emit "container-run.sh" "$sid" "$status" "${RUN_STARTED_EPOCH:-0}" "$now" "$repo" "$branch" "$title" || true
+      # Lifecycle shipper (r3.7/r3.8): ships only qualifying 137/KILL records
+      # with clean timestamp fidelity and a correlated session, exactly once
+      # per 15s batch. Fail-open: never changes this launcher's exit status.
+      if [ -f "$SCRIPT_DIR/../home/lib/notify-shipper.sh" ]; then
+        # shellcheck source=../home/lib/notify-shipper.sh
+        . "$SCRIPT_DIR/../home/lib/notify-shipper.sh"
+        notify_exit_ship "container-run.sh" "$sid" "$status" "${RUN_STARTED_EPOCH:-0}" "$now" "$repo" "$branch" "$title" || true
+      fi
+    ) || true
+  fi
   exit "$status"
 }
 trap restore_project_config EXIT
@@ -192,7 +228,12 @@ fi
 set -u
 
 # shellcheck disable=SC2086  (ENV_FLAGS intentionally word-split)
+# Optional exact container name (evidence tooling scopes kills to the
+# container this launch created; never any other running container).
+NAME_FLAGS=()
+[[ -n "${POLY_CONTAINER_NAME:-}" ]] && NAME_FLAGS=(--name "$POLY_CONTAINER_NAME")
 podman run --rm -it --init \
+  ${NAME_FLAGS[@]+"${NAME_FLAGS[@]}"} \
   -e TERM="${TERM:-xterm-256color}" \
   -e COLORTERM=truecolor \
   $ENV_FLAGS \

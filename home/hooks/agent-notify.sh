@@ -2,6 +2,11 @@
 # Shared, fail-open per-session Pushover notifier for Claude Code and Polytoken.
 set -u
 
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)"
+[ -f "$_LIB_DIR/notify-identity.sh" ] && . "$_LIB_DIR/notify-identity.sh"
+[ -f "$_LIB_DIR/notify-send.sh" ] && . "$_LIB_DIR/notify-send.sh"
+unset _LIB_DIR
+
 HARNESS="${1:-}"
 APP_TOKEN="${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}"
 USER_KEY="${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}"
