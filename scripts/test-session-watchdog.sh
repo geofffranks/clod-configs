@@ -43,10 +43,18 @@ mksession(){
 }
 run(){
   : > "$LOG"
-  WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
-  WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
-  PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
-  bash "$HOOK"
+  local purge="${1:-0}"   # 0=disabled (existing tests), N=threshold, "default"=omit env (pins built-in default)
+  if [ "$purge" = "default" ]; then
+    WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
+    WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
+    PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
+    bash "$HOOK"
+  else
+    WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
+    WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 WATCHDOG_PURGE_OLD_DAYS="$purge" \
+    PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
+    bash "$HOOK"
+  fi
 }
 
 # 1-4. One world: boot grace, death+enrichment, dedup, resume-clears, re-death.
@@ -75,6 +83,78 @@ rm -f "$TMP/logs/c2.liveness.jsonl"   # c2 goes away entirely; only c2b remains
 touch -t 200001010000 "$TMP/logs/c2b.liveness.jsonl"
 run
 [ "$(count)" = 1 ] && ok "new death episode pings again" || no "new death episode pings again"
+
+# T1/AC-2.1 (the flood): a session alive via ANY fresh journal must not be
+# re-armed by a stale leftover sibling. fresh+stale for one session => 0
+# pings; the stale journal alone would look like a death, but the fresh
+# sibling keeps the session alive. (Fails pre-fix: the stale sibling re-pings.)
+newworld
+mkdaemon f1 sessF1 fresh; mksession sessF1 active
+run                                     # bootstrap this fresh daemon (boot grace)
+mkdaemon f2 sessF1 stale                # a stale leftover sibling appears
+run
+[ "$(count)" = 0 ] && ok "fresh+stale sibling for one session pings 0 (flood fixed)" \
+  || no "fresh+stale sibling for one session pings 0 (calls=$(count))"
+
+# T2/AC-3.1a: a stale dead-session journal older than the threshold is purged
+# on run, together with its paired .log. Runs with the env var OMITTED so this
+# also pins the shipped default (WATCHDOG_PURGE_OLD_DAYS=7).
+newworld
+mkdaemon q1 sessQ1 stale; mksession sessQ1 idle
+run default
+[ ! -f "$TMP/logs/q1.liveness.jsonl" ] && [ ! -f "$TMP/logs/q1.log" ] \
+  && ok "stale dead-session journal + .log purged (default threshold 7d)" \
+  || no "stale dead-session journal + .log purged (default threshold 7d)"
+
+# T2/AC-3.1b: a fresh journal for a live session is never removed even when
+# dead-session journals are purged in the same scan.
+newworld
+mkdaemon live1 sessLive1 fresh; mkdaemon dead2 sessDead2 stale; mkdaemon dead3 sessDead3 stale
+mksession sessLive1 active; mksession sessDead2 idle; mksession sessDead3 idle
+run 7
+[ -f "$TMP/logs/live1.liveness.jsonl" ] \
+  && [ ! -f "$TMP/logs/dead2.liveness.jsonl" ] && [ ! -f "$TMP/logs/dead2.log" ] \
+  && [ ! -f "$TMP/logs/dead3.liveness.jsonl" ] \
+  && ok "live fresh journal kept while dead-session journals purged" \
+  || no "live fresh journal kept while dead-session journals purged"
+
+# T2/AC-3.1c: a stale journal whose session still has a fresh sibling is NOT
+# removed (the live-session-never-affected guard).
+newworld
+mkdaemon s1 sessS1 fresh; mkdaemon s2 sessS1 stale; mksession sessS1 active
+run 7
+[ -f "$TMP/logs/s2.liveness.jsonl" ] && [ -f "$TMP/logs/s2.log" ] \
+  && ok "stale journal with a fresh sibling is NOT purged (live-session guard)" \
+  || no "stale journal with a fresh sibling is NOT purged"
+
+# T1/AC-2.3: a session with only fresh journal(s) pings 0 (no regression), even
+# with a second fresh daemon for the same session after the bootstrap scan.
+newworld
+mkdaemon g1 sessG2 fresh; mksession sessG2 active
+run                                     # bootstrap (boot grace)
+mkdaemon g2 sessG2 fresh                # a second fresh daemon for the session
+run
+[ "$(count)" = 0 ] && [ ! -f "$TMP/state/tomb-sessG2" ] \
+  && ok "only-fresh session pings 0 and never tombstones (AC-2.3)" \
+  || no "only-fresh session pings 0 (calls=$(count))"
+
+# T2: WATCHDOG_PURGE_OLD_DAYS=0 (the harness default) disables purge: an old
+# stale journal for a dead session survives a scan with its .log untouched.
+newworld
+mkdaemon z1 sessZ1 stale; mksession sessZ1 idle
+run
+[ -f "$TMP/logs/z1.liveness.jsonl" ] && [ -f "$TMP/logs/z1.log" ] \
+  && ok "purge disabled (0) keeps old stale journal + .log" \
+  || no "purge disabled (0) keeps old stale journal + .log"
+
+# T2: an old anonymous journal (no paired .log session id) is purged as hygiene
+# once older than the threshold — it can name no live session.
+newworld
+: > "$TMP/logs/anon2.log"; : > "$TMP/logs/anon2.liveness.jsonl"; touch -t 200001010000 "$TMP/logs/anon2.liveness.jsonl"
+run default
+[ ! -f "$TMP/logs/anon2.liveness.jsonl" ] && [ ! -f "$TMP/logs/anon2.log" ] \
+  && ok "old anonymous journal + .log purged as hygiene" \
+  || no "old anonymous journal + .log purged as hygiene"
 
 # 5. Daemon death while the session is long idle is silent.
 newworld
@@ -113,7 +193,7 @@ total=0; last=0
 for scan in 1 2 3 4; do
   if [ "$scan" -lt 4 ]; then ln -sf "$FAILCURL" "$TMP/curl"; else ln -sf "$TMP/curl-good" "$TMP/curl"; fi
   WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
-  WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
+  WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 WATCHDOG_PURGE_OLD_DAYS=0 \
   PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
   bash "$HOOK"
 done
@@ -163,7 +243,7 @@ mkcrash 2026-09-13T16-00-00Z sessM fresh
 for scan in 1 2 3 4; do
   if [ "$scan" -lt 4 ]; then ln -sf "$FAILCURL" "$TMP/curl"; else ln -sf "$TMP/curl-good" "$TMP/curl"; fi
   WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
-  WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
+  WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 WATCHDOG_PURGE_OLD_DAYS=0 \
   PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
   bash "$HOOK"
 done

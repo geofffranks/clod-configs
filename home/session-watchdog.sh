@@ -13,12 +13,22 @@
 # session it served.
 #
 # Run periodically (launchd StartInterval) as a single-shot scan:
-#   fresh liveness   -> daemon alive; clears that session's death tombstone
-#   stale liveness   -> daemon gone; ping once per episode when the session's
-#                       log advanced within WATCHDOG_IDLE_LIMIT of the death
+#   any fresh liveness -> session alive; clears that session's death tombstone
+#   all liveness stale -> daemon gone; ping once per episode when the session's
+#                         log advanced within WATCHDOG_IDLE_LIMIT of the death
 #   fresh *tui.crash.log -> TUI panic; ping once per crash log when the named
 #                       session was recently active (a crash kills the process
 #                       that would run hooks, so the scan is the only sensor)
+#
+# Liveness is decided PER SESSION, not per file: a session is alive when ANY
+# of its liveness journals is fresh. A daemon replacement leaves a stale
+# leftover journal beside the fresh one for the same session; deciding per
+# file let that stale sibling re-arm a death and re-ping every scan (the
+# 2026-09-14 "Agent Died" flood). Only when EVERY journal for a session is
+# stale is a death considered (once per episode, unchanged). Long-stale
+# leftover journals for dead daemons are purged (WATCHDOG_PURGE_OLD_DAYS,
+# default 7 days; 0 disables); a live session's journal is never purged.
+#
 # Suppressions: boot grace (first scan only tombstones), mass staleness
 # (>= WATCHDOG_MASS new deaths in one scan reads as a host/container event,
 # not per-session deaths), idle deaths, crash logs older than the idle limit,
@@ -40,6 +50,8 @@ STATE_DIR="${WATCHDOG_STATE_DIR:-$HOME/.local/share/polytoken/.session-watchdog}
 LIVENESS_STALE="${WATCHDOG_LIVENESS_STALE:-90}"
 IDLE_LIMIT="${WATCHDOG_IDLE_LIMIT:-600}"
 MASS="${WATCHDOG_MASS:-4}"
+PURGE_DAYS="${WATCHDOG_PURGE_OLD_DAYS:-7}"   # 0 disables stale-journal purge
+case "$PURGE_DAYS" in ''|*[!0-9]*) PURGE_DAYS=0 ;; esac   # non-numeric => disabled
 
 # All optional dependencies fail open before any state or network work.
 command -v curl >/dev/null 2>&1 || exit 0
@@ -67,6 +79,27 @@ BOOT=0
 [ -f "$STATE_DIR/.bootstrapped" ] || BOOT=1
 QUEUE="$STATE_DIR/.queue.$$"
 : > "$QUEUE"
+LIVE="$STATE_DIR/.live.$$"
+: > "$LIVE"
+# Clean our per-scan scratch files if this single-shot scan is interrupted.
+trap 'rm -f "$QUEUE" "$LIVE"' INT TERM
+
+# A session is ALIVE when ANY of its liveness journals is fresh. A daemon
+# replacement leaves a stale leftover journal for the same session beside the
+# fresh one; deciding per file would let that stale sibling re-arm a death
+# and re-ping every scan (the 2026-09-14 "Agent Died" flood). First pass:
+# record every session that currently has at least one fresh journal.
+for f in "$LOG_DIR"/*.liveness.jsonl; do
+  [ -e "$f" ] || continue
+  stem="$(basename "$f" .liveness.jsonl)"
+  sess="$(session_for_stem "$stem")"
+  [ -n "$sess" ] || continue
+  sessfile="$(sanitize "$sess" 96)"
+  [ -n "$sessfile" ] || continue   # fully-stripped ids must not collapse identity
+  if [ "$((now - "$(mtime_of "$f")"))" -le "$LIVENESS_STALE" ]; then
+    printf '%s\n' "$sessfile" >> "$LIVE"
+  fi
+done
 
 for f in "$LOG_DIR"/*.liveness.jsonl; do
   [ -e "$f" ] || continue
@@ -74,11 +107,18 @@ for f in "$LOG_DIR"/*.liveness.jsonl; do
   sess="$(session_for_stem "$stem")"
   [ -n "$sess" ] || continue
   sessfile="$(sanitize "$sess" 96)"
+  [ -n "$sessfile" ] || continue
   tomb="$STATE_DIR/tomb-$sessfile"
-  m="$(mtime_of "$f")"
-  if [ "$((now - m))" -le "$LIVENESS_STALE" ]; then
-    rm -f "$tomb"        # daemon alive: a previous death episode is over
+  # Fresh at evaluation time (F1): a daemon that (re)started between the LIVE
+  # pass and here is alive by definition and must never be evaluated as a
+  # death, even though the LIVE snapshot predates it.
+  if [ "$((now - "$(mtime_of "$f")"))" -le "$LIVENESS_STALE" ]; then
+    rm -f "$tomb"
     continue
+  fi
+  if grep -Fxq -- "$sessfile" "$LIVE"; then
+    rm -f "$tomb"        # live session: a prior death episode is over; a stale
+    continue             # sibling must never re-arm it
   fi
   [ -f "$tomb" ] && continue
   # A journal whose last line disarms ended cleanly (TUI closed, session
@@ -105,7 +145,7 @@ done
 # daemon dies around the time a replacement is already tombstone-clear); ping
 # once per session, keeping the entry with the freshest session activity.
 if [ -s "$QUEUE" ]; then
-  sort -k1,1 -k2,2n "$QUEUE" 2>/dev/null | awk '!seen[$1]++' > "$QUEUE.d" && mv "$QUEUE.d" "$QUEUE"
+  sort -k1,1 -k2,2n "$QUEUE" 2>/dev/null | awk '!seen[$1]++' > "$QUEUE.d.$$" && mv "$QUEUE.d.$$" "$QUEUE"
 fi
 
 # Many simultaneous deaths = the host slept or a container restarted; that is
@@ -215,6 +255,32 @@ for f in "$LOG_DIR"/*tui.crash.log; do
   send_crash_ping "$sess" "$stem" "$f" "$age"
 done
 
-rm -f "$QUEUE"
+# T2: purge liveness journals (and their paired .log) for daemons that are
+# confirmed dead and long since stopped serving a live session. The
+# fresh-sibling rule above already makes leftovers inert, so this is defensive
+# hygiene against unbounded accumulation. A live session's journal is never
+# removed: deletion is gated on the session having no fresh journal in the
+# current scan (LIVE, re-derived from live mtimes this run), re-checked here so
+# a journal for a live session is never a purge candidate.
+if [ "${PURGE_DAYS:-0}" -gt 0 ]; then
+  old_cut=$((now - PURGE_DAYS * 86400))
+  for f in "$LOG_DIR"/*.liveness.jsonl; do
+    [ -e "$f" ] || continue
+    [ "$(mtime_of "$f")" -le "$old_cut" ] || continue
+    stem="$(basename "$f" .liveness.jsonl)"
+    sess="$(session_for_stem "$stem")"
+    if [ -n "$sess" ]; then
+      sessfile="$(sanitize "$sess" 96)"
+      [ -n "$sessfile" ] || continue
+      grep -Fxq -- "$sessfile" "$LIVE" && continue   # live session: never purge
+    fi
+    # A journal whose paired .log names no session is anonymous: no session can
+    # be live without a resolvable fresh journal, so an old anonymous journal
+    # is never a live session's and is safe to purge as hygiene.
+    rm -f "$f" "$LOG_DIR/$stem.log"
+  done
+fi
+
+rm -f "$QUEUE" "$LIVE"
 : > "$STATE_DIR/.bootstrapped"
 exit 0

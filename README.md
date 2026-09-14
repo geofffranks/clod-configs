@@ -161,6 +161,56 @@ reachable and point this at that container's sessions root),
 Events older than 120s, future timestamps, clock discontinuities, and any
 event outside the four mappings are silently ignored.
 
+#### Session watchdog ("Agent Died" scan)
+
+A host-side scan pushes "Agent Died" when a Polytoken session's daemon dies
+mid-work (a crash or replacement kills the process that would run hooks, so a
+host-side watcher is the only sensor). It runs as a macOS LaunchAgent
+(`scripts/install-session-watchdog.sh`) scanning every 30s. Each daemon keeps a
+continuously-updated liveness journal beside its log at
+`~/.local/share/polytoken/logs/<started-at>-<pid>.liveness.jsonl` (the paired
+`<started-at>-<pid>.log` names the session it served).
+
+**Per-session liveness.** A session is treated as **alive** when *any* of its
+liveness journals is fresh. When a daemon is replaced, the old daemon's
+leftover journal lingers beside the new one; this per-session alive check means
+a live session is never re-armed or re-pinged because a stale sibling exists
+(this stopped a recurring "Agent Died" flood from a stale leftover journal
+re-queuing a death every scan). Only when *every* journal for a session is
+stale is a death evaluated, and it pings at most once per episode (then
+tombstoned).
+
+**Suppression knobs:** `WATCHDOG_IDLE_LIMIT` (a daemon that died while the
+session was already long idle stays silent), `WATCHDOG_MASS` (many simultaneous
+deaths read as one host/container event), a boot-grace first scan, and a
+3-attempt send retry.
+
+**Stale-journal cleanup.** Long-stale leftover journals for dead daemons are
+purged automatically (`WATCHDOG_PURGE_OLD_DAYS`, default 7, 0 disables). A live
+session's journal is never removed — a journal is purged only when its session
+has no fresh journal. Manual cleanup for a specific leftover journal:
+
+```bash
+rm -f ~/.local/share/polytoken/logs/2026-09-14T00-08-58Z-10.liveness.jsonl \
+      ~/.local/share/polytoken/logs/2026-09-14T00-08-58Z-10.log
+```
+
+**Silence immediately** (stop the scan loop; it resumes at the next
+session_start keepalive):
+
+```bash
+kill $(cat $HOME/.local/share/polytoken/.session-watchdog/loop.pid) 2>/dev/null
+```
+
+That `kill` targets the keepalive-spawned loop (containers/Linux, which write
+`loop.pid`). On a native macOS LaunchAgent install there is no loop or
+`loop.pid`; pause the scan instead with:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/dev.gf.polytoken-session-watchdog.plist  # pause
+launchctl load -w   ~/Library/LaunchAgents/dev.gf.polytoken-session-watchdog.plist  # resume
+```
+
 #### Diagnostics and verification
 
 - Sender decisions (sent/rejected/no-creds): `~/.local/share/polytoken/logs/notify/notify.log`
@@ -169,7 +219,8 @@ event outside the four mappings are silently ignored.
 - Exit records: `notify-exit/notify-exit.log` in either data root.
 - Test suites: `bash scripts/test-agent-notify.sh`,
   `scripts/test-notify-exit-record.sh`, `scripts/test-notify-libs.sh`,
-  `scripts/test-notify-adapter.sh`, `scripts/test-notify-event-watcher.sh` —
+  `scripts/test-notify-adapter.sh`, `scripts/test-notify-event-watcher.sh`,
+  `scripts/test-session-watchdog.sh`, `scripts/test-watchdog-keepalive.sh` —
   all run offline with mock senders and assert no network egress.
 
 ### Requirements
