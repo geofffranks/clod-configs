@@ -4,13 +4,16 @@
 # launchers only append notify-exit-record/v1 lines; nothing notifies.
 #
 # Kill safety — every SIGKILL is scoped to what THIS run started:
-#   native:    the wrapper's env-gated kill timer kills its own child.
+#   native:    guided — you run the wrapper with its env-gated kill timer in
+#              a real terminal; it SIGKILLs only its own child. (A script(1)
+#              PTY cannot answer the TUI's cursor-position query, so the
+#              automated PTY variant cannot boot the native TUI.)
 #   container: run.sh gets POLY_CONTAINER_NAME; only that named container is
 #              killed. Never any other running container or process.
 #
 # Usage: bash scripts/collect-lifecycle-evidence.sh [all|kill]
 #   all  (default) = every scenario (fresh evidence file)
-#   kill           = only the two automated SIGKILL scenarios (appends)
+#   kill           = native-3 (guided) + container-3 (automated); appends
 set -u
 MODE="${1:-all}"
 R="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,8 +31,6 @@ if [ "$MODE" = "kill" ]; then echo >> "$OUT"; else : > "$OUT"; fi
 echo "Lifecycle evidence collected $(date -u +%Y-%m-%dT%H:%M:%SZ) mode=$MODE" >> "$OUT"
 cap "podman version" podman --version
 cap "native polytoken" polytoken --version
-
-HAVE_PTY=0; command -v script >/dev/null 2>&1 && HAVE_PTY=1
 
 if [ "$MODE" != "kill" ]; then
   echo "=========== GUIDED SCENARIOS ==========="
@@ -66,16 +67,15 @@ if [ "$MODE" != "kill" ]; then
   fi
 fi
 
-echo "=========== SIGKILL SCENARIOS (automated, scoped) ==========="
+echo "=========== SIGKILL SCENARIOS ==========="
 
-sec "NATIVE 3: SIGKILL TUI (wrapper kill-timer)"
+sec "NATIVE 3: SIGKILL TUI (guided: wrapper kill-timer in your terminal)"
 n="$(nl_count "$EXITDIR_N")"
-if [ "$HAVE_PTY" = 1 ]; then
-  POLY_NOTIFY_KILL_AFTER=10 script -q /dev/null bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>&1
-  echo "script exit status (record is ground truth): $?" | tee -a "$OUT"
-else
-  echo "SKIP: no 'script' (PTY) — a backgrounded TUI cannot start without a TTY." | tee -a "$OUT"
-fi
+echo "In a SECOND terminal run exactly:" | tee -a "$OUT"
+echo "  POLY_NOTIFY_KILL_AFTER=20 bash \"$R/home/bin/polytoken-notify-wrapper.sh\" new" | tee -a "$OUT"
+echo "The TUI comes up; after ~20s the wrapper SIGKILLs its own child and returns" | tee -a "$OUT"
+echo "(your shell reports exit 137). Then come back here." | tee -a "$OUT"
+ask "press Enter once the second-terminal wrapper has returned"
 show_records "$EXITDIR_N" "$n" "native-3"
 
 if command -v podman >/dev/null 2>&1; then
@@ -84,6 +84,7 @@ if command -v podman >/dev/null 2>&1; then
   CNAME="pt-ev-$$"
   tmpout="$(mktemp 2>/dev/null)" || tmpout="$R/.polytoken/.c3-out.$$"
   echo "running before this scenario: [$(podman ps -q 2>/dev/null | tr '\n' ' ')] — only name=$CNAME is ours" | tee -a "$OUT"
+  HAVE_PTY=0; command -v script >/dev/null 2>&1 && HAVE_PTY=1
   rp=""
   cid=""
   if [ "$HAVE_PTY" = 1 ]; then

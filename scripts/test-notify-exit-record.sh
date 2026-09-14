@@ -61,4 +61,11 @@ PODMAN_LOG="$T/podman.log"; : > "$PODMAN_LOG"
 [ -f "$RSHOME/.local/share/polytoken-dev/notify-exit/notify-exit.log" ] && ok 'run.sh writes exit record' || no 'run.sh writes exit record'
 tail -1 "$PODMAN_LOG" | grep -q -- '--name pt-test-c3' && ok 'POLY_CONTAINER_NAME reaches podman run' || no 'POLY_CONTAINER_NAME reaches podman run'
 
+# Async launch (kill-timer) must still hand the child the wrapper's stdin:
+# POSIX gives backgrounded children /dev/null stdin unless stdin is
+# explicitly redirected — that is what broke the PTY evidence run.
+printf '#!/usr/bin/env bash\nread -r line || exit 9\n[ "$line" = "ping" ] && exit 42 || exit 1\n' > "$W/polytoken"; chmod +x "$W/polytoken"
+printf 'ping\n' | PATH="$W:$PATH" POLY_NOTIFY_KILL_AFTER=3 bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>&1; st=$?
+[ "$st" = 42 ] && ok 'kill-timer child inherits stdin' || no 'kill-timer child inherits stdin'
+
 [ "$P" -gt 0 ] && [ "$F" -eq 0 ] && echo "PASS: $P" || echo "FAILURES: $F/$((P+F))"; exit "$F"

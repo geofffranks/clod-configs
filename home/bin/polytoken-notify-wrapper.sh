@@ -17,7 +17,7 @@ if [ -n "${POLY_NOTIFY_KILL_AFTER:-}" ]; then
   # Diagnostics-only kill timer (Task 4 evidence scenarios): SIGKILL this
   # launch's own child after N seconds, so collection never has to find
   # processes by name. Unset keeps normal foreground behavior.
-  polytoken "$@" &
+  polytoken "$@" <&0 &
   child=$!
   sleep "$POLY_NOTIFY_KILL_AFTER" 2>/dev/null || true
   kill -9 "$child" 2>/dev/null || true
