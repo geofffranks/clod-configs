@@ -55,22 +55,122 @@ Each target reads its own TTY override for interactive prompts:
 `CLAUDE_CONFIG_TTY` (Claude) and `POLYTOKEN_CONFIG_TTY` (Polytoken); both
 default to `/dev/tty`.
 
-### Optional Pushover attention notifications
+### Attention notifications (agent-notify)
 
-The recommended Claude and Polytoken hooks share one fail-open Pushover notifier.
-Configure credentials in the environment of the host Claude process:
+One fail-open Pushover notifier serves both harnesses. With no credentials
+configured it is fully inert: hooks still succeed, nothing is sent, nothing
+blocks. Credentials are read from the environment only — never from files this
+repo manages — and must never be committed:
 
 ```bash
 export PUSHOVER_APP_TOKEN=your-application-token
 export PUSHOVER_USER_KEY=your-user-key
 ```
 
-The notifier consolidates attention events per session, and a submitted prompt
-cancels only that session's pending notification. For Polytoken running in the
-Docker/container environment, pass the same variables through to the container
-(for example, with Docker Compose `environment:` entries or `docker run -e`);
-do not commit the credentials to this repository. Unset credentials simply
-disable notifications without affecting hook outcomes.
+#### What alerts you
+
+| Surface | Alert | Notes |
+|---|---|---|
+| Claude Code: turn ends needing input, or a `Notification` fires | one consolidated push after ~60s | your next prompt cancels the pending send |
+| Polytoken: end of turn awaiting you | same consolidation + cancel | suppressed while a saved-session goal is active (the goal driver continues without you) |
+| Polytoken: `ask_user_question` pending | push with the first question's text | your answer cancels it; ambient/background notifications cancel rather than add |
+| Polytoken: TUI or container killed (SIGKILL) | "abnormal exit" push | at most one per 15s window, with the affected-session count; normal quits, Ctrl-C/TERM/HUP exits, and TUI launch failures stay silent |
+| Polytoken: plan-handoff approval pending, goal-acceptance pending, goal completed | one push each | requires the optional SSE watcher (below); everything else on the stream — cancellations, provider errors, ambient events — stays silent |
+
+Titles carry the session title (or "Agent"); bodies carry `repo/branch:` plus
+a bounded, sanitized preview. No transcript text beyond the bounded preview
+ever leaves the machine.
+
+#### Installing
+
+```bash
+./install.sh --target claude       # Claude Code hooks (UserPromptSubmit/Stop/Notification)
+./install.sh --target polytoken    # native Polytoken hooks (see below)
+./install.sh --target all          # both, independently
+```
+
+- **Claude Code**: `home/` is copied into `CLAUDE_CONFIG_DIR` (default
+  `~/.claude`) and `settings.recommended.json` adds the three
+  `agent-notify.sh claude` hooks (Stop and Notification run async). The script
+  reads its session id from the event JSON and the repo/branch from the
+  transcript's working directory.
+- **Polytoken**: `agent-notify.sh polytoken` is installed into
+  `POLYTOKEN_CONFIG_DIR` (default `~/.config/polytoken`) and `hooks.json`
+  gains the `agent-notify`, `agent-notify-cancel` (pre_user_prompt),
+  `agent-notify-stop` (stop), `agent-notify-ask` (pre_tool_use on
+  `ask_user_question`), `agent-notify-answer` (post_tool_use), and
+  `session-watchdog-keepalive` entries. Hooks load at the next session start
+  or config reload. The session id comes from `POLYTOKEN_SESSION_ID`, and
+  repo/branch resolution follows the session log's most recent working
+  directory, so worktree sessions still name their repo.
+
+#### Configuring credentials
+
+- **Non-dockerized (native) Polytoken and Claude Code**: export both variables
+  in the environment that launches the harness (shell profile, LaunchAgent
+  environment, and so on). Hooks inherit it.
+- **Dockerized Polytoken** (`polytoken-container/run.sh`): put the two exports
+  in the env file run.sh injects — `POLY_ENV_FILE`, default
+  `~/.config/polytoken-container.env`:
+
+  ```bash
+  echo 'export PUSHOVER_APP_TOKEN=your-application-token' >> ~/.config/polytoken-container.env
+  echo 'export PUSHOVER_USER_KEY=your-user-key' >> ~/.config/polytoken-container.env
+  ```
+
+  Each container session's hooks run inside the container with that env, so
+  alerts work per session with no host-side daemon.
+
+#### Death alerts (lifecycle shipper)
+
+- **Dockerized**: built into `polytoken-container/run.sh` — its cleanup path
+  records how the container ended and sends the abnormal-exit alert when the
+  container was SIGKILLed. Nothing extra to run.
+- **Native**: opt-in — launch sessions with the wrapper instead of bare
+  `polytoken`: `bash home/bin/polytoken-notify-wrapper.sh new` (same arguments;
+  exit status and foreground behavior are preserved). Without the wrapper,
+  native sessions have no death alerts.
+
+Both lanes append a `notify-exit-record/v1` JSON line per launch — native to
+`~/.local/share/polytoken/notify-exit/`, container to the host store
+`~/.local/share/polytoken-dev/notify-exit/` (dir 700, file 600, size-capped).
+Records whose timestamps could not be rendered faithfully carry
+`"ts_fidelity":"degraded"` and never alert.
+
+#### Optional SSE watcher (approvals + goal completion)
+
+`home/lib/notify-event-watcher.sh` is a per-host loop that discovers live
+session daemons (`sessions/*/startup.json`), follows each daemon's `/events`
+stream, and pushes on plan-handoff approvals, goal-acceptance approvals, goal
+completion, and questions. It ships without an installer **by design** — start
+it manually. Note on questions: the ask hook (above) and the watcher do not
+share dedup state, so with both active an unanswered question can alert twice
+— immediately from the watcher, and once more from the hook's ~60s
+consolidation if it is still pending (answering cancels the hook's send). If
+you prefer single-alert questions, either skip the watcher's question mapping
+or uninstall the `agent-notify-ask` entry.
+
+```bash
+nohup bash /path/to/claude-config/home/lib/notify-event-watcher.sh >/dev/null 2>&1 &
+```
+
+Knobs: `NOTIFY_WATCHER_SESSIONS_DIR` (sessions root to watch — for
+containerized sessions run the watcher where the daemon's loopback port is
+reachable and point this at that container's sessions root),
+`NOTIFY_WATCHER_POLL_SECONDS` (5), `NOTIFY_WATCHER_FRESH_SECONDS` (120).
+Events older than 120s, future timestamps, clock discontinuities, and any
+event outside the four mappings are silently ignored.
+
+#### Diagnostics and verification
+
+- Sender decisions (sent/rejected/no-creds): `~/.local/share/polytoken/logs/notify/notify.log`
+  (bounded, rotated; `source|event|session|result|http_status`).
+- SSE adapter decision log: `~/.local/share/polytoken/logs/notify-adapter/notify.log`.
+- Exit records: `notify-exit/notify-exit.log` in either data root.
+- Test suites: `bash scripts/test-agent-notify.sh`,
+  `scripts/test-notify-exit-record.sh`, `scripts/test-notify-libs.sh`,
+  `scripts/test-notify-adapter.sh`, `scripts/test-notify-event-watcher.sh` —
+  all run offline with mock senders and assert no network egress.
 
 ### Requirements
 
