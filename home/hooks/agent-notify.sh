@@ -37,16 +37,18 @@ SESSION_RAW="${POLYTOKEN_SESSION_ID:-$(jq -r '.session_id // .sessionId // empty
 [ -n "$SESSION_RAW" ] || exit 0
 case "$EVENT" in
   UserPromptSubmit|pre_user_prompt) ;;
-  Stop|Notification|stop|notification|post_model_turn|post_tool_use) ;;
+  Stop|Notification|stop|notification|post_model_turn|post_tool_use|pre_tool_use) ;;
   SubagentStop|subagent_stop) exit 0 ;;
   *) exit 0 ;;
 esac
 # Polytoken: ambient notifications (background job and subagent completions)
 # are not requests for input, and while a saved-session goal is active the
 # goal driver re-prompts on its own after `stop` — neither is "needs input".
-# Only a goal-less end of turn may schedule a notice.
+# Only a goal-less end of turn may schedule a notice. An ambient notification
+# is routed to the cancel path below: the session resumed without the user,
+# so any send a prior `stop` scheduled (a turn that ended with work still in
+# flight) would fire mid-work and is a false alarm.
 if [ "$HARNESS" = polytoken ]; then
-  if [ "$EVENT" = notification ]; then exit 0; fi
   if [ "$EVENT" = stop ] && [ "${POLYTOKEN_GOAL_ACTIVE:-}" = true ]; then exit 0; fi
 fi
 
@@ -110,7 +112,13 @@ unlock() {
   LOCK_OWNER=""
 }
 
-if [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = pre_user_prompt ]; then
+# A user prompt means the human is back; a polytoken ambient notification
+# means the session resumed on its own; the answer to an ask_user_question
+# (post_tool_use for that tool) means the blocking question was answered.
+# All three invalidate a pending send.
+if [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = pre_user_prompt ] ||
+   { [ "$HARNESS" = polytoken ] && [ "$EVENT" = notification ]; } ||
+   { [ "$EVENT" = post_tool_use ] && [ "${POLYTOKEN_HOOK_MATCHER_SUBJECT:-}" = ask_user_question ]; }; then
   lock || exit 0
   rm -f "$STATE.gen" "$STATE.cancel"
   printf '%s\n' "$(date +%s%N 2>/dev/null || date +%s)" > "$STATE.cancel.tmp" && mv -f "$STATE.cancel.tmp" "$STATE.cancel"
@@ -122,6 +130,16 @@ GEN="$(date +%s%N 2>/dev/null || date +%s)-$$"
 sanitize() {
   # Keep only bounded, printable identity metadata; $2 caps the length (default 64).
   printf '%s' "$1" | tr '\r\n\t' '   ' | tr -cd '[:alnum:] ._/@:-' | cut -c1-"${2:-64}"
+}
+trunc() {
+  # sanitize + cap, with an explicit ellipsis when the text was cut.
+  local s
+  s="$(printf '%s' "$1" | tr '\r\n\t' '   ' | tr -cd '[:alnum:] ._/@:-')"
+  if [ "${#s}" -gt "$2" ]; then
+    printf '%s...' "${s:0:$2}"
+  else
+    printf '%s' "$s"
+  fi
 }
 SAFE_SESSION="$(sanitize "$SESSION_RAW")"; [ -n "$SAFE_SESSION" ] || SAFE_SESSION="unknown"
 # Session working directory. Precedence: payload cwd (Claude Code passes it;
@@ -150,23 +168,28 @@ RESP=""
 case "$EVENT" in
   Notification|notification|post_model_turn|post_tool_use)
     if [ "$HARNESS" = claude ]; then
-      RESP="$(sanitize "$(jq -r '.message // empty' <<<"$INPUT" 2>/dev/null || true)" 160)"
+      RESP="$(trunc "$(jq -r '.message // empty' <<<"$INPUT" 2>/dev/null || true)" 160)"
     fi
+    ;;
+  pre_tool_use)
+    # The pending question is the thing the human is being asked for.
+    RESP="$(trunc "$(jq -r '.input.questions[0].question // empty' <<<"$INPUT" 2>/dev/null || true)" 160)"
     ;;
 esac
 if [ -z "$RESP" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
   L="$(grep '"type":"assistant"' "$TRANSCRIPT" 2>/dev/null | tail -5 |
-       jq -r '[(.blocks // .message.content // [])[] | select(.type=="text") | .text] | last // empty' 2>/dev/null | tail -1)"
-  RESP="$(sanitize "$L" 160)"
+       jq -r '[(.blocks // .message.content // [])[] | select(.type=="text") | .text] | first // empty' 2>/dev/null | tail -1)"
+  RESP="$(trunc "$L" 160)"
 fi
 TITLE_PART=""
 if [ "$HARNESS" = polytoken ]; then
   [ -z "$RESP" ] && {
     L="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
     [ -n "$L" ] || L="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
-    RESP="$(sanitize "$L" 160)"
+    RESP="$(trunc "$L" 160)"
   }
   TITLE_PART="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
+  [ -n "$TITLE_PART" ] || TITLE_PART="$(jq -r '.inferred_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
   [ -n "$TITLE_PART" ] || TITLE_PART="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
 elif [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
   TITLE_PART="$(grep '"type":"summary"' "$TRANSCRIPT" 2>/dev/null | tail -1 | jq -r '.summary // empty' 2>/dev/null || true)"
@@ -192,7 +215,7 @@ if [ -n "$PROJECT_DIR" ] && command -v git >/dev/null 2>&1; then
   [ -n "$COMMON_DIR" ] && REPO_NAME="${COMMON_DIR##*/}"
 fi
 PROJECT="$(sanitize "${REPO_NAME:-${PROJECT_DIR##*/}}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
-TITLE="$(sanitize "${TITLE_PART:-Agent}" 48) Needs Input"
+TITLE="$(trunc "${TITLE_PART:-Agent}" 48)"
 PREVIEW="${RESP:-session=$SAFE_SESSION}"
 if [ -n "$BRANCH" ]; then
   MESSAGE="$PROJECT/$BRANCH: $PREVIEW"
