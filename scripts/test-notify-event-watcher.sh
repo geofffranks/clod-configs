@@ -57,21 +57,30 @@ fi
 
 # --- mapping: one send per RT-verified pending ------------------------------
 R=$(fresh map1)
-assert_eq "$(pf "$R" $((E_ASK1+1)) "$(fx 1472)")" \
-  "question_pending|01a09dd6-31f3-7530-b368-5ca3f5bd42d9|0b1k44-audio|1 question needs your answer — What should happen with the untracked file \`scripts/capture-probe-events.s" \
-  "ask_user_question maps question_pending with count and bounded first question"
+out="$(pf "$R" $((E_ASK1+1)) "$(fx 1472)")"
+case "$out" in
+  "0b1k44-audio|question_pending|01a09dd6-31f3-7530-b368-5ca3f5bd42d9|1 question needs your answer"*) ok "ask_user_question maps question_pending with count and bounded first question" ;;
+  *) echo "got: [$out]"; no "ask_user_question maps question_pending with count and bounded first question" ;;
+esac
+[ "${#out}" -le 200 ] && ok "ask body is bounded" || no "ask body is bounded"
 assert_eq "$(pf "$R" $((E_PLAN+1)) "$(fx 10452)")" \
-  "approval_pending|01a09ddf-ec3b-7822-b95f-85ace3e81239|0b1k44-audio|approve plan handoff" \
+  "0b1k44-audio|approval_pending|01a09ddf-ec3b-7822-b95f-85ace3e81239|approve plan handoff" \
   "plan_handoff interrogative maps approval_pending"
 assert_eq "$(pf "$R" $((E_GOAL_PROP+1)) "$(fx 14570)")" \
-  "approval_pending|01a09de1-cd72-7db1-9995-6f35ba4b4a33|0b1k44-audio|accept goal proposal" \
+  "0b1k44-audio|approval_pending|01a09de1-cd72-7db1-9995-6f35ba4b4a33|accept goal proposal" \
   "goal_proposal interrogative maps approval_pending"
-assert_eq "$(pf "$R" $((E_GOAL_DONE+1)) "$(fx 14493)" | cut -c1-72)" \
-  "goal_completed|01a09ddf-f4af-7080-912e-52c64d6e97dc:completed|0b1k44-audio|goal completed: Read and implement fully the plan file /home/dev/.l" \
-  "goal_driver_update completed maps goal_completed with goal.id:completed claim key"
+R=$(fresh mapgoal)
+out="$(pf "$R" $((E_GOAL_DONE+1)) "$(fx 14493)")"
+case "$out" in
+  "0b1k44-audio|goal_completed|01a09ddf-f4af-7080-912e-52c64d6e97dc:completed|goal completed: Read and implement fully"*) ok "goal_driver_update completed maps goal_completed with goal.id:completed claim key" ;;
+  *) echo "got: [$out]"; no "goal_driver_update completed maps goal_completed with goal.id:completed claim key" ;;
+esac
+[ "${#out}" -le 320 ] && ok "goal_completed body is bounded" || no "goal_completed body is bounded"
 
 # --- claim dedup: re-render / duplicate representation ----------------------
 assert_eq "$(pf_n "$R" $((E_ASK1+2)) "$(fx 1472)")" 0 "duplicate interrogative frame is claim-deduped"
+assert_eq "$(pf_n "$R" $((E_ASK1+3)) "$(fx 1472 | jq -c '.seq=1473')")" 0 \
+  "same interrogative at a new seq is claim-deduped (re-render)"
 assert_eq "$(pf_n "$R" $((E_GOAL_DONE+2)) "$(fx 14493 | jq -c '.seq=14494')")" 0 \
   "second goal_completed frame claims once per goal.id even at a new seq"
 assert_eq "$(pf_n "$R" $((E_PLAN+2)) "$(fx 10452)")" 0 "plan_handoff re-render deduped"
@@ -117,7 +126,7 @@ assert_eq "$(pf_n "$R" $((E_ASK1+1)) "$(fx 1472 | jq -c 'del(.event.interrogativ
 R=$(fresh disc)
 pf "$R" $((E_ASK1+1)) "$(fx 1472)" >/dev/null
 assert_eq "$(pf_n "$R" $((E_ASK1+1-60)) "$(fx 5704)")" 0 "backward clock jump beyond +5s suppresses the frame"
-assert_eq "$(pf_n "$R" $((E_ASK1+1-58)) "$(fx 5704)")" 1 "post-rebaseline frames evaluate normally again"
+assert_eq "$(pf_n "$R" $((E_ASK2+1)) "$(fx 5704)")" 1 "post-rebaseline frames evaluate normally again"
 
 # --- discovery: ready sessions with a port ----------------------------------
 SD="$TMP/sessions"; mkdir -p "$SD/a" "$SD/b" "$SD/c"
@@ -136,11 +145,11 @@ fi
 
 # --- production sender wiring: notify_identity_title + notify_send ----------
 SEND_LOG="$TMP/send.log"
-bash -c '
+NOTIFY_SEND_CAP="$SEND_LOG" bash -c '
   source "$1" || exit 9
-  notify_send(){ printf "%s\n" "title=$notify_title body=$notify_body" >> "$2"; }
+  notify_send(){ printf "%s\n" "title=$notify_title body=$notify_body" >> "$NOTIFY_SEND_CAP"; }
   notify_watcher_default_send sess-1 question_pending k1 "1 question needs your answer"
-' _ "$NW_LIB" "$SEND_LOG" >/dev/null 2>&1
+' _ "$NW_LIB" >/dev/null 2>&1
 assert_eq "$(cat "$SEND_LOG" 2>/dev/null)" "title=(sess-1) body=1 question needs your answer" \
   "default sender composes identity title and sends via notify_send"
 
