@@ -5,6 +5,8 @@ R="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; T="$(mktemp -d)"; trap 'rm
 P=0; F=0; ok(){ echo "ok: $1"; P=$((P+1)); }; no(){ echo "FAIL: $1"; F=$((F+1)); }
 # shellcheck source=../home/lib/notify-exit-record.sh
 . "$R/home/lib/notify-exit-record.sh"
+# All shipper/sender diagnostics stay in the temp tree, never the real HOME.
+export AGENT_NOTIFY_LOG_DIR="$T/logs"
 
 # Emitter: valid v1 line with signal derivation and identity fields.
 export POLY_NOTIFY_EXIT_DIR="$T/exit"
@@ -105,5 +107,88 @@ tail -1 "$PODMAN_LOG" | grep -q -- '--name pt-test-c3' && ok 'POLY_CONTAINER_NAM
 printf '#!/usr/bin/env bash\nread -r line || exit 9\n[ "$line" = "ping" ] && exit 42 || exit 1\n' > "$W/polytoken"; chmod +x "$W/polytoken"
 printf 'ping\n' | PATH="$W:$PATH" POLY_NOTIFY_KILL_AFTER=3 bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>&1; st=$?
 [ "$st" = 42 ] && ok 'kill-timer child inherits stdin' || no 'kill-timer child inherits stdin'
+
+# Lifecycle shipper (r3.7 closed-world + common-cause collapse; r3.8 fidelity
+# gate): after the exit record is emitted, ONLY a 137/KILL record with clean
+# timestamp fidelity and a correlated session_id reaches the shared sender —
+# exactly one send per floored-15s batch key, with the affected-session count
+# from the notify-exit.log in the body and the exact repo/branch (session_id)
+# title. Everything else diagnostic-logs a suppression and never sends.
+SHIP="$T/shipper"; mkdir -p "$SHIP/bin" "$SHIP/logs"; SHIP_CALLS="$SHIP/calls"; : > "$SHIP_CALLS"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$SHIP_CALLS" > "$SHIP/bin/curl"; chmod +x "$SHIP/bin/curl"
+if [ -f "$R/home/lib/notify-shipper.sh" ]; then
+  # shellcheck source=../home/lib/notify-shipper.sh
+  . "$R/home/lib/notify-shipper.sh"
+  shiptest(){ PATH="$SHIP/bin:$PATH" POLY_NOTIFY_EXIT_DIR="$SHIP/exit" PUSHOVER_APP_TOKEN=t PUSHOVER_USER_KEY=u AGENT_NOTIFY_PUSHOVER_URL=http://127.0.0.1:9 NOTIFY_EXIT_TS_FIDELITY="$1" notify_exit_ship "test-launcher" "$2" "$3" "$4" "$5" "claude-config" "feat/notify-cleanup" ""; }
+  wait_calls(){ local n="$1" i=0; while [ "$i" -lt 60 ]; do [ "$(wc -l < "$SHIP_CALLS" 2>/dev/null || echo 0)" -ge "$n" ] && return 0; sleep 0.05; i=$((i+1)); done; return 1; }
+  ended="$(date +%s)"
+  # Seed the shared store: two fidelity-clean 137/KILL records in the same
+  # 15s batch and one suppressed 0-exit record (rendering-date stub keeps
+  # the fixture fidelity-clean on any host).
+  PATH="$BSDSTUB:$PATH" POLY_NOTIFY_EXIT_DIR="$SHIP/exit" notify_exit_emit "test-launcher" "ghost-a" 137 $((ended-3)) "$ended" "" "" ""
+  PATH="$BSDSTUB:$PATH" POLY_NOTIFY_EXIT_DIR="$SHIP/exit" notify_exit_emit "test-launcher" "ghost-b" 137 $((ended-1)) "$ended" "" "" ""
+  PATH="$BSDSTUB:$PATH" POLY_NOTIFY_EXIT_DIR="$SHIP/exit" notify_exit_emit "test-launcher" "clean0" 0 $((ended-2)) $((ended-1)) "" "" ""
+  shiptest "" "live-sess" 137 "$((ended-10))" "$ended"
+  if wait_calls 1; then ok 'qualifying record ships'; else no 'qualifying record ships'; fi
+  grep -q '|tui_abnormal_exit|' "$T/logs/notify.log" && ok 'attempt diagnostic-logged with event' || no 'attempt diagnostic-logged with event'
+  grep -Eq '\|sent($|=)' "$T/logs/notify.log" && ok 'send result diagnostic-logged' || no 'send result diagnostic-logged'
+  grep -Fq 'title=claude-config/feat/notify-cleanup (live-sess)' "$SHIP_CALLS" && ok 'exact title contract repo/branch (session_id)' || no 'exact title contract repo/branch (session_id)'
+  grep -Fq '2 session(s) affected' "$SHIP_CALLS" && ok 'body counts batch records' || no 'body counts batch records'
+  grep -Fq 'TUI terminated abnormally' "$SHIP_CALLS" && ok 'body names the reason' || no 'body names the reason'
+  # Common-cause collapse: a second death in the same 15s batch loses the
+  # claim, diagnostic-logs, and never sends twice.
+  shiptest "" "live-sess2" 137 "$((ended-5))" "$ended"
+  if ! wait_calls 2; then ok 'common-cause collapse: one send per batch'; else no 'common-cause collapse: one send per batch'; fi
+  grep -q 'suppressed:claim-loser' "$T/logs/notify.log" && ok 'claim loser diagnostic-logged' || no 'claim loser diagnostic-logged'
+  # A distinct later window ships again.
+  shiptest "" "live-sess3" 137 "$((ended-10))" "$((ended+20))"
+  if wait_calls 2; then ok 'distinct batch window ships'; else no 'distinct batch window ships'; fi
+  # Closed world: nothing else may reach the sender; each suppresses with a
+  # bounded diagnostic entry.
+  before="$(wc -l < "$SHIP_CALLS")"
+  shiptest "" "s" 0 1 2; shiptest "" "s" 1 1 2; shiptest "" "s" 129 1 2; shiptest "" "s" 130 1 2; shiptest "" "s" 143 1 2
+  shiptest "degraded" "s" 137 1 2
+  shiptest "" "" 137 1 2
+  [ "$(wc -l < "$SHIP_CALLS")" = "$before" ] && ok 'closed world: no send for 0/1/129/130/143/degraded/no-session' || no 'closed world: no send for 0/1/129/130/143/degraded/no-session'
+  grep -q 'suppressed:status=0' "$T/logs/notify.log" && ok 'clean exit suppression logged' || no 'clean exit suppression logged'
+  grep -q 'suppressed:status=143' "$T/logs/notify.log" && ok 'HUP/TERM/INT suppression logged' || no 'HUP/TERM/INT suppression logged'
+  grep -q 'suppressed:ts_fidelity=degraded' "$T/logs/notify.log" && ok 'degraded fidelity suppression logged' || no 'degraded fidelity suppression logged'
+  grep -q 'suppressed:no-session' "$T/logs/notify.log" && ok 'uncorrelated suppression logged' || no 'uncorrelated suppression logged'
+  # Claim namespace hygiene.
+  [ "$(stat -c %a "$SHIP/exit/claims" 2>/dev/null || stat -f %Lp "$SHIP/exit/claims")" = 700 ] && ok 'claims dir 700 under exit dir' || no 'claims dir 700 under exit dir'
+  claim_ok=1; for cf in "$SHIP/exit/claims"/claim.*; do [ "$(stat -c %a "$cf" 2>/dev/null || stat -f %Lp "$cf")" = 600 ] || claim_ok=0; done
+  [ "$claim_ok" = 1 ] && ok 'claim files 600' || no 'claim files 600'
+  # Fail-open end-to-end through the native wrapper: SIGKILL of a correlated
+  # session ships once; missing credentials stay silent; exit status unchanged.
+  # The polytoken stub creates the session dir mid-launch so its birthtime is
+  # deterministically inside the launch window.
+  E2E="$T/e2e"; mkdir -p "$E2E/bin"; E2E_CALLS="$E2E/calls"; : > "$E2E_CALLS"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$E2E_CALLS" > "$E2E/bin/curl"; chmod +x "$E2E/bin/curl"
+  printf '#!/usr/bin/env bash\nmkdir -p "$POLY_SESSIONS_DIR/e2e-sess"\nkill -9 $$\n' > "$W/polytoken"; chmod +x "$W/polytoken"
+  PATH="$BSDSTUB:$E2E/bin:$W:$PATH" POLY_NOTIFY_EXIT_DIR="$E2E/exit" POLY_SESSIONS_DIR="$E2E/sessions" PUSHOVER_APP_TOKEN=t PUSHOVER_USER_KEY=u AGENT_NOTIFY_PUSHOVER_URL=http://127.0.0.1:9 bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>&1; est=$?
+  [ "$est" = 137 ] && ok 'e2e wrapper exit status unchanged' || no 'e2e wrapper exit status unchanged'
+  i=0; while [ "$i" -lt 60 ] && [ ! -s "$E2E_CALLS" ]; do sleep 0.05; i=$((i+1)); done
+  grep -Fq '(e2e-sess)' "$E2E_CALLS" && ok 'e2e ships correlated session title' || no 'e2e ships correlated session title'
+  grep -Fq '1 session(s) affected' "$E2E_CALLS" && ok 'e2e counts its own record' || no 'e2e counts its own record'
+  # Without credentials the sender is a silent no-op: still no network, no crash.
+  mkdir -p "$E2E/exit2"; : > "$E2E_CALLS"
+  PATH="$BSDSTUB:$E2E/bin:$W:$PATH" POLY_NOTIFY_EXIT_DIR="$E2E/exit2" POLY_SESSIONS_DIR="$E2E/sessions" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= bash "$R/home/bin/polytoken-notify-wrapper.sh" new >/dev/null 2>&1; est2=$?
+  [ "$est2" = 137 ] && [ ! -s "$E2E_CALLS" ] && ok 'e2e without credentials stays silent and fail-open' || no 'e2e without credentials stays silent and fail-open'
+else
+  no "shipper library exists"
+fi
+# Container lane: run.sh trap ships 137/KILL records from the host data root.
+# The podman stub creates the session dir mid-launch (deterministic birthtime
+# inside the launch window) and exits 137 like a killed container would.
+RSHOME2="$T/rshome2"; mkdir -p "$RSHOME2/workspace" "$RSHOME2/.config/polytoken" "$RSHOME2/bin" "$RSHOME2/.local/share/polytoken-dev"
+RBIN2="$T/rsbin2"; mkdir -p "$RBIN2"
+printf '#!/usr/bin/env bash\nprintf '"'"'%%s\n'"'"' "$*" >> "$PODMAN_LOG2"\nmkdir -p "$HOME/.local/share/polytoken-dev/sessions/runsh-sess"\nexit 137\n' > "$RBIN2/podman"; chmod +x "$RBIN2/podman"
+RUNSH_CALLS="$T/runsh-calls"; : > "$RUNSH_CALLS"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$RUNSH_CALLS" > "$RBIN2/curl"; chmod +x "$RBIN2/curl"
+( cd "$RSHOME2/workspace" && PATH="$RBIN2:$BSDSTUB:$PATH" HOME="$RSHOME2" PODMAN_LOG2="$T/podman2.log" POLY_ENV_FILE="$T/none2.env" POLY_CONTAINER_NAME="pt-test-c4" PUSHOVER_APP_TOKEN=t PUSHOVER_USER_KEY=u AGENT_NOTIFY_PUSHOVER_URL=http://127.0.0.1:9 bash "$R/polytoken-container/run.sh" new ) >/dev/null 2>&1; rst2=$?
+[ "$rst2" = 137 ] && ok 'run.sh preserves 137 exit under set -e' || no 'run.sh preserves 137 exit under set -e'
+i=0; while [ "$i" -lt 60 ] && [ ! -s "$RUNSH_CALLS" ]; do sleep 0.05; i=$((i+1)); done
+grep -Fq '(runsh-sess)' "$RUNSH_CALLS" && ok 'run.sh trap ships correlated record' || no 'run.sh trap ships correlated record'
+grep -q 'suppressed:status=0' "$T/logs/notify.log" && ok 'run.sh status-0 trap suppressed with diagnostic' || no 'run.sh status-0 trap suppressed with diagnostic'
 
 [ "$P" -gt 0 ] && [ "$F" -eq 0 ] && echo "PASS: $P" || echo "FAILURES: $F/$((P+F))"; exit "$F"

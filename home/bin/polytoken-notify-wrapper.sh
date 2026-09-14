@@ -8,6 +8,10 @@ set -u
 _LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)"
 # shellcheck source=../lib/notify-exit-record.sh
 . "$_LIB/notify-exit-record.sh"
+if [ -f "$_LIB/notify-shipper.sh" ]; then
+  # shellcheck source=../lib/notify-shipper.sh
+  . "$_LIB/notify-shipper.sh"
+fi
 unset _LIB
 
 command -v polytoken >/dev/null 2>&1 || { echo "polytoken-notify-wrapper: polytoken not on PATH" >&2; exit 127; }
@@ -28,8 +32,9 @@ else
 fi
 ended="$(date +%s)"
 
-# Launch-scoped session identity: the newest session directory created or
-# touched during this launch window. Empty means "no correlated session".
+# Launch-scoped session identity (F1): the session directory CREATED
+# (birthtime) during this launch window. Unavailable birthtime is ambiguity;
+# empty means "no correlated session". mtime is never consulted.
 sessions_root="${POLY_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}"
 sess_dir="$(notify_exit_newest_session "$sessions_root" "$started" "$ended")"
 session_id=""
@@ -48,4 +53,10 @@ if [ -n "$sess_dir" ] && [ -f "$sess_dir/session.json" ]; then
 fi
 
 notify_exit_emit "native-wrapper" "$session_id" "$status" "$started" "$ended" "$repo" "$branch" "$title" || true
+# Lifecycle shipper (r3.7/r3.8): ships only qualifying 137/KILL records with
+# clean timestamp fidelity and a correlated session, exactly once per 15s
+# batch. Fail-open by contract: never blocks meaningfully (the shared sender
+# detaches immediately) and never changes the launcher's exit status.
+command -v notify_exit_ship >/dev/null 2>&1 && \
+  notify_exit_ship "native-wrapper" "$session_id" "$status" "$started" "$ended" "$repo" "$branch" "$title" || true
 exit "$status"

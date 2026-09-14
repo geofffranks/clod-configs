@@ -162,6 +162,14 @@ restore_project_config() {
         title="$(grep -o '"session_title"[[:space:]]*:[[:space:]]*"[^"]*"' "$sess/session.json" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//' || true)"
       fi
       notify_exit_emit "container-run.sh" "$sid" "$status" "${RUN_STARTED_EPOCH:-0}" "$now" "$repo" "$branch" "$title" || true
+      # Lifecycle shipper (r3.7/r3.8): ships only qualifying 137/KILL records
+      # with clean timestamp fidelity and a correlated session, exactly once
+      # per 15s batch. Fail-open: never changes this launcher's exit status.
+      if [ -f "$SCRIPT_DIR/../home/lib/notify-shipper.sh" ]; then
+        # shellcheck source=../home/lib/notify-shipper.sh
+        . "$SCRIPT_DIR/../home/lib/notify-shipper.sh"
+        notify_exit_ship "container-run.sh" "$sid" "$status" "${RUN_STARTED_EPOCH:-0}" "$now" "$repo" "$branch" "$title" || true
+      fi
     ) || true
   fi
   exit "$status"
