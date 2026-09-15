@@ -177,7 +177,8 @@ D="$(seed x "$EXTRAHOOK")"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
 hasnt "$out" "OVERWRITE"                                "adding to a shared event is not a conflict"
 ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | index("~/my/stop.sh") != null' "user Stop hook preserved"
-ajq "$D/settings.json" '.hooks.Stop | length == 3'     "recommended Stop hooks added too"
+# user stop.sh + recommended agent-state, agent-join, agent-notify
+ajq "$D/settings.json" '.hooks.Stop | length == 4'      "recommended Stop hooks added too"
 rm -rf "$D"
 
 # --- S16: tilde vs expanded $HOME are the SAME hook -> dedup, not re-add ---
@@ -188,7 +189,8 @@ TILDEHOOK="{ \"hooks\": { \"Stop\": [ { \"matcher\": \"\", \"hooks\": [ { \"type
 D="$(seed x "$TILDEHOOK")"
 out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" 2>&1)"
 ajq "$D/settings.json" '[.hooks.Stop[].hooks[].command] | map(select(test("agent-state"))) | length == 1' "agent-state not duplicated across tilde/expanded forms"
-ajq "$D/settings.json" '.hooks.Stop | length == 2'     "agent-state deduped, agent-join added"
+# agent-state (deduped) + agent-join + agent-notify
+ajq "$D/settings.json" '.hooks.Stop | length == 3'     "agent-state deduped, agent-join added"
 rm -rf "$D"
 
 # --- S17: partial accept across two conflicts (deterministic order) ---
@@ -308,6 +310,89 @@ CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" >/d
 ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command | select(test("skill-once/hook.sh$"))] | length==1' "expanded post command not duplicated"
 ajq "$D/settings.json" '[.hooks.PostToolUse[].hooks[].command] | index("~/my/post.sh") != null' "unrelated post hook preserved"
 rm -rf "$D"
+
+# --- N1: --notify-hook-only fresh install -> exactly the notify stack ---
+sc "N1 notify-only fresh -> exactly the notify stack, hooks-only settings"
+D="$(mktemp -d)"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --notify-hook-only 2>&1)"
+[ -f "$D/hooks/agent-notify.sh" ] && [ -x "$D/hooks/agent-notify.sh" ] && ok "notify hook installed executable" || no "notify hook installed executable"
+cmp -s "$REPO/home/hooks/agent-notify.sh" "$D/hooks/agent-notify.sh" && ok "notify hook matches source" || no "notify hook matches source"
+cmp -s "$REPO/home/lib/notify-mac.sh" "$D/lib/notify-mac.sh" && ok "mac lane lib installed (credential-free default-on lane)" || no "mac lane lib installed"
+ajq "$D/settings.json" '([.hooks | to_entries[] | .value[].hooks[].command] | map(select(test("/hooks/agent-notify\\.sh"))) | length) == 3' "exactly 3 agent-notify hook commands"
+ajq "$D/settings.json" '([.hooks | keys[]] | sort) == ["Notification","Stop","UserPromptSubmit"]' "exactly the 3 notify events"
+ajq "$D/settings.json" '.hooks.Stop[0].hooks[0].async == true and .hooks.Notification[0].hooks[0].async == true and (.hooks.UserPromptSubmit[0].hooks[0].async // false | not)' "async flags match the recommendation"
+ajq "$D/settings.json" '[.hooks | to_entries[] | .value[].hooks[].command] | all(test("agent-state|agent-join|read-once|skill-once|no-remote-writes") | not)' "no non-notify recommended hooks (agent-state absent)"
+ajq "$D/settings.json" 'keys == ["hooks"]' "settings.json is hooks-only (no env/theme/statusline keys)"
+for f in statusline.sh CLAUDE.md skills agent-join bash-guard read-once hooks/agent-state.sh lib/notify-send.sh lib/notify-identity.sh; do
+  [ ! -e "$D/$f" ] && ok "omitted: $f" || no "omitted: $f"
+done
+rm -rf "$D"
+
+# --- N2: lib drift — every lib the installed hook sources must be installed ---
+sc "N2 notify-only lib drift check"
+D="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --notify-hook-only >/dev/null 2>&1
+drift=0
+while IFS= read -r lib; do
+  [ -f "$D/lib/$lib" ] || { drift=1; echo "  missing lib: $lib" >&2; }
+done < <(grep -oE '\$_LIB_DIR/[A-Za-z0-9._-]+\.sh' "$D/hooks/agent-notify.sh" | sed 's/^.*_LIB_DIR\///' | sort -u)
+[ "$drift" = 0 ] && ok "every sourced lib is installed" || no "every sourced lib is installed"
+rm -rf "$D"
+
+# --- N3: --notify-hook-only without jq -> clear fatal error, nothing written ---
+sc "N3 notify-only without jq -> fatal, nothing written"
+D="$(mktemp -d)"; NOJQ="$(mktemp -d)"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz PATH="$NOJQ" /bin/bash "$REPO/install.sh" --notify-hook-only 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && ok "non-zero exit without jq (rc=$rc)" || no "non-zero exit without jq (rc=$rc)"
+has "$out" "--notify-hook-only requires jq" "clear jq requirement error"
+[ ! -e "$D/settings.json" ] && ok "no settings.json written" || no "no settings.json written"
+hasnt "$out" "skipping settings merge" "never the silent skip path"
+rm -rf "$D" "$NOJQ"
+
+# --- N4: idempotent re-run -> unchanged, no .bak ---
+sc "N4 notify-only idempotent re-run"
+D="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --notify-hook-only >/dev/null 2>&1
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --notify-hook-only 2>&1)"
+has "$out" "unchanged" "second run reports unchanged"
+ls "$D"/*.bak-* >/dev/null 2>&1 && no "no .bak on idempotent re-run" || ok "no .bak on idempotent re-run"
+rm -rf "$D"
+
+# --- N5: notify-only over a full install -> no-op ---
+sc "N5 notify-only over full install -> no-op"
+D="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --overwrite >/dev/null 2>&1
+before="$(cat "$D/settings.json")"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --notify-hook-only 2>&1)"
+[ "$(cat "$D/settings.json")" = "$before" ] && ok "settings.json byte-identical" || no "settings.json byte-identical"
+has "$out" "up to date" "reported up to date"
+rm -rf "$D"
+
+# --- N6: full install after notify-only -> adds the remainder ---
+sc "N6 full install after notify-only -> adds the remainder"
+D="$(mktemp -d)"
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --notify-hook-only >/dev/null 2>&1
+CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz "$REPO/install.sh" --overwrite >/dev/null 2>&1
+ajq "$D/settings.json" '.theme == "dark"' "theme added by full install"
+ajq "$D/settings.json" '[.hooks.PreToolUse[].hooks[].command] | any(test("agent-state"))' "non-notify hooks added"
+[ -f "$D/statusline.sh" ] && ok "statusline script added" || no "statusline script added"
+ajq "$D/settings.json" '([.hooks | to_entries[] | .value[].hooks[].command] | map(select(test("/hooks/agent-notify\\.sh"))) | length) == 3' "notify entries still exactly 3 (no dup)"
+rm -rf "$D"
+
+# --- N7: notify-only selector is fail-closed on a source rename ---
+sc "N7 notify-only selector fail-closed on source rename"
+S="$(mktemp -d)"
+cp "$REPO/install.sh" "$S/install.sh"
+cp -R "$REPO/home" "$S/home"
+sed -i.bak 's/agent-notify\.sh/agent-notify-renamed.sh/g' "$S/home/settings.recommended.json"
+D="$(mktemp -d)"
+out="$(CLAUDE_CONFIG_DIR="$D" CLAUDE_CONFIG_TTY=/nonexistent-xyz bash "$S/install.sh" --notify-hook-only 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && ok "renamed source fails loudly (rc=$rc)" || no "renamed source fails loudly (rc=$rc)"
+has "$out" "selector" "diagnostic names the selector failure"
+[ ! -e "$D/settings.json" ] && ok "no settings.json on selector failure" || no "no settings.json on selector failure"
+[ ! -e "$D/hooks" ] && [ ! -e "$D/lib" ] && ok "no partial install on selector failure (no hook or lib copies)" || no "no partial install on selector failure"
+ls "$D"/*.bak-* >/dev/null 2>&1 && no "no backups on selector failure" || ok "no backups on selector failure"
+rm -rf "$S" "$D"
 
 echo
 echo "=== $pass passed, $fail failed ==="

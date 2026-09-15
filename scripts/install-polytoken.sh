@@ -1,16 +1,41 @@
 #!/usr/bin/env bash
 # scripts/install-polytoken.sh — install native Polytoken configuration.
 #
-# Invoked by install.sh as: scripts/install-polytoken.sh FORCE
-#   FORCE is "0" or "1". Consumes:
+# Invoked by install.sh as: scripts/install-polytoken.sh FORCE [MODE]
+#   FORCE is "0" or "1". MODE (default empty) selects the scope:
+#     ""                 full install (config, permissions, hooks, managed files)
+#     notify             notify-only: the attention-notification stack and its
+#                        hook entries. The macOS LaunchAgent (invoked by
+#                        install.sh) owns the death scan, so the two keepalive
+#                        hook entries are dropped.
+#     notify-container   notify-only for containerized sessions: no LaunchAgent,
+#                        so the keepalive hook entries are installed instead and
+#                        keep the watchdog and SSE watcher running in-container.
+#
+# Consumes:
 #     POLYTOKEN_CONFIG_DIR  destination config root (default ~/.config/polytoken)
 #     POLYTOKEN_CONFIG_TTY  readable TTY for per-patch prompts (default /dev/tty)
 #
-# jq is used for hooks.json; mikefarah/yq v4 is required for YAML merges. If a
-# required dependency is missing, nothing structured is changed.
+# jq is used for hooks.json; mikefarah/yq v4 is required for YAML merges
+# (full installs only — the notify modes need jq alone). If a required
+# dependency is missing, nothing structured is changed.
 set -euo pipefail
 
+# ---- early gates (before any external command or filesystem work) ----
+die() { echo "polytoken: $*" >&2; exit 1; }
+
 FORCE="${1:-0}"
+MODE="${2:-}"
+case "$MODE" in
+  ""|notify|notify-container) ;;
+  *) die "unknown install mode: $MODE (expected empty, notify, or notify-container)" ;;
+esac
+notify_mode=0
+[ -n "$MODE" ] && notify_mode=1
+# Every mode is jq-based (hooks.json render, filter, and merge); fail closed
+# before resolving paths or creating anything.
+command -v jq >/dev/null 2>&1 || die "jq is required (https://stedolan.github.io/jq)"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}"
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -32,11 +57,41 @@ EXEC_SCRIPTS=(
   hooks/agent-notify.sh
   hooks/session-watchdog.sh
   hooks/watchdog-keepalive.sh
+  hooks/notify-watcher-keepalive.sh
   compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh
   compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once
   compat/grep-guard/hook.sh compat/large-read-guard/hook.sh
   compat/hooks/no-remote-writes.sh
 )
+
+# The attention-notification stack, shared verbatim by full and notify-only
+# installs (one array — no second enumeration): the agent-notify hook with its
+# mac-lane lib, the session watchdog and its container keepalive, and the SSE
+# event watcher with its libraries and session-start keepalive hook.
+NOTIFY_FILES=(
+  "home/hooks/agent-notify.sh:hooks/agent-notify.sh"
+  "home/session-watchdog.sh:hooks/session-watchdog.sh"
+  "home/hooks/watchdog-keepalive.sh:hooks/watchdog-keepalive.sh"
+  "home/hooks/notify-watcher-keepalive.sh:hooks/notify-watcher-keepalive.sh"
+  "home/lib/notify-mac.sh:lib/notify-mac.sh"
+  "home/lib/notify-event-watcher.sh:lib/notify-event-watcher.sh"
+  "home/lib/notify-identity.sh:lib/notify-identity.sh"
+  "home/lib/notify-send.sh:lib/notify-send.sh"
+  "home/lib/notify-claim.sh:lib/notify-claim.sh"
+)
+
+# Managed notify hook names expected in polytoken/hooks.json (rendered names).
+# In LaunchAgent mode (MODE=notify) the two keepalive entries are dropped: the
+# host LaunchAgent owns the death scan, and on stock macOS a keepalive loop
+# cannot spawn at all (no flock).
+notify_hook_names() {
+  if [ "$MODE" = "notify" ]; then
+    printf '%s\n' agent-notify agent-notify-cancel agent-notify-stop agent-notify-ask agent-notify-answer
+  else
+    printf '%s\n' agent-notify agent-notify-cancel agent-notify-stop agent-notify-ask agent-notify-answer \
+      session-watchdog-keepalive notify-watcher-keepalive
+  fi
+}
 
 # Clean up any staged files we leave behind on error. Must return 0 so the EXIT
 # trap never overrides the script's real exit status.
@@ -48,21 +103,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-die() { echo "polytoken: $*" >&2; exit 1; }
-
 # ---- dependency gates (before any structured change) ----
-require_jq() {
-  command -v jq >/dev/null 2>&1 \
-    || die "jq is required (https://stedolan.github.io/jq)"
-}
 require_yq_v4() {
   command -v yq >/dev/null 2>&1 \
     || die "mikefarah/yq v4 is required for YAML merges (https://github.com/mikefarah/yq); the Python yq wrapper is not supported"
   yq --version 2>/dev/null | grep -Eq 'version v4\.' \
     || die "mikefarah/yq v4 is required (got: $(yq --version 2>&1))"
 }
-require_jq
-require_yq_v4
+if [ "$notify_mode" = 0 ]; then
+  require_yq_v4
+fi
 
 # ---- interaction mode ----
 mode=interactive
@@ -203,6 +253,13 @@ render_hooks() {
 }
 
 render_legacy_skill_hooks() {
+  # Notify-only never removes hooks: an empty legacy set makes the removal
+  # pass structurally inert, so no destructive removal prompt (or no-TTY
+  # auto-removal) can ever fire outside the notify scope.
+  if [ "$notify_mode" = 1 ]; then
+    printf '[]\n'
+    return 0
+  fi
   jq -nc --arg dir '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '[
     {name:"skill-once",event:"pre_tool_use",matcher:"skill",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/hook.sh skill")}},
     {name:"skill-once-reset",event:"post_compaction",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/compact.sh compact")}}
@@ -497,16 +554,56 @@ ensure_local_bin_on_path() {
 echo "Installing Polytoken config into: $DEST"
 mkdir -p "$DEST"
 
+if [ "$notify_mode" = 1 ]; then
+  # ---- notify-only branch ----
+  # Exactly the attention stack, nothing else: no AGENTS.md, adapter,
+  # container-awareness, compat, skills, subagents, or facets; no
+  # permissions/config/PATH steps; jq is the only dependency.
+  echo "  notify-only mode ($MODE): installing the notification stack only"
+
+  # Filter the rendered recommended hooks to the managed notify names and use
+  # the filtered file as PT_HOOKS for BOTH the fresh and the merge branch — a
+  # fresh notify install must never land adapter-dependent guard hooks whose
+  # scripts this mode does not copy. Fail closed: any count other than the
+  # expected set means the canonical source drifted (e.g. a rename) and
+  # nothing is installed.
+  filtered="$(mktemp)"
+  STAGED_FILES+=("$filtered")
+  names_json="$(notify_hook_names | jq -R . | jq -s -c .)"
+  render_hooks | jq -c --argjson names "$names_json" '[ .[] | select(.name as $n | $names | index($n)) ]' > "$filtered" \
+    || die "notify hook filter failed; nothing installed"
+  matched="$(jq 'length' "$filtered")"
+  expected="$(notify_hook_names | wc -l | tr -d ' ')"
+  [ "$matched" = "$expected" ] \
+    || die "notify hook selector matched $matched of the expected $expected hook entries; nothing installed"
+  # Fail closed on the exact name set, not just the count: a rename-and-add
+  # drift could otherwise keep the count stable while changing the set.
+  jq -e --argjson names "$names_json" \
+    '([.[].name] | length) == ([.[].name] | unique | length)
+     and ([.[].name] | sort) == ($names | sort)' \
+    "$filtered" >/dev/null \
+    || die "notify hook selector did not match the expected name set exactly; nothing installed"
+  PT_HOOKS="$filtered"
+
+  for spec in "${NOTIFY_FILES[@]}"; do
+    copy_managed_file "$ROOT/${spec%%:*}" "$DEST/${spec#*:}"
+  done
+  for s in "${EXEC_SCRIPTS[@]}"; do
+    [ -f "$DEST/$s" ] && chmod +x "$DEST/$s"
+  done
+  install_hooks
+  echo "Done."
+  exit 0
+fi
+
 # 1. Plain managed files: AGENTS.md, adapter, compat scripts, skills.
 copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
 copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
 copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/container-awareness.sh"
-copy_managed_file "$ROOT/home/hooks/agent-notify.sh" "$DEST/hooks/agent-notify.sh"
-copy_managed_file "$ROOT/home/session-watchdog.sh" "$DEST/hooks/session-watchdog.sh"
-copy_managed_file "$ROOT/home/hooks/watchdog-keepalive.sh" "$DEST/hooks/watchdog-keepalive.sh"
-# The credential-free mac Notification Center lane, resolved by the installed
-# hooks under $DEST/hooks/ via ../lib.
-copy_managed_file "$ROOT/home/lib/notify-mac.sh" "$DEST/lib/notify-mac.sh"
+# The notify stack (hooks + libs, incl. the SSE watcher) from the one shared array.
+for spec in "${NOTIFY_FILES[@]}"; do
+  copy_managed_file "$ROOT/${spec%%:*}" "$DEST/${spec#*:}"
+done
 for d in "${COMPAT_DIRS[@]}"; do
   if [ -d "$ROOT/home/$d" ]; then
     while IFS= read -r -d '' src; do
