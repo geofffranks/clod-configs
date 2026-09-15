@@ -22,6 +22,16 @@ printf '%s\n' "$*" >> "${MOCK_LOG:?}"
 exit 1
 EOF
 chmod +x "$FAILCURL"
+# Recording osascript + Darwin uname stubs (AC6): the default-on mac lane must
+# never pop a real Notification Center alert during tests; the Darwin uname
+# stub keeps credential-free mac assertions working on Linux CI too.
+OSA="$TMP/osacalls"; : > "$OSA"; export OSA_LOG="$OSA"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${2:-}|${3:-}" >> "${OSA_LOG:-/dev/null}"\n' > "$TMP/osascript-rec"; chmod +x "$TMP/osascript-rec"
+ln -sf "$TMP/osascript-rec" "$TMP/osascript"
+printf '#!/usr/bin/env bash\necho Darwin\n' > "$TMP/uname"; chmod +x "$TMP/uname"
+# Failing osascript stub isolates mac-lane failure from Pushover retry state.
+printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/osascript-fail"; chmod +x "$TMP/osascript-fail"
+osacount(){ wc -l < "$OSA" | tr -d ' '; }
 pass=0; fail=0
 ok(){ echo "ok: $1"; pass=$((pass+1)); }; no(){ echo "FAIL: $1"; fail=$((fail+1)); }
 count(){ wc -l < "$LOG" | tr -d ' '; }
@@ -41,20 +51,49 @@ mksession(){
   printf '%s\n' '{"type":"user","content":"hi"}' >> "$TMP/sess/$1/log.jsonl"
   if [ "$2" = idle ]; then touch -t 200001010000 "$TMP/sess/$1/log.jsonl"; fi
 }
+# mkcrash <stem> <session> fresh|stale [message] — a TUI crash log naming its session
+mkcrash(){
+  local msg="${4:-panicked at rs/polytoken-cli/src/tui/reducer/mod.rs:706:55: index out of bounds}"
+  {
+    echo "polytoken TUI crash log"
+    echo "======================="
+    echo "Timestamp: x"
+    echo "Session: $2"
+    echo
+    echo "Reason: panic"
+    echo "Location: rs/polytoken-cli/src/tui/reducer/mod.rs:706:55"
+    echo "Message: $msg"
+  } > "$TMP/logs/$1-tui.crash.log"
+  if [ "$3" = stale ]; then touch -t 200001010000 "$TMP/logs/$1-tui.crash.log"; fi
+  return 0
+}
+
 run(){
-  : > "$LOG"
+  : > "$LOG"; : > "$OSA"
   local purge="${1:-0}"   # 0=disabled (existing tests), N=threshold, "default"=omit env (pins built-in default)
   if [ "$purge" = "default" ]; then
     WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
     WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 \
-    PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
+    PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
     bash "$HOOK"
   else
     WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
     WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 WATCHDOG_PURGE_OLD_DAYS="$purge" \
-    PATH="$TMP:$PATH" MOCK_LOG="$LOG" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
+    PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user \
     bash "$HOOK"
   fi
+}
+# Credential-free mac-only runner: no Pushover creds anywhere (env vars empty
+# AND the real host watchdog.env is pinned away, so pushover_ok=0 by
+# construction), so only the mac lane can send. Does NOT truncate $OSA:
+# cross-scan mac-send counts are asserted directly.
+run_nocreds(){
+  : > "$LOG"
+  WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/state" \
+  WATCHDOG_LIVENESS_STALE=30 WATCHDOG_IDLE_LIMIT=300 WATCHDOG_MASS=3 WATCHDOG_PURGE_OLD_DAYS=0 \
+  WATCHDOG_ENV_FILE="$TMP/none.env" \
+  PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= \
+  bash "$HOOK"
 }
 
 # 1-4. One world: boot grace, death+enrichment, dedup, resume-clears, re-death.
@@ -71,9 +110,12 @@ run
 [ "$(count)" = 1 ] && grep -q -- '--data-urlencode title=fix the flux capacitor Agent Died' "$LOG" \
   && grep -q -- '--data-urlencode message=projx: fix the flux capacitor' "$LOG" \
   && grep -q 'last activity 0m ago' "$LOG" && ok "death while active pings once, enriched" || no "death while active pings once, enriched"
+# The mac lane fires for the same death with the SAME title/body (AC2).
+grep -Fq 'fix the flux capacitor Agent Died|projx: fix the flux capacitor (last activity 0m ago)' "$OSA" \
+  && ok "death mac-sends with the same title/body" || no "death mac-sends with the same title/body"
 
 run
-[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-sessC" ] && ok "death episode pings only once" || no "death episode pings only once"
+[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-sessC" ] && [ "$(osacount)" = 0 ] && ok "death episode pings only once" || no "death episode pings only once"
 
 mkdaemon c2 sessC fresh
 run
@@ -160,25 +202,62 @@ run default
 newworld
 mkdaemon e1 sessE stale; mksession sessE idle
 run
-[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-sessE" ] && ok "idle death never pings" || no "idle death never pings"
+[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-sessE" ] && [ "$(osacount)" = 0 ] && ok "idle death never pings" || no "idle death never pings"
 
 # 6. Mass deaths (>= WATCHDOG_MASS in one scan) are treated as one host event.
 newworld
 mkdaemon m1 s1 stale; mkdaemon m2 s2 stale; mkdaemon m3 s3 stale
 mksession s1 active; mksession s2 active; mksession s3 active
 run
-[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-s1" ] && [ -f "$TMP/state/tomb-s3" ] && ok "mass death suppression" || no "mass death suppression"
+[ "$(count)" = 0 ] && [ -f "$TMP/state/tomb-s1" ] && [ -f "$TMP/state/tomb-s3" ] && [ "$(osacount)" = 0 ] && ok "mass death suppression" || no "mass death suppression"
 
 # 7. A liveness file whose daemon log names no session is skipped safely.
 newworld
 : > "$TMP/logs/anon.log"; : > "$TMP/logs/anon.liveness.jsonl"; touch -t 200001010000 "$TMP/logs/anon.liveness.jsonl"
 run && [ "$(count)" = 0 ] && ok "anonymous daemon log skipped safely" || no "anonymous daemon log skipped safely"
 
-# 8. Missing credentials fail open before any state or network work.
+# 8. No destination at all (non-mac uname): fail open before any state or
+#    network work — today's fail-open behavior.
+NONMAC="$TMP/nonmac"; mkdir -p "$NONMAC"; printf '#!/usr/bin/env bash\necho Linux\n' > "$NONMAC/uname"; chmod +x "$NONMAC/uname"
 newworld
 out="$(WATCHDOG_LOG_DIR="$TMP/logs" WATCHDOG_SESSIONS_DIR="$TMP/sess" WATCHDOG_STATE_DIR="$TMP/nocreds" \
-  PATH="$TMP:/usr/bin:/bin" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= bash "$HOOK")"
-[ -z "$out" ] && [ ! -d "$TMP/nocreds" ] && ok "missing credentials fail open" || no "missing credentials fail open"
+  WATCHDOG_ENV_FILE="$TMP/none.env" \
+  PATH="$NONMAC:/usr/bin:/bin" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= bash "$HOOK")"
+[ -z "$out" ] && [ ! -d "$TMP/nocreds" ] && ok "non-mac missing credentials fail open" || no "non-mac missing credentials fail open"
+
+# 8b. Credential-free mac-only scan (Darwin uname stub keeps this portable to
+#     Linux CI): death and TUI-crash alerts mac-send with ZERO curl, and the
+#     episode is claimed without any Pushover retry state (AC2/AC5).
+newworld
+mkdaemon mc1 sessMC fresh; mksession sessMC active "mac only death"
+run_nocreds                                  # boot grace: records, sends nothing
+[ "$(osacount)" = 0 ] && [ "$(count)" = 0 ] && ok "credential-free boot scan stays silent" || no "credential-free boot scan stays silent"
+touch -t 200001010000 "$TMP/logs/mc1.liveness.jsonl"
+mkcrash mccrash sessMC fresh "mac only crash message"
+run_nocreds
+grep -Fq 'mac only death Agent Died|projx: mac only death (last activity 0m ago)' "$OSA" \
+  && grep -Fq 'mac only death TUI Crashed|projx: mac only crash message (last activity 0m ago)' "$OSA" \
+  && [ "$(osacount)" = 2 ] && [ "$(count)" = 0 ] \
+  && ok "credential-free death+crash mac-send with zero curl" || no "credential-free death+crash mac-send with zero curl"
+[ -f "$TMP/state/tomb-sessMC" ] && [ ! -e "$TMP/state/att-sessMC" ] \
+  && [ -f "$TMP/state/crash-mccrash-tui.crash" ] \
+  && ok "mac-only episodes claimed without Pushover retry state" || no "mac-only episodes claimed without Pushover retry state"
+
+# 8c. A mac-lane failure must not release the tombstone or create att: the
+#     episode sends exactly once (no mac retry), Pushover state untouched.
+newworld
+mkdaemon mf1 sessMF fresh; mksession sessMF active "mac fail death"
+run_nocreds                                  # boot grace
+touch -t 200001010000 "$TMP/logs/mf1.liveness.jsonl"
+: > "$OSA"
+ln -sf "$TMP/osascript-fail" "$TMP/osascript"
+run_nocreds                                  # mac send fails (swallowed, fail-open)
+ln -sf "$TMP/osascript-rec" "$TMP/osascript"
+[ "$(count)" = 0 ] && [ ! -e "$TMP/state/att-sessMF" ] && [ -f "$TMP/state/tomb-sessMF" ] \
+  && ok "mac failure never touches att or releases the tombstone" || no "mac failure never touches att or releases the tombstone"
+run_nocreds                                  # episode already claimed: no second attempt
+[ "$(count)" = 0 ] && [ "$(osacount)" = 0 ] \
+  && ok "mac-only episode sends exactly once despite failure" || no "mac-only episode sends exactly once despite failure"
 
 # 9. Send failures retry up to 3 attempts, then tombstone. Per-scan ping
 #    counts: 1, 1, 1 failing attempts, then the 4th scan tombstones silently.
@@ -201,23 +280,6 @@ done
 # then the cap tombstones the episode and the fourth scan sends nothing.
 [ "$(count)" = 3 ] && [ -f "$TMP/state/tomb-sessR" ] && ok "failed sends retry 3 times then tombstone" || no "failed sends retry 3 times then tombstone (calls=$(count) tomb=$([ -f "$TMP/state/tomb-sessR" ] && echo y || echo n))"
 
-# mkcrash <stem> <session> fresh|stale [message] — a TUI crash log naming its session
-mkcrash(){
-  local msg="${4:-panicked at rs/polytoken-cli/src/tui/reducer/mod.rs:706:55: index out of bounds}"
-  {
-    echo "polytoken TUI crash log"
-    echo "======================="
-    echo "Timestamp: x"
-    echo "Session: $2"
-    echo
-    echo "Reason: panic"
-    echo "Location: rs/polytoken-cli/src/tui/reducer/mod.rs:706:55"
-    echo "Message: $msg"
-  } > "$TMP/logs/$1-tui.crash.log"
-  if [ "$3" = stale ]; then touch -t 200001010000 "$TMP/logs/$1-tui.crash.log"; fi
-  return 0
-}
-
 # 10. A fresh TUI crash in an active session pings once, enriched like a death.
 newworld
 mksession sessK active "chasing the tui panic"
@@ -226,8 +288,10 @@ run
 [ "$(count)" = 1 ] && grep -q -- '--data-urlencode title=chasing the tui panic TUI Crashed' "$LOG" \
   && grep -q -- '--data-urlencode message=projx: panicked at rs/tui.rs:706: index out of bounds (last activity 0m ago)' "$LOG" \
   && ok "fresh TUI crash pings once, enriched" || no "fresh TUI crash pings once, enriched"
+grep -Fq 'chasing the tui panic TUI Crashed|projx: panicked at rs/tui.rs:706: index out of bounds (last activity 0m ago)' "$OSA" \
+  && ok "crash mac-sends with the same title/body" || no "crash mac-sends with the same title/body"
 run
-[ "$(count)" = 0 ] && [ -f "$TMP/state/crash-2026-09-13T15-27-09Z-tui.crash" ] && ok "crash pings only once per crash log" || no "crash pings only once per crash log"
+[ "$(count)" = 0 ] && [ -f "$TMP/state/crash-2026-09-13T15-27-09Z-tui.crash" ] && [ "$(osacount)" = 0 ] && ok "crash pings only once per crash log" || no "crash pings only once per crash log"
 
 # 11. A crash log older than the idle limit is tombstoned silently.
 newworld

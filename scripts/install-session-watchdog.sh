@@ -21,6 +21,8 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_SRC="$SELF_DIR/home/session-watchdog.sh"
 PLIST_SRC="$SELF_DIR/launchd/$LABEL.plist"
 SCRIPT_DST="${HOME}/.claude/session-watchdog.sh"
+MAC_MODULE_SRC="$SELF_DIR/home/lib/notify-mac.sh"
+MAC_MODULE_DST="${HOME}/.claude/lib/notify-mac.sh"
 PLIST_DST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 ENV_FILE="${HOME}/.config/polytoken/watchdog.env"
 LOG_FILE="${HOME}/Library/Logs/polytoken-session-watchdog.log"
@@ -69,6 +71,12 @@ esac
 mkdir -p "$(dirname "$SCRIPT_DST")"
 cp "$SCRIPT_SRC" "$SCRIPT_DST"
 chmod +x "$SCRIPT_DST"
+
+# Also copy the credential-free mac Notification Center module so the
+# watchdog-only install (no ~/.claude/lib from a full claude install) can
+# resolve it from the sibling lib dir.
+mkdir -p "$(dirname "$MAC_MODULE_DST")"
+cp "$MAC_MODULE_SRC" "$MAC_MODULE_DST"
 
 mkdir -p "$(dirname "$PLIST_DST")" "$(dirname "$LOG_FILE")"
 if [ -z "${PUSHOVER_APP_TOKEN:-}" ] || [ -z "${PUSHOVER_USER_KEY:-}" ]; then

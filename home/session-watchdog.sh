@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Host-side watchdog: pings Pushover when a Polytoken session's daemon dies
-# while the session was recently active.
+# Host-side watchdog: posts to the local macOS Notification Center (credential-
+# free, on by default on a native mac host) and to Pushover (optional) when a
+# Polytoken session's daemon dies while the session was recently active.
 #
 # Why: a daemon death (crash, container restart, supervisor respawn) kills an
 # in-flight turn without firing any hook — the process that would run hooks is
@@ -44,6 +45,17 @@ _user="${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}"
 APP_TOKEN="${_app:-${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}}"
 USER_KEY="${_user:-${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}}"
 unset _app _user
+# Best-effort source of the credential-free mac Notification Center lane: the
+# watchdog lives at $DEST/hooks/ (native) or ~/.claude/ (watchdog-only install);
+# the module is at the sibling lib dir in both layouts.
+_NOTIFY_MAC_SRC=""
+for _cand in \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/lib/notify-mac.sh" \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)/notify-mac.sh"; do
+  if [ -z "$_NOTIFY_MAC_SRC" ] && [ -f "$_cand" ]; then _NOTIFY_MAC_SRC="$_cand"; fi
+done
+[ -n "$_NOTIFY_MAC_SRC" ] && . "$_NOTIFY_MAC_SRC"
+unset _NOTIFY_MAC_SRC
 LOG_DIR="${WATCHDOG_LOG_DIR:-$HOME/.local/share/polytoken/logs}"
 SESSIONS_DIR="${WATCHDOG_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}"
 STATE_DIR="${WATCHDOG_STATE_DIR:-$HOME/.local/share/polytoken/.session-watchdog}"
@@ -53,11 +65,13 @@ MASS="${WATCHDOG_MASS:-4}"
 PURGE_DAYS="${WATCHDOG_PURGE_OLD_DAYS:-7}"   # 0 disables stale-journal purge
 case "$PURGE_DAYS" in ''|*[!0-9]*) PURGE_DAYS=0 ;; esac   # non-numeric => disabled
 
-# All optional dependencies fail open before any state or network work.
-command -v curl >/dev/null 2>&1 || exit 0
+# jq is required for title/body enrichment in BOTH lanes (mac and Pushover);
+# curl is required only for Pushover. Fail open before any state or network work.
 command -v jq >/dev/null 2>&1 || exit 0
-[ -n "$APP_TOKEN" ] && [ -n "$USER_KEY" ] || exit 0
 [ -d "$LOG_DIR" ] || exit 0
+pushover_ok=0
+[ -n "$APP_TOKEN" ] && [ -n "$USER_KEY" ] && command -v curl >/dev/null 2>&1 && pushover_ok=1
+[ "$pushover_ok" = 1 ] || notify_mac_available || exit 0
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 
 sanitize() {
@@ -180,13 +194,16 @@ send_ping() {  # $1 session, $2 idle seconds
   # state must not double-ping the same death. Release the claim on failure
   # so the retry can run.
   : > "$STATE_DIR/tomb-$sessfile"
-  if curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
-    --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
-    --data-urlencode "title=$title" --data-urlencode "message=$message" >/dev/null 2>&1; then
-    rm -f "$att"
-  else
-    rm -f "$STATE_DIR/tomb-$sessfile"
-    echo $((n + 1)) > "$att"
+  notify_mac_send "$title" "$message" 2>/dev/null || true
+  if [ "$pushover_ok" = 1 ]; then
+    if curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
+      --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
+      --data-urlencode "title=$title" --data-urlencode "message=$message" >/dev/null 2>&1; then
+      rm -f "$att"
+    else
+      rm -f "$STATE_DIR/tomb-$sessfile"
+      echo $((n + 1)) > "$att"
+    fi
   fi
 }
 
@@ -213,13 +230,16 @@ send_crash_ping() {  # $1 session, $2 crash-log stem, $3 crash-log path, $4 age 
   # Claim the crash episode before delivering (same anti-double-ping rule
   # as daemon deaths); release the claim on failure so the retry can run.
   : > "$STATE_DIR/crash-$stem"
-  if curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
-    --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
-    --data-urlencode "title=$title" --data-urlencode "message=$message" >/dev/null 2>&1; then
-    rm -f "$att"
-  else
-    rm -f "$STATE_DIR/crash-$stem"
-    echo $((n + 1)) > "$att"
+  notify_mac_send "$title" "$message" 2>/dev/null || true
+  if [ "$pushover_ok" = 1 ]; then
+    if curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
+      --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
+      --data-urlencode "title=$title" --data-urlencode "message=$message" >/dev/null 2>&1; then
+      rm -f "$att"
+    else
+      rm -f "$STATE_DIR/crash-$stem"
+      echo $((n + 1)) > "$att"
+    fi
   fi
 }
 

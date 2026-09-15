@@ -3,6 +3,16 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -r "$TMP"' EXIT
 pass=0; fail=0
+# Suite-wide stubs (AC6): the default-on mac Notification Center lane must never
+# pop a real alert on a mac dev host, so osascript is replaced with a recorder and
+# uname reports Darwin. The Darwin stub also lets the suite's credential-free
+# assertions pass on Linux CI. These are installed before any sender runs here.
+STUBS="$TMP/stubs"; mkdir -p "$STUBS"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${2:-}|${3:-}" >> "${OSA_LOG:-/dev/null}"\n' > "$STUBS/osascript"; chmod +x "$STUBS/osascript"
+printf '#!/usr/bin/env bash\necho Darwin\n' > "$STUBS/uname"; chmod +x "$STUBS/uname"
+export PATH="$STUBS:$PATH"
+OSA="$TMP/osacalls"; : > "$OSA"; export OSA_LOG="$OSA"
+osacount(){ wc -l < "$OSA" | tr -d ' '; }
 ok(){ echo "ok: $1"; pass=$((pass+1)); }; no(){ echo "FAIL: $1"; fail=$((fail+1)); }
 assert_eq(){ [ "$1" = "$2" ] && ok "$3" || { echo "got: $1 expected: $2"; no "$3"; }; }
 # Formatter API: notify_identity_title session repo branch title; body reason error question.
@@ -24,9 +34,14 @@ LONG=$(printf 'x%.0s' $(seq 1 2000)); if run_title sid repo branch "$LONG" >/dev
 # Sender must use one curl, detached, bounded diagnostics, and env-only credentials.
 CURL="$TMP/curl"; CALLS="$TMP/calls"; LOGDIR="$TMP/logs"; mkdir -p "$LOGDIR"
 printf '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$CALLS"\nexit 22\n' > "$CURL"; chmod +x "$CURL"
-PATH="$TMP:$PATH" CALLS="$CALLS" AGENT_NOTIFY_LOG_DIR="$LOGDIR" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user AGENT_NOTIFY_PUSHOVER_URL=http://127.0.0.1:9 notify_source=test notify_event=stop notify_session=sid notify_title=Title notify_body=Body bash "$REPO/home/lib/notify-send.sh"; sleep .1
+PATH="$TMP:$PATH" CALLS="$CALLS" OSA_LOG="$OSA" AGENT_NOTIFY_LOG_DIR="$LOGDIR" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user AGENT_NOTIFY_PUSHOVER_URL=http://127.0.0.1:9 notify_source=test notify_event=stop notify_session=sid notify_title=Title notify_body=Body bash "$REPO/home/lib/notify-send.sh"; sleep .1
 for _ in 1 2 3 4 5; do [ -s "$CALLS" ] && break; sleep .05; done
 assert_eq "$(wc -l < "$CALLS" | tr -d ' ')" 1 "one failed curl attempt"
+# With creds present the mac lane also fires once, with the SAME title/body the
+# Pushover sender receives (AC1/AC2 parity through notify_send).
+for _ in 1 2 3 4 5; do [ -s "$OSA" ] && break; sleep .05; done
+assert_eq "$(osacount)" 1 "mac fires once with creds"
+assert_eq "$(cat "$OSA" 2>/dev/null)" "Title|Body" "mac send same title/body as Pushover"
 grep -Eq -- --max-time home/lib/notify-send.sh && grep -Eq -- '--max-time 10' home/lib/notify-send.sh && ok "curl timeout bounded" || no "curl timeout bounded"
 if grep -Eq -- 'curl .*--fail' home/lib/notify-send.sh && grep -q 'notify_diag rejected' home/lib/notify-send.sh; then ok "HTTP failure flag and rejected result"; else no "HTTP failure flag and rejected result"; fi
 AGENT_NOTIFY_LOG_DIR="$LOGDIR" source "$REPO/home/lib/notify-send.sh"
@@ -37,6 +52,40 @@ ROT="$TMP/rotation"; mkdir -p "$ROT"; AGENT_NOTIFY_LOG_DIR="$ROT" bash -c 'sourc
 [ -f "$LOGDIR/notify.log" ] && [ "$(stat -c %a "$LOGDIR" 2>/dev/null || stat -f %Lp "$LOGDIR")" = 700 ] && ok "diagnostic log and dir permissions" || no "diagnostic log and dir permissions"
 [ -z "$(PUSHOVER_APP_TOKEN= PUSHOVER_USER_KEY= AGENT_NOTIFY_LOG_DIR="$TMP/missing" bash "$REPO/home/lib/notify-send.sh" 2>&1)" ] && [ ! -e "$TMP/missing" ] && ok "missing credentials silent" || no "missing credentials silent"
 [ "$(wc -c < "$LOGDIR/notify.log")" -lt 10000 ] && ok "diagnostic bounded" || no "diagnostic bounded"
+# macOS Notification Center module (notify-mac.sh): availability predicate and
+# send behavior under a controlled PATH (per-test gating toggles knob/uname/osa).
+M="$REPO/home/lib/notify-mac.sh"
+# (a) on Darwin with osascript present: exactly one invocation, SAME title/body.
+: > "$OSA"
+bash -c 'source "$1"; notify_mac_send "Title" "Body"' _ "$M" >/dev/null 2>&1
+assert_eq "$(osacount)" 1 "mac send: exactly one invocation"
+assert_eq "$(cat "$OSA" 2>/dev/null)" "Title|Body" "mac send: same title/body as Pushover args"
+# (b) zero when AGENT_NOTIFY_MAC=0.
+: > "$OSA"
+AGENT_NOTIFY_MAC=0 bash -c 'source "$1"; notify_mac_send "T" "B"' _ "$M" >/dev/null 2>&1
+[ ! -s "$OSA" ] && ok "mac send zero when AGENT_NOTIFY_MAC=0" || no "mac send zero when AGENT_NOTIFY_MAC=0"
+# (b) zero when non-Darwin (uname stub reports Linux).
+mkdir -p "$TMP/linuxver"; printf '#!/usr/bin/env bash\necho Linux\n' > "$TMP/linuxver/uname"; chmod +x "$TMP/linuxver/uname"
+: > "$OSA"
+PATH="$TMP/linuxver:$STUBS:$PATH" bash -c 'source "$1"; notify_mac_send "T" "B"' _ "$M" >/dev/null 2>&1
+[ ! -s "$OSA" ] && ok "mac send zero on non-Darwin" || no "mac send zero on non-Darwin"
+# (b) zero when osascript absent (uname says Darwin but no osascript reachable).
+mkdir -p "$TMP/noosa"; printf '#!/usr/bin/env bash\necho Darwin\n' > "$TMP/noosa/uname"; chmod +x "$TMP/noosa/uname"
+: > "$OSA"
+PATH="$TMP/noosa:/bin" bash -c 'source "$1"; notify_mac_send "T" "B"' _ "$M" >/dev/null 2>&1
+[ ! -s "$OSA" ] && ok "mac send zero when osascript absent" || no "mac send zero when osascript absent"
+# (c) empty title/body -> zero invocation even when available.
+: > "$OSA"
+bash -c 'source "$1"; notify_mac_send "" ""' _ "$M" >/dev/null 2>&1
+[ ! -s "$OSA" ] && ok "mac send zero on empty title/body" || no "mac send zero on empty title/body"
+# (d) the perl alarm(5) backstop is in the module source...
+grep -Eq 'alarm[[:space:]]+5' "$M" && ok "module has perl alarm 5 backstop" || no "module has perl alarm 5 backstop"
+# (d) ...and a wedged osascript returns well under 5s (AC4).
+mkdir -p "$TMP/slow"; printf '#!/usr/bin/env bash\nsleep 30\n' > "$TMP/slow/osascript"; chmod +x "$TMP/slow/osascript"
+_s0="$(date +%s)"
+PATH="$TMP/slow:$STUBS:$PATH" bash -c 'source "$1"; notify_mac_send "t" "b"' _ "$M" >/dev/null 2>&1
+_s1="$(date +%s)"
+[ "$((_s1 - _s0))" -lt 8 ] && ok "wedged osascript bounded (<8s)" || no "wedged osascript bounded (<8s)"
 # Claim library (notify-claim.sh): atomic exclusive-create claims, restrictive
 # perms, exactly one concurrent winner (r3.1/r3.7 claim-boundary contract).
 CLAIMS="$TMP/claims"

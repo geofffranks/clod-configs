@@ -61,9 +61,11 @@ p4_seed() {
 sc "P1 fresh target -> expected files, no Claude-only artifacts"
 D="$(mktemp -d)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
-for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh; do
+for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh lib/notify-mac.sh; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
+cmp -s "$REPO/home/lib/notify-mac.sh" "$D/lib/notify-mac.sh" 2>/dev/null \
+  && ok "installed notify-mac.sh matches source" || no "installed notify-mac.sh matches source"
 for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh \
          compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once \
          compat/grep-guard/hook.sh compat/large-read-guard/hook.sh compat/hooks/no-remote-writes.sh; do

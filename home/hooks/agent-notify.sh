@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Shared, fail-open per-session Pushover notifier for Claude Code and Polytoken.
+# Shared, fail-open per-session attention notifier for Claude Code and Polytoken:
+# the local macOS Notification Center lane (credential-free, on by default on a
+# native mac host) plus the optional Pushover sender.
 set -u
 
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)"
 [ -f "$_LIB_DIR/notify-identity.sh" ] && . "$_LIB_DIR/notify-identity.sh"
 [ -f "$_LIB_DIR/notify-send.sh" ] && . "$_LIB_DIR/notify-send.sh"
+# Direct guarded source so the installed polytoken copy (which ships no
+# notify-send.sh) still gets the mac Notification Center module.
+[ -f "$_LIB_DIR/notify-mac.sh" ] && . "$_LIB_DIR/notify-mac.sh"
 unset _LIB_DIR
 
 HARNESS="${1:-}"
@@ -31,10 +36,13 @@ else
   EVENT="$(jq -r '.hook_event_name // .event // ""' <<<"$INPUT" 2>/dev/null || true)"
 fi
 
-# All non-prompt events fail open when credentials are unavailable, before any
-# state directory, worker, or network request is started.
+# All non-prompt events fail open when no destination is available, before any
+# state directory, worker, or network request is started. Pushover needs
+# credentials; the mac Notification Center lane is credential-free.
 [ -n "$HARNESS" ] || exit 0
-[ -n "$APP_TOKEN" ] && [ -n "$USER_KEY" ] || exit 0
+pushover_ok=0
+[ -n "$APP_TOKEN" ] && [ -n "$USER_KEY" ] && pushover_ok=1
+[ "$pushover_ok" = 1 ] || notify_mac_available || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 # Polytoken passes the session id via POLYTOKEN_SESSION_ID, not the stdin payload;
 # Claude Code passes it in the JSON. Try env first, fall back to payload.
@@ -236,9 +244,13 @@ unlock
   CURRENT="$(cat "$STATE.gen" 2>/dev/null || true)"
   [ "$CURRENT" = "$GEN" ] || { unlock; exit 0; }
   # Keep ownership lock through send, so cancellation/new generations cannot race it.
-  curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
-    --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
-    --data-urlencode "title=$TITLE" --data-urlencode "message=$MESSAGE" >/dev/null 2>&1 || { unlock; exit 0; }
+  # Send to the local Notification Center first (bounded, credential-free).
+  notify_mac_send "$TITLE" "$MESSAGE" 2>/dev/null || true
+  if [ "$pushover_ok" = 1 ]; then
+    curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
+      --data-urlencode "token=$APP_TOKEN" --data-urlencode "user=$USER_KEY" \
+      --data-urlencode "title=$TITLE" --data-urlencode "message=$MESSAGE" >/dev/null 2>&1 || { unlock; exit 0; }
+  fi
   [ "$(cat "$STATE.gen" 2>/dev/null || true)" = "$GEN" ] && rm -f "$STATE.gen" "$STATE.cancel"
   unlock
 ) </dev/null >/dev/null 2>&1 &
