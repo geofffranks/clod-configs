@@ -29,6 +29,52 @@ notify_mac_available() {
   [ "${_notify_mac_ok:-0}" = "1" ]
 }
 
+# _notify_mac_terminal_bundle — detect a running terminal app and return its bundle ID.
+# Checks known terminals in preference order; falls back to com.apple.Terminal (always
+# present on macOS). Sets AGENT_NOTIFY_TERMINAL_BUNDLE to override auto-detection.
+_notify_mac_terminal_bundle() {
+  [ -n "${AGENT_NOTIFY_TERMINAL_BUNDLE:-}" ] && {
+    printf '%s\n' "$AGENT_NOTIFY_TERMINAL_BUNDLE"; return 0
+  }
+  local name bundle
+  while IFS='|' read -r name bundle; do
+    pgrep -x "$name" >/dev/null 2>&1 && { printf '%s\n' "$bundle"; return 0; }
+  done <<'TERMINALS'
+Ghostty|com.mitchellh.ghostty
+kitty|net.kovidgoyal.kitty
+iTerm2|com.googlecode.iterm2
+Terminal|com.apple.Terminal
+TERMINALS
+  # No terminal detected; fall back to Terminal.app which is always installed.
+  printf '%s\n' "com.apple.Terminal"
+  return 0
+}
+
+# _notify_mac_script — path to the stable named AppleScript file.
+# A fixed, persistent file avoids the temp-GUID-file problem: when osascript
+# reads from stdin (`-`) macOS creates a new UUID-named temp .scpt on every
+# call, associates the notification with Script Editor + that GUID file, and
+# clicking the notification opens Script Editor with a now-gone temp script.
+# Using a stable named file lets macOS remember the permission grant and gives
+# the notification a consistent click-target.
+_notify_mac_script="${XDG_DATA_HOME:-$HOME/.local/share}/agent-notify/notify.applescript"
+
+# _notify_mac_ensure_script — idempotent: write the script file once.
+_notify_mac_ensure_script() {
+  [ -f "$_notify_mac_script" ] && return 0
+  local dir
+  dir="$(dirname "$_notify_mac_script")"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  chmod 700 "$dir" 2>/dev/null || true
+  printf '%s\n' \
+    'on run argv' \
+    '  display notification (item 2 of argv) with title (item 1 of argv)' \
+    'end run' \
+    > "$_notify_mac_script" 2>/dev/null || return 1
+  chmod 600 "$_notify_mac_script" 2>/dev/null || true
+  return 0
+}
+
 # notify_mac_send <title> <body> — post to Notification Center, always 0.
 notify_mac_send() {
   local title="${1:-}" body="${2:-}" perl_bin="" rc=0
@@ -36,24 +82,34 @@ notify_mac_send() {
   # No content, no alert (also keeps the notify-send.sh self-execute path a
   # silent no-op when called with unset title/body).
   [ -n "$title" ] || [ -n "$body" ] || return 0
-  # Bounded send. macOS ships no `timeout`, so every osascript invocation runs
-  # under a perl alarm(5) backstop. SIGALRM persists across exec (POSIX), so a
-  # wedged osascript is killed at 5s and can never hang the caller (or extend
-  # the agent-notify/watchdog lock longer than the existing bounded windows).
+  # Bounded send. macOS ships no `timeout`, so every invocation runs under a
+  # perl alarm(5) backstop. SIGALRM persists across exec (POSIX), so a wedged
+  # process is killed at 5s and can never hang the caller.
   perl_bin="$(command -v perl 2>/dev/null || true)"
   [ -n "$perl_bin" ] || return 0
-  # argv + here-doc: title/body travel as osascript argv items (no shell or
-  # AppleScript quoting needed) and sanitized text is already quote-safe.
-  "$perl_bin" -e 'alarm 5; exec @ARGV' osascript - "$title" "$body" \
-    <<'APPLESCRIPT' 2>/dev/null
-on run argv
-  display notification (item 2 of argv) with title (item 1 of argv)
-end run
-APPLESCRIPT
+
+  # Prefer terminal-notifier when available: it sends the notification with the
+  # terminal app's icon (-sender) and activates the terminal on click (-activate),
+  # matching Claude Code's built-in notification behavior as closely as possible.
+  local tn_bin bundle
+  tn_bin="$(command -v terminal-notifier 2>/dev/null || true)"
+  if [ -n "$tn_bin" ]; then
+    bundle="$(_notify_mac_terminal_bundle)"
+    "$perl_bin" -e 'alarm 5; exec @ARGV' \
+      "$tn_bin" -title "$title" -message "$body" \
+      -sender "$bundle" -activate "$bundle" \
+      2>/dev/null
+    return 0
+  fi
+
+  # Fallback: stable named AppleScript file. A fixed path avoids the macOS
+  # temp-GUID association that links the notification to Script Editor and an
+  # already-deleted temp .scpt on every click.
+  _notify_mac_ensure_script || return 0
+  "$perl_bin" -e 'alarm 5; exec @ARGV' osascript "$_notify_mac_script" "$title" "$body" \
+    2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    # Reuse the existing rotated notify.log (no new log file) only when the
-    # diagnostic harness is present and a source is identified.
     if command -v notify_diag >/dev/null 2>&1 && [ -n "${notify_source:-}" ]; then
       notify_diag mac-failed >/dev/null 2>&1 || true
     fi

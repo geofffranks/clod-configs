@@ -377,16 +377,15 @@ install_claude_notify() {
         | with_entries(select((.value | length) > 0)) ) }' \
     "$SRC_DIR/settings.recommended.json" > "$FRAG"
   if ! jq -e '
-    ([.hooks | keys[]] | sort) == ["Notification", "Stop", "UserPromptSubmit"]
-    and ([.hooks | to_entries[] | .value[]] | length) == 3
-    and ([.hooks | to_entries[] | .value[].hooks[].command] | length == 3)
+    ([.hooks | keys[]] | sort) == ["Stop", "UserPromptSubmit"]
+    and ([.hooks | to_entries[] | .value[]] | length) == 2
+    and ([.hooks | to_entries[] | .value[].hooks[].command] | length == 2)
     and ([.hooks | to_entries[] | .value[].hooks[].command] | all(test("/hooks/agent-notify\\.sh")))
     and (.hooks.UserPromptSubmit[0].hooks[0].async // false | not)
     and (.hooks.Stop[0].hooks[0].async == true)
-    and (.hooks.Notification[0].hooks[0].async == true)
   ' "$FRAG" >/dev/null; then
     rm -f "$FRAG"
-    echo "install.sh: --notify-hook-only selector did not match the expected 3 agent-notify hook entries (UserPromptSubmit, Stop async, Notification async); nothing installed" >&2
+    echo "install.sh: --notify-hook-only selector did not match the expected 2 agent-notify hook entries (UserPromptSubmit, Stop async); nothing installed" >&2
     exit 1
   fi
 
