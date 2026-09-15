@@ -96,6 +96,12 @@ noted where it applies).
 | `ask_user_question` pending | push with the first question's text (`agent-notify-ask`) | your answer cancels it (`agent-notify-answer`); an ambient notification (background job / subagent completion) cancels rather than adds |
 | TUI or container killed (SIGKILL) | "abnormal exit" alert | at most one per 15s window with the affected-session count; normal quits, Ctrl-C/TERM/HUP exits, and TUI launch failures stay silent |
 | Plan-handoff approval pending, goal-acceptance pending, goal completed | one alert each | sent by the SSE event watcher (below) — everything else on the stream stays silent |
+| A turn is cancelled (any reason, including self-initiated) | immediate "turn cancelled — reason" push, one per cancelled prompt | sent by the SSE event watcher (below); no rate cap — N distinct cancels mean N pushes; cancels older than 120s stay silent (envelope staleness) |
+| A command is held at the permission gate | "permission needed: <tool>" push, one per gate episode | sent by the SSE event watcher (below); body names the tool only, never the command arguments |
+
+### Unified notification format
+
+All notification lanes share the same session-aware title and canonical body tags; the SSE watcher's pushes receive that treatment too.
 
 Hook wiring (from `polytoken/hooks.json`): `agent-notify` (notification),
 `agent-notify-cancel` (pre_user_prompt), `agent-notify-stop` (stop),
@@ -111,6 +117,11 @@ watcher, and once more from the hook's ~3-minute consolidation if it is still
 pending (answering cancels the hook's send). If you prefer single-alert
 questions, remove the `agent-notify-ask` entry from your `hooks.json`; a
 watcher-side knob is a tracked backlog opportunity, not a shipped option.
+
+The watcher and hook lanes are likewise independent for cancellations: a
+cancelled turn can produce both the watcher's immediate cancel push and, if the
+hook lane's stop timer had already armed, its delayed "needs input" notice — no
+cross-lane suppression, by design.
 
 ## Credentials
 
@@ -249,11 +260,28 @@ launchctl load -w   ~/Library/LaunchAgents/dev.gf.polytoken-session-watchdog.pli
 `lib/notify-event-watcher.sh` adds what hooks cannot see: daemon-level session
 events. It discovers live session daemons (`sessions/*/startup.json`), follows
 each daemon's `/events` stream with the Bearer scheme, and pushes on exactly
-four mappings — questions (`question_pending`), plan-handoff approvals and
-goal-acceptance approvals (`approval_pending`), and goal completion
-(`goal_completed`). Everything else on the stream — cancellations, provider
-errors, ambient events, heartbeats — stays silent. This is not cruft: no hook
-fires for these daemon transitions.
+six mappings — questions (`question_pending`), plan-handoff approvals and
+goal-acceptance approvals (`approval_pending`), goal completion
+(`goal_completed`), turn cancellations (`turn_cancelled`), and permission-gate
+holds (`approval_pending`). Agent-raised permission-gate holds arrive without a
+sequence number; the watcher processes them cursorless with freshness checks and
+permanent per-episode claims, so reconnect re-renders do not double-push. The
+daemon never announces operator-facing approval popups, so those cannot push.
+Everything else on the stream — provider errors, ambient events, heartbeats —
+stays silent. This is not cruft: no hook fires for these daemon transitions.
+
+**Event coverage**
+
+| Event on the stream | Push | Once per |
+|---|---|---|
+| `ask_user_question` | "N questions need your answer" (+ first question) | question episode |
+| plan-handoff approval (interrogative) | "approve plan handoff" | handoff episode |
+| goal-acceptance approval (interrogative) | "accept goal proposal" | proposal episode |
+| permission gate held by an agent (interrogative[permission], arrives without a sequence number) | "permission needed: <tool>" | gate episode |
+| `goal_driver_update` completed | "goal completed: ..." | goal |
+| `turn_cancelled` (any reason) | "turn cancelled — <reason>" | cancelled prompt |
+
+Everything else on the stream stays silent (heartbeats, `hook_fired`, `session_idle`, `stream_discontinuity`, provider noise); operator-facing TUI approval popups are not announced on the stream, so they cannot push.
 
 **Under Polytoken the watcher is ensured-running by default**: the
 `notify-watcher-keepalive` session-start hook spawns one detached supervision
@@ -298,3 +326,6 @@ interaction between this watcher and the ask hook.
   `scripts/test-notify-adapter.sh`, `scripts/test-notify-event-watcher.sh`,
   `scripts/test-session-watchdog.sh`, `scripts/test-watchdog-keepalive.sh` —
   all run offline with mock senders and assert no network egress.
+- Raw SSE frames for watcher debugging: `bash scripts/capture-sse-experiment.sh --list`,
+  then `bash scripts/capture-sse-experiment.sh <session-dir> --max-seconds 120`
+  appends verbatim `data:` frames to a timestamped JSONL (no processing, no sends).

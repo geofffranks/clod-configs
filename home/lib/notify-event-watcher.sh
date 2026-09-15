@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 # SSE event watcher — attention lane (plan-002 r3.9 + operator "Choice C"
 # dispatch). Long-running per-host loop that discovers live session daemons,
-# connects to /events with the Bearer scheme, and notifies on EXACTLY the four
-# RT-verified mappings (everything else stays silent):
+# connects to /events with the Bearer scheme, and notifies on exactly the six
+# mapped events (everything else stays silent):
 #
 #   ask_user_question                 -> question_pending          (claim: interrogative_id)
 #   interrogative[plan_handoff]       -> approval_pending          (claim: interrogative_id)
 #   interrogative[goal_proposal]      -> approval_pending          (claim: interrogative_id)
 #   goal_driver_update[completed]     -> goal_completed            (claim: goal.id+":completed")
+#   turn_cancelled                    -> turn_cancelled            (claim: prompt_id+":cancelled")
+#   interrogative[permission]         -> approval_pending          (claim: interrogative_id)
+#
+# Agent-raised permission interrogatives arrive with seq:null and are handled
+# cursorless (freshness + claim only); operator-facing TUI permission prompts
+# emit no event at all (a documented daemon limitation, so their mapping is dormant).
 #
 # Normative contracts implemented (plan r3.1/r3.9):
 # - Baseline on connect: the first frame's seq starts the cursor; pre-connect
@@ -22,7 +28,7 @@
 #   before any send; dedup makes re-fires and re-renders no-ops. Where the
 #   required ID is absent the frame is diagnostic-skipped — never a synthetic
 #   key.
-# - Non-mapped event types (session_idle, turn_cancelled, hook_fired,
+# - Non-mapped event types (session_idle, stream_discontinuity, hook_fired,
 #   notification*, heartbeat, ...) are silently ignored. Only the `completed`
 #   goal transition maps; `accepted`/`created`/... stay silent.
 #
@@ -33,8 +39,10 @@
 #   <root>/claims/<safe_session_id>/claim.<key>   atomic send claims
 #   <root>/watch/<safe_session_id>/cursor         "seq N" + "clock EPOCH"
 #
-# RUN (operator deployment step — this repo intentionally ships no installer
-# or launchd changes):
+# RUN (deployment): install.sh/scripts/install-polytoken.sh copy and wire the
+# watcher and its keepalive on non-macOS and containerized installs; on native
+# macOS the installer wires the watchdog LaunchAgent but omits the watcher
+# keepalive entry, so start the watcher manually there:
 #   nohup bash "$HOME/path/to/repo/home/lib/notify-event-watcher.sh" \
 #     >/dev/null 2>&1 &
 #
@@ -122,6 +130,7 @@ _nw_cursor_write(){ # <watch_dir> <seq> <clock_epoch>
 # lines are printed to stdout as "send <kind> key=<key>".
 notify_watcher_process_frame(){
   local frame="${1:-}" now="${2:-}" sid seq emitted etype
+  local cursorless=0
   command -v jq >/dev/null 2>&1 || { _nw_skip no-jq unknown; return 0; }
   [ -n "$frame" ] && [ -n "$now" ] || { _nw_skip bad-args unknown; return 0; }
   case "$now" in ''|*[!0-9]*) _nw_skip bad-clock unknown; return 0 ;; esac
@@ -131,7 +140,13 @@ notify_watcher_process_frame(){
   emitted="$(jq -r '.emitted_at // empty' <<<"$frame" 2>/dev/null)"
   etype="$(jq -r '.event.type // empty' <<<"$frame" 2>/dev/null)"
   [ -n "$sid" ] || { _nw_skip no-session unknown; return 0; }
-  case "$seq" in ''|*[!0-9]*|0) _nw_skip bad-seq "$sid" "$seq"; return 0 ;; esac
+  case "$seq" in ''|*[!0-9]*|0)
+    if [ "$etype" = "interrogative" ] && [ -n "$(jq -r 'select((.event.interrogative_id | type) == "string" and length > 0) | .event.interrogative_id' <<<"$frame" 2>/dev/null)" ]; then
+      cursorless=1; seq=""
+    else
+      _nw_skip bad-seq "$sid" "$seq"; return 0
+    fi ;;
+  esac
 
   local safe watch claims cursor last_seq=0 last_clock=0
   safe="$(_nw_safe "$sid")"
@@ -148,7 +163,7 @@ notify_watcher_process_frame(){
   # Clock-discontinuity backstop: apparent ages are untrustworthy across a
   # backward jump beyond the tolerance; suppress, rebaseline, diagnostic-log.
   if [ "$last_clock" -gt 0 ] && [ "$((last_clock - now))" -gt "$NOTIFY_WATCHER_CLOCK_TOLERANCE" ]; then
-    _nw_cursor_write "$watch" "$last_seq" "$now" || true
+    [ "$cursorless" -eq 0 ] && _nw_cursor_write "$watch" "$last_seq" "$now" || true
     notify_source=event-watcher notify_event=clock-discontinuity notify_session="$sid" \
       notify_diag "backward jump $last_clock->$now; suppressed frame seq=$seq; rebaselined" 2>/dev/null || true
     printf 'skip clock-discontinuity seq=%s\n' "$seq"
@@ -157,7 +172,7 @@ notify_watcher_process_frame(){
 
   # Baseline / replay: the first processed frame starts the cursor; anything
   # at or below it was already seen (or predates connect) and stays silent.
-  if [ "$last_seq" -gt 0 ] && [ "$seq" -le "$last_seq" ]; then
+  if [ "$cursorless" -eq 0 ] && [ "$last_seq" -gt 0 ] && [ "$seq" -le "$last_seq" ]; then
     _nw_cursor_write "$watch" "$last_seq" "$now" || true
     _nw_skip replay "$sid" "$seq"
     return 0
@@ -166,26 +181,26 @@ notify_watcher_process_frame(){
   local emax=0
   if [ -n "$emitted" ]; then emax="$(notify_watcher_epoch "$emitted" 2>/dev/null)" || emax=0; fi
   if [ -z "$emitted" ] || [ "$emax" -le 0 ]; then
-    _nw_cursor_write "$watch" "$seq" "$now" || true
+    [ "$cursorless" -eq 0 ] && _nw_cursor_write "$watch" "$seq" "$now" || true
     _nw_skip malformed-timestamp "$sid" "$seq"
     return 0
   fi
   local age=$((now - emax))
   if [ "$age" -gt "$NOTIFY_WATCHER_FRESH_SECONDS" ]; then
-    _nw_cursor_write "$watch" "$seq" "$now" || true
+    [ "$cursorless" -eq 0 ] && _nw_cursor_write "$watch" "$seq" "$now" || true
     _nw_skip stale "$sid" "$seq"
     return 0
   fi
   if [ "$age" -lt 0 ] && [ "$((-age))" -gt "$NOTIFY_WATCHER_FUTURE_TOLERANCE" ]; then
-    _nw_cursor_write "$watch" "$seq" "$now" || true
+    [ "$cursorless" -eq 0 ] && _nw_cursor_write "$watch" "$seq" "$now" || true
     _nw_skip unverifiable "$sid" "$seq"
     return 0
   fi
 
   # Cursor advances once the envelope checks pass — mapped or not.
-  _nw_cursor_write "$watch" "$seq" "$now" || true
+  [ "$cursorless" -eq 0 ] && _nw_cursor_write "$watch" "$seq" "$now" || true
 
-  # Mapping (exactly the four RT-verified attention mappings).
+  # Mapping (the watcher's six mapped events — see the header above).
   local kind="" key="" body="" iid count first summary gid
   case "$etype" in
     ask_user_question)
@@ -206,6 +221,13 @@ notify_watcher_process_frame(){
       case "$itype" in
         plan_handoff)  kind="approval_pending"; key="$iid"; body="approve plan handoff" ;;
         goal_proposal) kind="approval_pending"; key="$iid"; body="accept goal proposal" ;;
+        permission)
+          local tname
+          kind="approval_pending"; key="$iid"
+          body="permission needed to run a command"
+          tname="$(jq -r '.event.permission_tool_call.tool_name as $t | select(($t|type) == "string" and ($t|length) > 0) | $t' <<<"$frame" 2>/dev/null)"
+          [ -n "$tname" ] && body="permission needed: $(_nw_clean_line "$tname" 80)"
+          ;;
         *) return 0 ;;  # outside the notification allowlist: silent
       esac
       [ -n "$key" ] || { _nw_skip missing-interrogative-id "$sid" "$seq"; return 0; }
@@ -220,6 +242,15 @@ notify_watcher_process_frame(){
       summary="$(jq -r '.event.goal.summary // .event.goal.terminal_reason.detail // empty' <<<"$frame" 2>/dev/null)"
       body="goal completed: $(_nw_clean_line "$summary" 200)"
       kind="goal_completed"
+      ;;
+    turn_cancelled)
+      local cpid creason
+      cpid="$(jq -r '.event.prompt_id as $p | select(($p|type) == "string" and ($p|length) > 0) | $p' <<<"$frame" 2>/dev/null)"
+      [ -n "$cpid" ] || { _nw_skip missing-prompt-id "$sid" "$seq"; return 0; }
+      creason="$(jq -r '.event.reason as $r | select(($r|type) == "string" and ($r|length) > 0) | $r' <<<"$frame" 2>/dev/null)"
+      body="turn cancelled"
+      [ -n "$creason" ] && body="turn cancelled — $(_nw_clean_line "$creason" 80)"
+      kind="turn_cancelled"; key="$cpid:cancelled"
       ;;
     *) return 0 ;;  # every non-mapped family: silent
   esac

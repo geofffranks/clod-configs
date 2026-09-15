@@ -64,7 +64,7 @@ notify_identity_session_title() {
 # Canonical `[<source:type>] ` body tag. The vocabulary is a fixed, closed set:
 #   hook:needs_input                                  consolidated attention alert
 #   sse:question_pending sse:approval_pending         watcher (diagnostic source
-#   sse:goal_completed                                "event-watcher")
+#   sse:goal_completed sse:turn_cancelled             "event-watcher")
 #   watchdog:agent_died watchdog:tui_crash            session watchdog lanes
 #   shipper:tui_abnormal_exit                         lifecycle shipper
 # Pure string assembly; cannot fail, so a body is always taggable (fail-open).

@@ -59,6 +59,7 @@ assert_eq "$(run_tag hook needs_input)" "[hook:needs_input] " "tag hook:needs_in
 assert_eq "$(run_tag sse question_pending)" "[sse:question_pending] " "tag sse:question_pending"
 assert_eq "$(run_tag sse approval_pending)" "[sse:approval_pending] " "tag sse:approval_pending"
 assert_eq "$(run_tag sse goal_completed)" "[sse:goal_completed] " "tag sse:goal_completed"
+assert_eq "$(run_tag sse turn_cancelled)" "[sse:turn_cancelled] " "tag sse:turn_cancelled"
 assert_eq "$(run_tag watchdog agent_died)" "[watchdog:agent_died] " "tag watchdog:agent_died"
 assert_eq "$(run_tag watchdog tui_crash)" "[watchdog:tui_crash] " "tag watchdog:tui_crash"
 assert_eq "$(run_tag shipper tui_abnormal_exit)" "[shipper:tui_abnormal_exit] " "tag shipper:tui_abnormal_exit"
