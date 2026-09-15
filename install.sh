@@ -354,7 +354,8 @@ fi
 }
 
 # Notify-only Claude install: just the attention-notification stack — the
-# agent-notify hook, its single lib dependency (notify-mac.sh, the
+# agent-notify hook, its two lib dependencies (notify-identity.sh, the shared
+# title/body-tag formatter the hook calls, and notify-mac.sh, the
 # credential-free mac Notification Center lane), and the three agent-notify
 # hook entries. No guards, skills, statusline, CLAUDE.md, env/model keys, or
 # other recommended settings. The hook entries are derived at runtime by jq
@@ -397,10 +398,14 @@ install_claude_notify() {
   mkdir -p "$DEST"
 
   # 2. Copy exactly the notify files (same new/unchanged/updated protocol as a
-  #    full install). The lib pair notify-identity/notify-send is deliberately
-  #    excluded: the hook sources neither. notify-mac.sh must ship — the hook
-  #    calls notify_mac_available/notify_mac_send for the default-on mac lane.
-  for rel in hooks/agent-notify.sh lib/notify-mac.sh; do
+  #    full install). notify-send.sh is deliberately excluded: the hook never
+  #    sources or calls it (the push is inline curl). notify-mac.sh must ship —
+  #    the hook calls notify_mac_available/notify_mac_send for the default-on
+  #    mac lane — and so must notify-identity.sh: the hook calls its
+  #    notify_identity_title/notify_identity_session_title/notify_alert_tag
+  #    formatters; without it alerts still deliver (fail-open) but degrade to
+  #    "(sid)" titles and untagged bodies.
+  for rel in hooks/agent-notify.sh lib/notify-identity.sh lib/notify-mac.sh; do
     src="$SRC_DIR/$rel"
     dst="$DEST/$rel"
     mkdir -p "$(dirname "$dst")"

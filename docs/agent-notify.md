@@ -64,10 +64,25 @@ runs on `UserPromptSubmit` (cancel lane) plus async `Stop` and `Notification`
 entries. The delay default is `AGENT_NOTIFY_DELAY=180` seconds; all timing
 coverage in tests uses explicit fractional overrides.
 
-Titles carry the session title (or "Agent"); bodies carry `repo/branch:` plus
-a bounded, sanitized preview. No transcript text beyond that preview ever
-leaves the machine — the same sanitized title/body reaches Notification Center
-and Pushover.
+Every alert renders the same identity in the title —
+`<repo>[/<branch>] (<session-id>)[ - <session-title>]`, falling back to
+`(<session-id>)` when a session has no project identity — and every body opens
+with a canonical `[source:type]` tag from a fixed, closed vocabulary:
+
+| Tag | Sender | Meaning |
+|---|---|---|
+| `[hook:needs_input]` | agent-notify hook | one consolidated attention alert (all its trigger events share it) |
+| `[sse:question_pending]` | SSE watcher | `ask_user_question` awaiting an answer |
+| `[sse:approval_pending]` | SSE watcher | plan-handoff or goal-acceptance approval pending |
+| `[sse:goal_completed]` | SSE watcher | goal driver completed |
+| `[watchdog:agent_died]` | session watchdog | daemon died mid-work |
+| `[watchdog:tui_crash]` | session watchdog | TUI panic |
+| `[shipper:tui_abnormal_exit]` | lifecycle shipper | TUI/container SIGKILLed |
+
+The watcher's diagnostic-log source stays `event-watcher` — body tag `sse`
+corresponds to diagnostic source `event-watcher`. No transcript text beyond
+the bounded preview ever leaves the machine — the same title and tagged body
+reach both Notification Center and Pushover.
 
 Under Claude Code there is no session watchdog and no SSE watcher; the death
 alerts and watcher sections below are Polytoken-side (the manual nohup path is
@@ -143,17 +158,21 @@ Both lanes append a `notify-exit-record/v1` JSON line per launch — native to
 Records whose timestamps could not be rendered faithfully carry
 `"ts_fidelity":"degraded"` and never alert.
 
-## Session watchdog ("Agent Died" scan)
+## Session watchdog (daemon-death and TUI-crash scan)
 
-A host-side scan alerts **"Agent Died"** when a Polytoken session's daemon
-dies mid-work. A crash or replacement kills the process that would run hooks,
-so a host-side watcher is the only reliable sensor. It runs as a macOS
-LaunchAgent (`scripts/install-session-watchdog.sh`, invoked automatically by
+A host-side scan alerts when a Polytoken session's daemon dies mid-work. A
+crash or replacement kills the process that would run hooks, so a host-side
+watcher is the only reliable sensor. The title names the session
+(`repo/branch (session-id) - title`, falling back to `(session-id)`); the body
+carries the glanceable lead-in:
+`[watchdog:agent_died] Agent died — <project>: <last text> (last activity Nm
+ago)`. It runs as a macOS LaunchAgent
+(`scripts/install-session-watchdog.sh`, invoked automatically by
 `install.sh` on native macOS) scanning every 30s. Each daemon keeps a
 continuously-updated liveness journal beside its log at
 `~/.local/share/polytoken/logs/<started-at>-<pid>.liveness.jsonl` (the paired
-`<started-at>-<pid>.log` names the session it served). A TUI panic alerts
-**"TUI Crashed"** under the same claim/retry model.
+`<started-at>-<pid>.log` names the session it served). A TUI panic alerts as
+`[watchdog:tui_crash] TUI crashed — …` under the same claim/retry model.
 
 On a native mac the watchdog delivers through the same dual channel as the
 hooks: Notification Center first (credential-free, so it works with no
