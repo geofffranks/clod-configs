@@ -237,20 +237,24 @@ _nw_clean_line(){
   LC_ALL=C printf '%s' "${1:-}" | tr '[:cntrl:]' ' ' | cut -c1-"${2:-80}"
 }
 
-# Production sender: identity title from the session's project path (fail-open
-# to "(sid)"), then the shared one-shot fail-open sender. No credentials in
-# scope means notify_send no-ops.
+# Production sender: session-title enrichment (best-effort, shared identity
+# library) folded into the identity title — repo/branch (session_id)[ - title],
+# failing open to "(sid)" — then the shared one-shot fail-open sender with the
+# canonical [sse:<kind>] body tag. Decoration lives ONLY here, so frame
+# mapping and claim tests stay byte-stable. No credentials in scope means
+# notify_send no-ops.
 notify_watcher_default_send(){
-  local sid="${1:-}" kind="${2:-}" key="${3:-}" body="${4:-}" title project
+  local sid="${1:-}" kind="${2:-}" key="${3:-}" body="${4:-}" title project stitle
   project=""
   if [ -f "$NOTIFY_WATCHER_SESSIONS_DIR/${sid//\//_}/session.json" ]; then
     project="$(jq -r '.project_path // empty' \
       "$NOTIFY_WATCHER_SESSIONS_DIR/${sid//\//_}/session.json" 2>/dev/null)"
   fi
-  title="$(notify_identity_resolve "$sid" "$project" "" 2>/dev/null)" || title=""
+  stitle="$(notify_identity_session_title "$NOTIFY_WATCHER_SESSIONS_DIR" "$sid")"
+  title="$(notify_identity_resolve "$sid" "$project" "$stitle" 2>/dev/null)" || title=""
   [ -n "$title" ] || title="($sid)"
   notify_source=event-watcher notify_event="$kind" notify_session="$sid" \
-  notify_title="$title" notify_body="$body" notify_send
+  notify_title="$title" notify_body="$(notify_alert_tag sse "$kind")$body" notify_send
   return 0
 }
 

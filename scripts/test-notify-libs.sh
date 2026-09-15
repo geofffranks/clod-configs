@@ -31,6 +31,37 @@ assert_eq "$(run_title sid repo branch '')" "repo/branch (sid)" "empty title omi
 if run_title '' repo branch '' >/dev/null 2>&1; then no "missing session id skips"; else ok "missing session id skips"; fi
 assert_eq "$(run_title $'s\n\t' $'r\r' $'b\n' $'t\t')" $'r /b  (s  ) - t ' "controls sanitized only"
 LONG=$(printf 'x%.0s' $(seq 1 2000)); if run_title sid repo branch "$LONG" >/dev/null 2>&1; then no "oversize skips"; else ok "oversize skips"; fi
+# Resolver project-basename fallback: a non-git project dir still names its
+# repo (git fails there); with no project dir at all the title is "(<sid>)".
+NGPROJ="$TMP/nongit/projdir"; mkdir -p "$NGPROJ"
+assert_eq "$(bash -c 'source "$1"; notify_identity_resolve sid "$2" ""' _ "$REPO/home/lib/notify-identity.sh" "$NGPROJ")" "projdir (sid)" "non-git project dir falls back to basename"
+assert_eq "$(bash -c 'source "$1"; notify_identity_resolve sid "" ""' _ "$REPO/home/lib/notify-identity.sh")" "(sid)" "absent project dir falls back to sid only"
+# Session-title enrichment helper: record.json .session_title beats
+# session.json .inferred_title beats .last_user_message_preview; any failure
+# yields empty; charset pinned to the hook set; bounded to 48 chars.
+run_enrich(){ bash -c 'source "$1"; notify_identity_session_title "$2" "$3"' _ "$REPO/home/lib/notify-identity.sh" "$@"; }
+SSDIR="$TMP/sessions"; mkdir -p "$SSDIR/enrA" "$SSDIR/enrB" "$SSDIR/enrC" "$SSDIR/enrE" "$SSDIR/enrF"
+printf '%s' '{"session_title":"record title"}' > "$SSDIR/enrA/record.json"
+printf '%s' '{"inferred_title":"inferred title","last_user_message_preview":"raw preview"}' > "$SSDIR/enrA/session.json"
+assert_eq "$(run_enrich "$SSDIR" enrA)" "record title" "enrichment prefers record.json session_title"
+printf '%s' '{"inferred_title":"inferred title","last_user_message_preview":"raw preview"}' > "$SSDIR/enrB/session.json"
+assert_eq "$(run_enrich "$SSDIR" enrB)" "inferred title" "enrichment falls back to inferred_title"
+printf '%s' '{"last_user_message_preview":"raw preview"}' > "$SSDIR/enrC/session.json"
+assert_eq "$(run_enrich "$SSDIR" enrC)" "raw preview" "enrichment falls back to last_user_message_preview"
+assert_eq "$(run_enrich "$SSDIR" missing)" "" "enrichment empty on missing session"
+assert_eq "$(run_enrich "" enrA)" "" "enrichment empty without sessions dir"
+printf '%s' '{"inferred_title":"t:i/tle@x-y_z.w/é"}' > "$SSDIR/enrE/session.json"
+assert_eq "$(run_enrich "$SSDIR" enrE)" "t:i/tle@x-y_z.w/" "enrichment charset is alnum plus space . _ / @ : -"
+printf '%s' "{\"inferred_title\":\"$(printf 'a%.0s' $(seq 1 60))\"}" > "$SSDIR/enrF/session.json"
+assert_eq "$(run_enrich "$SSDIR" enrF)" "$(printf 'a%.0s' $(seq 1 48))" "enrichment bounded to 48 chars"
+run_tag(){ bash -c 'source "$1"; notify_alert_tag "$2" "$3"' _ "$REPO/home/lib/notify-identity.sh" "$1" "$2"; }
+assert_eq "$(run_tag hook needs_input)" "[hook:needs_input] " "tag hook:needs_input"
+assert_eq "$(run_tag sse question_pending)" "[sse:question_pending] " "tag sse:question_pending"
+assert_eq "$(run_tag sse approval_pending)" "[sse:approval_pending] " "tag sse:approval_pending"
+assert_eq "$(run_tag sse goal_completed)" "[sse:goal_completed] " "tag sse:goal_completed"
+assert_eq "$(run_tag watchdog agent_died)" "[watchdog:agent_died] " "tag watchdog:agent_died"
+assert_eq "$(run_tag watchdog tui_crash)" "[watchdog:tui_crash] " "tag watchdog:tui_crash"
+assert_eq "$(run_tag shipper tui_abnormal_exit)" "[shipper:tui_abnormal_exit] " "tag shipper:tui_abnormal_exit"
 # Sender must use one curl, detached, bounded diagnostics, and env-only credentials.
 CURL="$TMP/curl"; CALLS="$TMP/calls"; LOGDIR="$TMP/logs"; mkdir -p "$LOGDIR"
 printf '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$CALLS"\nexit 22\n' > "$CURL"; chmod +x "$CURL"

@@ -23,6 +23,10 @@
 #     affected-session count in the body.
 #   - Title via notify_identity_title: repo/branch (session_id), no fallbacks;
 #     a title failure suppresses.
+#   - Body: canonical [shipper:tui_abnormal_exit] tag + notify_identity_body
+#     output; the tag length is subtracted from AGENT_NOTIFY_BODY_LIMIT (the
+#     helper caps content internally), clamped at >= 1 so a tiny operator
+#     limit cannot go negative.
 #   - Fail-open: never changes the launcher exit status; the shared sender
 #     (local macOS Notification Center + optional Pushover) is an immediate
 #     detached attempt bounded by the sender's own timeouts.
@@ -95,7 +99,7 @@ notify_exit_ship(){
   local launcher="${1:-}" session_id="${2:-}" status="${3:-}" started="${4:-}" ended="${5:-}"
   local repo="${6:-}" branch="${7:-}" title="${8:-}"
   local fidelity="${NOTIFY_EXIT_TS_FIDELITY:-}" signal dir claims batch count
-  local ship_title="" ship_body=""
+  local ship_title="" ship_body="" tag body_limit
   signal="$(_notify_exit_signal "$status")"
   dir="$(notify_exit_dir)"
   claims="$dir/claims"
@@ -133,7 +137,16 @@ notify_exit_ship(){
     notify_diag "suppressed:title-unavailable" || true
     return 0
   fi
-  ship_body="$(notify_identity_body "TUI terminated abnormally" "signal KILL" "$count session(s) affected")"
+  # Canonical body tag; subtract its length from the body limit so tag +
+  # content stays within the operator's bound (the helper caps content
+  # internally), clamped at >= 1 so a tiny limit cannot go negative.
+  tag="$(notify_alert_tag shipper tui_abnormal_exit)"
+  body_limit="${AGENT_NOTIFY_BODY_LIMIT:-512}"
+  case "$body_limit" in ''|*[!0-9]*) body_limit=512 ;; esac
+  body_limit=$(( body_limit - ${#tag} ))
+  [ "$body_limit" -ge 1 ] || body_limit=1
+  ship_body="$(AGENT_NOTIFY_BODY_LIMIT="$body_limit" notify_identity_body "TUI terminated abnormally" "signal KILL" "$count session(s) affected")"
+  ship_body="$tag$ship_body"
   notify_event="tui_abnormal_exit"
   notify_title="$ship_title"
   notify_body="$ship_body"

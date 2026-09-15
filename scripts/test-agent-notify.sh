@@ -58,10 +58,10 @@ wait_until wait_count 2 && ok "same-harness distinct-session isolation" || no "s
 AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Notification","session_id":"same","message":"first"}'
 K="$(key claude same)"; wait_until test -s "$TMP/state/$K.gen"
 AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Notification","session_id":"same","message":"latest"}'
-wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -q -- '--data-urlencode title=Agent ' "$LOG" && ok "same-session consolidation delivers latest category" || no "same-session consolidation delivers latest category"
+wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -Fq -- '--data-urlencode title=(same) ' "$LOG" && ok "same-session consolidation delivers latest category" || no "same-session consolidation delivers latest category"
 # Cross-harness namespace isolation and payload identity/title.
 : > "$LOG"; run claude '{"hook_event_name":"Stop","session_id":"cross","message":"claude"}' & p1=$!; run polytoken '{"event":"stop","session_id":"cross","message":"poly"}' & p2=$!; wait $p1 $p2
-wait_until wait_count 2 && grep -q -- '--data-urlencode title=Agent ' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
+wait_until wait_count 2 && grep -Fq -- '--data-urlencode title=(cross) ' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
 # Prompt cancellation is synchronous and prevents the delayed worker from sending.
 # Cancellation is synchronous and wins the race by design: the worker sleeps
 # 2s before its gen re-check, so even a loaded host finishes the cancel first.
@@ -86,7 +86,7 @@ wait_until wait_count 0 && ! grep -q 'session=live-lock' "$LOG" && ok "live owne
 : > "$LOG"; K="$(key claude locked)"; mkdir -p "$TMP/state/$K.lock"; (exit 0) & dead_pid=$!; wait "$dead_pid"; printf '%s\n' "$dead_pid" > "$TMP/state/$K.lock/pid"; printf '%s\n' fixture > "$TMP/state/$K.lock/token"; printf '%s\n' "1" > "$TMP/state/$K.lock/heartbeat"
 touch -t 200001010000 "$TMP/state/$K.lock/heartbeat" "$TMP/state/$K.lock"
 AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"locked","message":"recovered"}'
-wait_until wait_count 1 && grep -q -- '--data-urlencode title=Agent ' "$LOG" && ok "crashed-owner lock recovery" || no "crashed-owner lock recovery"
+wait_until wait_count 1 && grep -Fq -- '--data-urlencode title=(locked) ' "$LOG" && ok "crashed-owner lock recovery" || no "crashed-owner lock recovery"
 # A partial/legacy lock with a live PID but missing token is never reclaimed.
 : > "$LOG"; K="$(key claude partial-live)"; mkdir -p "$TMP/state/$K.lock"; printf '%s\n' "$$" > "$TMP/state/$K.lock/pid"; printf '%s\n' "1" > "$TMP/state/$K.lock/heartbeat"
 AGENT_NOTIFY_LOCK_WAIT=1 run claude '{"hook_event_name":"Stop","session_id":"partial-live","message":"must-not-steal"}'
@@ -98,14 +98,14 @@ wait_until wait_text 'session=partial' && ok "partial lock recovery" || no "part
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"a\u0001b","message":"x"}'; AGENT_NOTIFY_DELAY_TEST=0.01 run claude '{"hook_event_name":"Stop","session_id":"a","message":"y"}'; wait_until wait_count 2 && ok "adversarial session isolation" || no "adversarial session isolation"
 # Payload text the harness does not define as notice content stays private; fixed category and safe metadata only.
 # Unknown payload junk fields are never forwarded; fixed category and safe metadata only.
-: > "$LOG"; run claude '{"hook_event_name":"Notification","session_id":"safe/../id","cwd":"/tmp/proj\u0009name","notification":"leak","reason":"also-leak"}'; wait_until wait_count 1 && ! grep -Eq 'leak' "$LOG" && grep -q -- '--data-urlencode title=Agent ' "$LOG" && ok "payload junk never forwarded" || no "payload junk never forwarded"
+: > "$LOG"; run claude '{"hook_event_name":"Notification","session_id":"safe/../id","cwd":"/tmp/proj\u0009name","notification":"leak","reason":"also-leak"}'; wait_until wait_count 1 && ! grep -Eq 'leak' "$LOG" && grep -Fq -- '(safe/../id)' "$LOG" && grep -Fq -- '--data-urlencode message=[hook:needs_input] ' "$LOG" && ok "payload junk never forwarded" || no "payload junk never forwarded"
 # Claude Notification: harness-authored .message is the body; transcript text is not sent on notice events.
 LEAK="$TMP/leak.jsonl"; printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"TRANSCRIPT SECRET=from-transcript"}]}}' > "$LEAK"
 : > "$LOG"; run claude "{\"hook_event_name\":\"Notification\",\"session_id\":\"notice\",\"transcript_path\":\"$LEAK\",\"message\":\"Claude needs your permission\"}"
 wait_until wait_text 'Claude needs your permission' && ! grep -q 'from-transcript' "$LOG" && ok "claude notice text forwarded; transcript not" || no "claude notice text forwarded; transcript not"
 # Claude Stop: summarize the transcript's last assistant text; project from payload cwd.
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"clstop\",\"transcript_path\":\"$LEAK\",\"cwd\":\"/tmp/claudeproj\"}"
-wait_until wait_text 'from-transcript' && grep -q 'claudeproj:' "$LOG" && ok "claude stop summarizes transcript" || no "claude stop summarizes transcript"
+wait_until wait_text 'from-transcript' && grep -Fq -- '--data-urlencode title=claudeproj (clstop)' "$LOG" && ok "claude stop summarizes transcript" || no "claude stop summarizes transcript"
 # The delayed worker must not hold the hook's stdout/stderr: a reader blocked on
 # EOF (how both harnesses wait) must see the hook exit well before DELAY elapses.
 : > "$LOG"; start="$SECONDS"
@@ -117,11 +117,11 @@ reader_s=$((SECONDS - start))
 PSDIR="$TMP/psessions"; mkdir -p "$PSDIR/enr1"
 printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user_message_preview":"fix the stop hook timeout"}' > "$PSDIR/enr1/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr1"}'
-wait_until wait_text 'fix the stop hook timeout' && grep -q 'claude-config/' "$LOG" && ! grep -q 'session=enr1' "$LOG" && ok "polytoken notification carries project and preview" || no "polytoken notification carries project and preview"
+wait_until wait_text 'fix the stop hook timeout' && grep -q -- '--data-urlencode title=claude-config/' "$LOG" && grep -Fq -- '--data-urlencode message=[hook:needs_input] fix the stop hook timeout' "$LOG" && ! grep -q 'session=enr1' "$LOG" && ok "polytoken notification carries project and preview" || no "polytoken notification carries project and preview"
 # record.json title is the fallback when session.json has no preview.
 mkdir -p "$PSDIR/enr2"; printf '%s' '{"session_title":"enr-two-title"}' > "$PSDIR/enr2/record.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr2"}'
-wait_until wait_text 'enr-two-title' && grep -q -- '--data-urlencode title=enr-two-title ' "$LOG" && ok "record.json title fallback" || no "record.json title fallback"
+wait_until wait_text 'enr-two-title' && grep -Fq -- '--data-urlencode title=(enr2) - enr-two-title ' "$LOG" && ok "record.json title fallback" || no "record.json title fallback"
 # Slash-bearing session ids cannot escape the sessions dir when reading metadata.
 mkdir -p "$TMP/enr3"; printf '%s' '{"last_user_message_preview":"pwned"}' > "$TMP/enr3/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"../enr3"}'
@@ -131,17 +131,17 @@ mkdir -p "$PSDIR/enr4"
 printf '%s\n' '{"type":"assistant","blocks":[{"type":"thinking","thinking":"internal"}]}' '{"type":"assistant","blocks":[{"type":"text","text":"rewrote the notifier summary"}]}' > "$PSDIR/enr4/log.jsonl"
 printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user_message_preview":"stale preview"}' > "$PSDIR/enr4/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr4"}'
-wait_until wait_text 'rewrote the notifier summary' && grep -q -- '--data-urlencode title=stale preview ' "$LOG" && ok "polytoken stop summarizes transcript over preview" || no "polytoken stop summarizes transcript over preview"
+wait_until wait_text 'rewrote the notifier summary' && grep -Fq -- '(enr4) - stale preview ' "$LOG" && ok "polytoken stop summarizes transcript over preview" || no "polytoken stop summarizes transcript over preview"
 # POLYTOKEN_PROJECT_PATH (exported by the daemon env) names the project directly.
 : > "$LOG"; printf '%s' '{"event":"stop","session_id":"envproj"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_PATH="/tmp/envproj" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
-wait_until wait_text 'envproj: session=envproj' && ok "project env override" || no "project env override"
+wait_until wait_text 'session=envproj' && grep -Fq -- '--data-urlencode title=envproj (envproj)' "$LOG" && ok "project env override" || no "project env override"
 # Title prefers the session's own naming: record.json title for polytoken,
 # transcript summary for claude.
 mkdir -p "$PSDIR/enr5"
 printf '%s' '{"session_title":"billing refactor"}' > "$PSDIR/enr5/record.json"
 printf '%s' '{"last_user_message_preview":"stale preview"}' > "$PSDIR/enr5/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr5"}'
-wait_until wait_text 'billing refactor' && grep -q -- '--data-urlencode title=billing refactor ' "$LOG" && ok "polytoken title from session_title" || no "polytoken title from session_title"
+wait_until wait_text 'billing refactor' && grep -Fq -- '--data-urlencode title=(enr5) - billing refactor ' "$LOG" && ok "polytoken title from session_title" || no "polytoken title from session_title"
 # Polytoken notification events are ambient (background job / subagent
 # completions), never "needs input": nothing is scheduled, nothing is sent.
 : > "$LOG"; run polytoken '{"event":"notification","session_id":"ambient","message":"job done"}'
@@ -166,24 +166,24 @@ sleep 0.3; [ ! -e "$TMP/state/$(key polytoken goalon).gen" ] && [ "$(count)" = 0
 WR="$TMP/wtrepo"; git init -q -b main "$WR" 2>/dev/null; git -C "$WR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init; git -C "$WR" worktree add -q -b probe-branch "$WR/.worktrees/probe" main
 mkdir -p "$PSDIR/wtenr"; printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"check the probe\"}" > "$PSDIR/wtenr/session.json"
 : > "$LOG"; printf '%s' '{"event":"stop","session_id":"wtenr"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_DIR="$WR/.worktrees/probe" POLYTOKEN_PROJECT_PATH="$WR" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
-wait_until wait_text 'wtrepo/probe-branch: check the probe' && ok "polytoken worktree branch and repo name" || no "polytoken worktree branch and repo name"
+wait_until wait_text 'check the probe' && grep -Fq -- '--data-urlencode title=wtrepo/probe-branch (wtenr)' "$LOG" && ok "polytoken worktree branch and repo name" || no "polytoken worktree branch and repo name"
 # Claude sessions carry cwd in the payload; a worktree cwd reports its own branch.
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"clwt\",\"transcript_path\":\"$LEAK\",\"cwd\":\"$WR/.worktrees/probe\"}"
-wait_until wait_text 'wtrepo/probe-branch:' && ok "claude worktree branch from payload cwd" || no "claude worktree branch from payload cwd"
+wait_until wait_text 'wtrepo/probe-branch (clwt)' && ok "claude worktree branch from payload cwd" || no "claude worktree branch from payload cwd"
 # A main-repo session still reports repo/branch as before.
 mkdir -p "$PSDIR/mrenr"; printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"main line\"}" > "$PSDIR/mrenr/session.json"
 : > "$LOG"; printf '%s' '{"event":"stop","session_id":"mrenr"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_DIR="$WR" POLYTOKEN_PROJECT_PATH="$WR" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
-wait_until wait_text 'wtrepo/main: main line' && ok "main-repo session branch unchanged" || no "main-repo session branch unchanged"
+wait_until wait_text 'main line' && grep -Fq -- '--data-urlencode title=wtrepo/main (mrenr)' "$LOG" && ok "main-repo session branch unchanged" || no "main-repo session branch unchanged"
 # A polytoken session that moved into a worktree after start reports the branch
 # of its most recent working directory, taken from the session log's cwd trail.
 mkdir -p "$PSDIR/mvenr"
 printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"moved mid-session\"}" > "$PSDIR/mvenr/session.json"
 printf '%s\n' '{"type":"tool_use","cwd":"'"$WR"'"}' '{"type":"tool_use","cwd":"'"$WR/.worktrees/probe"'"}' > "$PSDIR/mvenr/log.jsonl"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"mvenr"}'
-wait_until wait_text 'wtrepo/probe-branch: moved mid-session' && ok "moved session branch from session log cwd" || no "moved session branch from session log cwd"
+wait_until wait_text 'moved mid-session' && grep -Fq -- '--data-urlencode title=wtrepo/probe-branch (mvenr)' "$LOG" && ok "moved session branch from session log cwd" || no "moved session branch from session log cwd"
 LEAK2="$TMP/leak2.jsonl"; printf '%s\n' '{"type":"summary","summary":"Fixing the notifier"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"all done"}]}}' > "$LEAK2"
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"cltitle\",\"transcript_path\":\"$LEAK2\",\"cwd\":\"/tmp/claudeproj\"}"
-wait_until wait_text 'Fixing the notifier' && grep -q ': all done' "$LOG" && ok "claude title from transcript summary" || no "claude title from transcript summary"
+wait_until wait_text 'Fixing the notifier' && grep -Fq -- '--data-urlencode message=[hook:needs_input] all done' "$LOG" && ok "claude title from transcript summary" || no "claude title from transcript summary"
 # Harness defaults and explicit overrides choose independent config roots.
 for h in claude polytoken; do
   base="$TMP/default-$h"; mkdir -p "$base"; : > "$LOG"
@@ -200,12 +200,16 @@ CLAUDE_CONFIG_DIR="$TMP/both-claude" POLYTOKEN_CONFIG_DIR="$TMP/both-polytoken" 
 jq -e '([.hooks.Notification[], .hooks.Stop[]] | map(.hooks[] | select(.command | contains("agent-notify.sh"))) | length == 2 and all(.[]; .async == true))' "$REPO/home/settings.recommended.json" >/dev/null && jq -e '([.hooks.SubagentStop[].hooks[]?.command // ""] | all(.[]; contains("agent-notify.sh") | not))' "$REPO/home/settings.recommended.json" >/dev/null && ok "Claude wiring" || no "Claude wiring"
 jq -e '([.[] | select(.name == "agent-notify" and .event == "notification")] | length == 1) and ([.[] | select(.name | startswith("agent-notify")) | .handler.bash | contains(" polytoken")] | all)' "$REPO/polytoken/hooks.json" >/dev/null && ok "Polytoken wiring" || no "Polytoken wiring"
 grep -q 'DELAY="${AGENT_NOTIFY_DELAY:-180}"' "$HOOK" && ok "production delay default" || no "production delay default"
-# The hook's only lib dependency is notify-mac.sh (notify_mac_available/notify_mac_send).
-# notify-identity.sh and notify-send.sh are never used by the hook: any source
-# or call reference (outside comments) is a regression the notify-only install
-# manifest would not cover.
-! grep -Ev '^[[:space:]]*#' "$HOOK" | grep -Eq 'notify-identity|notify-send|notify_identity|notify_send|notify_diag' \
+# notify-send.sh is never used by the hook (the push is inline curl): any
+# source or call reference to it (outside comments) is a regression the
+# notify-only install manifest would not cover. notify-identity.sh IS used
+# (title/body-tag formatting) and is asserted below.
+! grep -Ev '^[[:space:]]*#' "$HOOK" | grep -Eq 'notify-send|notify_send|notify_diag' \
   && ok "hook references no unused notify libs" || no "hook references no unused notify libs"
+# The hook sources AND calls the shared identity library (sole formatter).
+grep -qF '. "$_LIB_DIR/notify-identity.sh"' "$HOOK" && grep -q 'notify_identity_title ' "$HOOK" \
+  && grep -q 'notify_identity_session_title ' "$HOOK" && grep -q 'notify_alert_tag ' "$HOOK" \
+  && ok "hook sources and calls the identity library" || no "hook sources and calls the identity library"
 # Exercise the actual Claude installer into a temporary destination, then verify status, content, and mode.
 DEST="$TMP/installed-claude"; HOME="$TMP/home"; mkdir -p "$HOME"
 if CLAUDE_CONFIG_DIR="$DEST" CLAUDE_CONFIG_TTY=/dev/null CLAUDE_CONFIG_OVERWRITE=1 bash "$REPO/install.sh" --target claude --overwrite >/dev/null 2>&1; then
@@ -245,7 +249,7 @@ fi
 # stop, so pre_tool_use schedules a push carrying the question and the
 # answer (post_tool_use, same tool) cancels it like a prompt does.
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run polytoken '{"event":"pre_tool_use","tool_name":"ask_user_question","session_id":"askq","input":{"questions":[{"question":"which approach do you want?"}]}}'
-wait_until wait_text 'which approach do you want' && grep -q -- '--data-urlencode title=Agent ' "$LOG" && ok "ask_user_question schedules a push with the question" || no "ask_user_question schedules a push with the question"
+wait_until wait_text 'which approach do you want' && grep -Fq -- '--data-urlencode title=(askq) ' "$LOG" && ok "ask_user_question schedules a push with the question" || no "ask_user_question schedules a push with the question"
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=2 run polytoken '{"event":"pre_tool_use","tool_name":"ask_user_question","session_id":"answait","input":{"questions":[{"question":"pick one"}]}}'
 K="$(key polytoken answait)"; wait_until test -s "$TMP/state/$K.gen" && ok "ask_user_question schedules pending state" || no "ask_user_question schedules pending state"
 POLYTOKEN_HOOK_MATCHER_SUBJECT=ask_user_question run polytoken '{"event":"post_tool_use","tool_name":"ask_user_question","session_id":"answait"}'
@@ -254,10 +258,20 @@ POLYTOKEN_HOOK_MATCHER_SUBJECT=ask_user_question run polytoken '{"event":"post_t
 K="$(key polytoken no-cancel)"; wait_until test -s "$TMP/state/$K.gen"
 POLYTOKEN_HOOK_MATCHER_SUBJECT=shell_exec run polytoken '{"event":"post_tool_use","tool_name":"shell_exec","session_id":"no-cancel"}'
 wait_until wait_text no-cancel && ok "post_tool_use for other tools never cancels" || no "post_tool_use for other tools never cancels"
-# Title/body format: long titles truncate with an ellipsis; no "Needs Input".
+# Overlength contract (fail-open): the hook retries once with a shortened
+# title component, then falls back to "(<sid>)"; the alert is never suppressed
+# by formatting and an old-format title never appears.
 LEAK3="$TMP/leak3.jsonl"; printf '%s\n' '{"type":"summary","summary":"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"}' > "$LEAK3"
-: > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"trunct\",\"transcript_path\":\"$LEAK3\",\"cwd\":\"/tmp/claudeproj\"}"
-wait_until wait_text 'title=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijkl...' && ! grep -q 'Needs Input' "$LOG" && ok "long title truncates with ellipsis, no suffix" || no "long title truncates with ellipsis, no suffix"
+: > "$LOG"; printf '%s' "{\"hook_event_name\":\"Stop\",\"session_id\":\"trunct\",\"transcript_path\":\"$LEAK3\",\"cwd\":\"/tmp/claudeproj\"}" | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 AGENT_NOTIFY_MAX_LENGTH=40 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude
+wait_until wait_text 'title=claudeproj (trunct) - ABCDEFGHIJKLMNOP ' && ok "overlength title retries with a shortened component" || no "overlength title retries with a shortened component"
+: > "$LOG"
+printf '%s' "{\"hook_event_name\":\"Stop\",\"session_id\":\"trunct\",\"transcript_path\":\"$LEAK3\",\"cwd\":\"/tmp/claudeproj\"}" | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 AGENT_NOTIFY_MAX_LENGTH=20 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude
+wait_until wait_text 'title=(trunct) ' && ! grep -Eq 'title=[a-zA-Z]' "$LOG" && ok "pathological length falls back to (sid), never suppressed" || no "pathological length falls back to (sid), never suppressed"
+# The claude title component (summary + ellipsis) never exceeds 48 chars total.
+LEAK4="$TMP/leak4.jsonl"; printf '%s\n' '{"type":"summary","summary":"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"}' > "$LEAK4"
+: > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"comp48\",\"transcript_path\":\"$LEAK4\",\"cwd\":\"/tmp/claudeproj\"}"
+wait_until wait_text 'title=claudeproj (comp48) - ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghi... ' \
+  && ok "claude title component bounded to 48 chars total" || no "claude title component bounded to 48 chars total"
 # The body opens with the final response's first text, not its last line.
 LEAKB="$TMP/leakb.jsonl"; printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"No the evidence shows the opposite"},{"type":"text","text":"One honest caveat if a daemon"}]}}' > "$LEAKB"
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"firsttxt\",\"transcript_path\":\"$LEAKB\",\"cwd\":\"/tmp/claudeproj\"}"
@@ -265,5 +279,5 @@ wait_until wait_text 'evidence shows the opposite' && ! wait_text 'honest caveat
 # Polytoken titles prefer the session's inferred_title over the raw prompt preview.
 mkdir -p "$PSDIR/enr6"; printf '%s' '{"inferred_title":"my real title","last_user_message_preview":"quoted snippet"}' > "$PSDIR/enr6/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr6"}'
-wait_until wait_text 'title=my real title ' && ok "inferred_title is preferred for the title" || no "inferred_title is preferred for the title"
+wait_until wait_text 'title=(enr6) - my real title ' && ok "inferred_title is preferred for the title" || no "inferred_title is preferred for the title"
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"

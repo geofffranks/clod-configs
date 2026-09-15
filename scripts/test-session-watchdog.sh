@@ -36,6 +36,10 @@ pass=0; fail=0
 ok(){ echo "ok: $1"; pass=$((pass+1)); }; no(){ echo "FAIL: $1"; fail=$((fail+1)); }
 count(){ wc -l < "$LOG" | tr -d ' '; }
 newworld(){ mkdir -p "$TMP/logs" "$TMP/sess" "$TMP/state"; }
+# The watchdog sources AND calls the shared identity library (sole formatter).
+grep -qF 'notify-identity.sh' "$HOOK" && grep -q 'notify_identity_resolve ' "$HOOK" \
+  && grep -q 'notify_alert_tag ' "$HOOK" && ok "watchdog sources and calls the identity library" \
+  || no "watchdog sources and calls the identity library"
 
 # mkdaemon <stem> <session> fresh|stale — a daemon log naming its session plus a liveness file
 mkdaemon(){
@@ -107,11 +111,11 @@ mkdaemon c1 sessC fresh; mksession sessC active "fix the flux capacitor"
 run                                   # bootstrap c1's freshness
 touch -t 200001010000 "$TMP/logs/c1.liveness.jsonl"
 run
-[ "$(count)" = 1 ] && grep -q -- '--data-urlencode title=fix the flux capacitor Agent Died' "$LOG" \
-  && grep -q -- '--data-urlencode message=projx: fix the flux capacitor' "$LOG" \
-  && grep -q 'last activity 0m ago' "$LOG" && ok "death while active pings once, enriched" || no "death while active pings once, enriched"
+[ "$(count)" = 1 ] && grep -Fq -- '--data-urlencode title=projx (sessC) - fix the flux capacitor' "$LOG" \
+  && grep -Fq -- '--data-urlencode message=[watchdog:agent_died] Agent died — projx: fix the flux capacitor (last activity 0m ago)' "$LOG" \
+  && ok "death while active pings once, enriched" || no "death while active pings once, enriched"
 # The mac lane fires for the same death with the SAME title/body (AC2).
-grep -Fq 'fix the flux capacitor Agent Died|projx: fix the flux capacitor (last activity 0m ago)' "$OSA" \
+grep -Fq 'projx (sessC) - fix the flux capacitor|[watchdog:agent_died] Agent died — projx: fix the flux capacitor (last activity 0m ago)' "$OSA" \
   && ok "death mac-sends with the same title/body" || no "death mac-sends with the same title/body"
 
 run
@@ -235,8 +239,8 @@ run_nocreds                                  # boot grace: records, sends nothin
 touch -t 200001010000 "$TMP/logs/mc1.liveness.jsonl"
 mkcrash mccrash sessMC fresh "mac only crash message"
 run_nocreds
-grep -Fq 'mac only death Agent Died|projx: mac only death (last activity 0m ago)' "$OSA" \
-  && grep -Fq 'mac only death TUI Crashed|projx: mac only crash message (last activity 0m ago)' "$OSA" \
+grep -Fq 'projx (sessMC) - mac only death|[watchdog:agent_died] Agent died — projx: mac only death (last activity 0m ago)' "$OSA" \
+  && grep -Fq 'projx (sessMC) - mac only death|[watchdog:tui_crash] TUI crashed — projx: mac only crash message (last activity 0m ago)' "$OSA" \
   && [ "$(osacount)" = 2 ] && [ "$(count)" = 0 ] \
   && ok "credential-free death+crash mac-send with zero curl" || no "credential-free death+crash mac-send with zero curl"
 [ -f "$TMP/state/tomb-sessMC" ] && [ ! -e "$TMP/state/att-sessMC" ] \
@@ -285,10 +289,10 @@ newworld
 mksession sessK active "chasing the tui panic"
 mkcrash 2026-09-13T15-27-09Z sessK fresh "panicked at rs/tui.rs:706: index out of bounds"
 run
-[ "$(count)" = 1 ] && grep -q -- '--data-urlencode title=chasing the tui panic TUI Crashed' "$LOG" \
-  && grep -q -- '--data-urlencode message=projx: panicked at rs/tui.rs:706: index out of bounds (last activity 0m ago)' "$LOG" \
+[ "$(count)" = 1 ] && grep -Fq -- '--data-urlencode title=projx (sessK) - chasing the tui panic' "$LOG" \
+  && grep -Fq -- '--data-urlencode message=[watchdog:tui_crash] TUI crashed — projx: panicked at rs/tui.rs:706: index out of bounds (last activity 0m ago)' "$LOG" \
   && ok "fresh TUI crash pings once, enriched" || no "fresh TUI crash pings once, enriched"
-grep -Fq 'chasing the tui panic TUI Crashed|projx: panicked at rs/tui.rs:706: index out of bounds (last activity 0m ago)' "$OSA" \
+grep -Fq 'projx (sessK) - chasing the tui panic|[watchdog:tui_crash] TUI crashed — projx: panicked at rs/tui.rs:706: index out of bounds (last activity 0m ago)' "$OSA" \
   && ok "crash mac-sends with the same title/body" || no "crash mac-sends with the same title/body"
 run
 [ "$(count)" = 0 ] && [ -f "$TMP/state/crash-2026-09-13T15-27-09Z-tui.crash" ] && [ "$(osacount)" = 0 ] && ok "crash pings only once per crash log" || no "crash pings only once per crash log"
@@ -366,11 +370,14 @@ mkcrash 2026-09-13T17-00-00Z sessN2 fresh
 run
 [ "$(count)" = 0 ] && [ -f "$TMP/state/crash-2026-09-13T17-00-00Z-tui.crash" ] && ok "crash in never-prompted session stays silent" || no "crash in never-prompted session stays silent"
 
-# 17. An empty title part does not duplicate "Agent": "Agent Died", once.
+# 17. No session metadata and no git: the title fails open to "(<sid>)" — a
+# formatting gap can never suppress the death alert, and no suffix doubles.
 newworld
 mkdaemon g1 sessG fresh
 mkdir -p "$TMP/sess/sessG"; : > "$TMP/sess/sessG/log.jsonl"; printf '%s\n' '{"type":"user"}' >> "$TMP/sess/sessG/log.jsonl"
 touch -t 200001010000 "$TMP/logs/g1.liveness.jsonl"
 run
-grep -q -- '--data-urlencode title=Agent Died ' "$LOG" && ! grep -q 'Agent Agent' "$LOG" && ok "empty title part does not duplicate Agent" || no "empty title part does not duplicate Agent"
+grep -Fq -- '--data-urlencode title=(sessG) ' "$LOG" && ! grep -q 'Agent Agent' "$LOG" \
+  && grep -Fq -- '[watchdog:agent_died] Agent died — unknown:' "$LOG" \
+  && ok "missing metadata falls back to (sid) title, alert still delivers" || no "missing metadata falls back to (sid) title, alert still delivers"
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"
