@@ -80,13 +80,28 @@ export PUSHOVER_USER_KEY=your-user-key
 | Polytoken: `ask_user_question` pending | alert with the first question's text | Notification Center + Pushover | your answer cancels it; ambient/background notifications cancel rather than add |
 | Polytoken: TUI or container killed (SIGKILL) | "abnormal exit" alert | Notification Center + Pushover | at most one per 15s window, with the affected-session count; normal quits, Ctrl-C/TERM/HUP exits, and TUI launch failures stay silent |
 | Polytoken: plan-handoff approval pending, goal-acceptance pending, goal completed | one alert each | Notification Center + Pushover | requires the optional SSE watcher (below); everything else on the stream — cancellations, provider errors, ambient events — stays silent |
-| Watchdog: a session's daemon died mid-work | "Agent Died" | Notification Center + Pushover | see the session watchdog (below); Pushover retries up to 3×, the mac lane sends once per episode |
-| Watchdog: a Polytoken TUI panic | "TUI Crashed" | Notification Center + Pushover | same claim/retry model as "Agent Died" |
+| Watchdog: a session's daemon died mid-work | `[watchdog:agent_died]` alert | Notification Center + Pushover | see the session watchdog (below); Pushover retries up to 3×, the mac lane sends once per episode |
+| Watchdog: a Polytoken TUI panic | `[watchdog:tui_crash]` alert | Notification Center + Pushover | same claim/retry model as `agent_died` |
 
-Titles carry the session title (or "Agent"); bodies carry `repo/branch:` plus
-a bounded, sanitized preview. No transcript text beyond the bounded preview
-ever leaves the machine — the same sanitized title/body reaches both
-Notification Center and Pushover.
+Every alert renders the same identity in the title —
+`<repo>[/<branch>] (<session-id>)[ - <session-title>]`, falling back to
+`(<session-id>)` when a session has no project identity — and every body opens
+with a canonical `[source:type]` tag from a fixed, closed vocabulary:
+
+| Tag | Sender | Meaning |
+|---|---|---|
+| `[hook:needs_input]` | agent-notify hook | one consolidated attention alert (all its trigger events share it) |
+| `[sse:question_pending]` | SSE watcher | `ask_user_question` awaiting an answer |
+| `[sse:approval_pending]` | SSE watcher | plan-handoff or goal-acceptance approval pending |
+| `[sse:goal_completed]` | SSE watcher | goal driver completed |
+| `[watchdog:agent_died]` | session watchdog | daemon died mid-work |
+| `[watchdog:tui_crash]` | session watchdog | TUI panic |
+| `[shipper:tui_abnormal_exit]` | lifecycle shipper | TUI/container SIGKILLed |
+
+The watcher's diagnostic-log source stays `event-watcher` — body tag `sse`
+corresponds to diagnostic source `event-watcher`. No transcript text beyond
+the bounded preview ever leaves the machine — the same title and tagged body
+reach both Notification Center and Pushover.
 
 #### Installing
 
@@ -175,12 +190,17 @@ reachable and point this at that container's sessions root),
 Events older than 120s, future timestamps, clock discontinuities, and any
 event outside the four mappings are silently ignored.
 
-#### Session watchdog ("Agent Died" scan)
+#### Session watchdog (daemon-death and TUI-crash scan)
 
-A host-side scan alerts "Agent Died" when a Polytoken session's daemon dies
-mid-work (a crash or replacement kills the process that would run hooks, so a
-host-side watcher is the only sensor). It runs as a macOS LaunchAgent
-(`scripts/install-session-watchdog.sh`) scanning every 30s. Each daemon keeps a
+A host-side scan alerts when a Polytoken session's daemon dies mid-work (a
+crash or replacement kills the process that would run hooks, so a host-side
+watcher is the only sensor). The title names the session
+(`repo/branch (session-id) - title`, falling back to `(session-id)`); the body
+carries the glanceable lead-in:
+`[watchdog:agent_died] Agent died — <project>: <last text> (last activity Nm
+ago)` — or `[watchdog:tui_crash] TUI crashed — …` for a panic. It runs as a
+macOS LaunchAgent (`scripts/install-session-watchdog.sh`) scanning every 30s.
+Each daemon keeps a
 continuously-updated liveness journal beside its log at
 `~/.local/share/polytoken/logs/<started-at>-<pid>.liveness.jsonl` (the paired
 `<started-at>-<pid>.log` names the session it served).

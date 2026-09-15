@@ -142,14 +142,39 @@ if [ -f "$R/home/lib/notify-shipper.sh" ]; then
   grep -Fq 'title=claude-config/feat/notify-cleanup (live-sess)' "$SHIP_CALLS" && ok 'exact title contract repo/branch (session_id)' || no 'exact title contract repo/branch (session_id)'
   grep -Fq '2 session(s) affected' "$SHIP_CALLS" && ok 'body counts batch records' || no 'body counts batch records'
   grep -Fq 'TUI terminated abnormally' "$SHIP_CALLS" && ok 'body names the reason' || no 'body names the reason'
+  grep -Fq '[shipper:tui_abnormal_exit] TUI terminated abnormally' "$SHIP_CALLS" && ok 'body carries the canonical shipper tag' || no 'body carries the canonical shipper tag'
+  # Limit accounting: the tag length is subtracted from AGENT_NOTIFY_BODY_LIMIT,
+  # so the DELIVERED body (tag + content) stays within the operator bound.
+  rawship(){ PATH="$SHIP/bin:$PATH" POLY_NOTIFY_EXIT_DIR="$SHIP/exit" PUSHOVER_APP_TOKEN=t PUSHOVER_USER_KEY=u AGENT_NOTIFY_PUSHOVER_URL=http://127.0.0.1:9 NOTIFY_EXIT_TS_FIDELITY="" notify_exit_ship "test-launcher" "$1" 137 "$2" "$3" "claude-config" "feat/notify-cleanup" ""; }
+  lastmsg(){ tail -1 "$SHIP_CALLS" | sed -n 's/.*--data-urlencode message=//p'; }
+  before="$(wc -l < "$SHIP_CALLS")"
+  AGENT_NOTIFY_BODY_LIMIT=40 rawship "len-sess" "$((ended + 35))" "$((ended + 40))"
+  if wait_calls $((before + 1)); then ok 'bounded ship delivers'; else no 'bounded ship delivers'; fi
+  blen="$(lastmsg | wc -c | tr -d ' ')"; blen=$((blen - 1))   # trailing newline
+  [ "$blen" -le 40 ] && [ "$blen" -ge 28 ] && ok "delivered body stays within AGENT_NOTIFY_BODY_LIMIT (len=$blen)" || no "delivered body stays within AGENT_NOTIFY_BODY_LIMIT (len=$blen)"
+  # A tiny limit clamps at >= 1 (never negative): tag + exactly one content char.
+  before="$(wc -l < "$SHIP_CALLS")"
+  AGENT_NOTIFY_BODY_LIMIT=10 rawship "tiny-sess" "$((ended + 50))" "$((ended + 55))"
+  if wait_calls $((before + 1)); then ok 'tiny-limit ship delivers'; else no 'tiny-limit ship delivers'; fi
+  blen="$(lastmsg | wc -c | tr -d ' ')"; blen=$((blen - 1))
+  [ "$blen" = 29 ] && ok "tiny limit clamps at one content char (len=$blen)" || no "tiny limit clamps at one content char (len=$blen)"
+  # Title failure suppresses (NEW): with AGENT_NOTIFY_MAX_LENGTH below the
+  # title length, notify_identity_title rejects; a title-unavailable
+  # diagnostic is logged and NOTHING is ever sent.
+  before="$(wc -l < "$SHIP_CALLS")"
+  AGENT_NOTIFY_MAX_LENGTH=8 rawship "short-sess" "$((ended + 70))" "$((ended + 75))"
+  sleep 0.5
+  [ "$(wc -l < "$SHIP_CALLS")" = "$before" ] && ok 'title failure suppresses, never sends' || no 'title failure suppresses, never sends'
+  grep -q 'suppressed:title-unavailable' "$T/logs/notify.log" && ok 'title-unavailable diagnostic logged' || no 'title-unavailable diagnostic logged'
   # Common-cause collapse: a second death in the same 15s batch loses the
   # claim, diagnostic-logs, and never sends twice.
+  collapse_before="$(wc -l < "$SHIP_CALLS")"
   shiptest "" "live-sess2" 137 "$((ended-5))" "$ended"
-  if ! wait_calls 2; then ok 'common-cause collapse: one send per batch'; else no 'common-cause collapse: one send per batch'; fi
+  if ! wait_calls $((collapse_before + 1)); then ok 'common-cause collapse: one send per batch'; else no 'common-cause collapse: one send per batch'; fi
   grep -q 'suppressed:claim-loser' "$T/logs/notify.log" && ok 'claim loser diagnostic-logged' || no 'claim loser diagnostic-logged'
   # A distinct later window ships again.
   shiptest "" "live-sess3" 137 "$((ended-10))" "$((ended+20))"
-  if wait_calls 2; then ok 'distinct batch window ships'; else no 'distinct batch window ships'; fi
+  if wait_calls $((collapse_before + 1)); then ok 'distinct batch window ships'; else no 'distinct batch window ships'; fi
   # Closed world: nothing else may reach the sender; each suppresses with a
   # bounded diagnostic entry.
   before="$(wc -l < "$SHIP_CALLS")"

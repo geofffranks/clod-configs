@@ -45,17 +45,21 @@ _user="${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}"
 APP_TOKEN="${_app:-${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}}"
 USER_KEY="${_user:-${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}}"
 unset _app _user
-# Best-effort source of the credential-free mac Notification Center lane: the
-# watchdog lives at $DEST/hooks/ (native) or ~/.claude/ (watchdog-only install);
-# the module is at the sibling lib dir in both layouts.
+# Best-effort source of the shared identity library (sole title/body-tag
+# formatter) and the credential-free mac Notification Center lane: the
+# watchdog lives at $DEST/hooks/ (native) or ~/.claude/ (watchdog-only
+# install); both modules sit at the sibling lib dir in either layout.
+_IDENTITY_SRC=""
 _NOTIFY_MAC_SRC=""
 for _cand in \
-  "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/lib/notify-mac.sh" \
-  "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)/notify-mac.sh"; do
-  if [ -z "$_NOTIFY_MAC_SRC" ] && [ -f "$_cand" ]; then _NOTIFY_MAC_SRC="$_cand"; fi
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/lib" \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)"; do
+  if [ -z "$_IDENTITY_SRC" ] && [ -f "$_cand/notify-identity.sh" ]; then _IDENTITY_SRC="$_cand/notify-identity.sh"; fi
+  if [ -z "$_NOTIFY_MAC_SRC" ] && [ -f "$_cand/notify-mac.sh" ]; then _NOTIFY_MAC_SRC="$_cand/notify-mac.sh"; fi
 done
+[ -n "$_IDENTITY_SRC" ] && . "$_IDENTITY_SRC"
 [ -n "$_NOTIFY_MAC_SRC" ] && . "$_NOTIFY_MAC_SRC"
-unset _NOTIFY_MAC_SRC
+unset _IDENTITY_SRC _NOTIFY_MAC_SRC _cand
 LOG_DIR="${WATCHDOG_LOG_DIR:-$HOME/.local/share/polytoken/logs}"
 SESSIONS_DIR="${WATCHDOG_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}"
 STATE_DIR="${WATCHDOG_STATE_DIR:-$HOME/.local/share/polytoken/.session-watchdog}"
@@ -168,7 +172,7 @@ mass=0
 while read -r _ _; do mass=$((mass + 1)); done < "$QUEUE"
 
 send_ping() {  # $1 session, $2 idle seconds
-  local sess="$1" idle="$2" sessfile sf rf preview title_part project body att n
+  local sess="$1" idle="$2" sessfile sf preview project body title message att n
   sessfile="$(sanitize "$sess" 96)"
   att="$STATE_DIR/att-$sessfile"
   n="$(cat "$att" 2>/dev/null || echo 0)"
@@ -176,20 +180,21 @@ send_ping() {  # $1 session, $2 idle seconds
     : > "$STATE_DIR/tomb-$sessfile"; rm -f "$att"; return 0
   fi
   sf="$SESSIONS_DIR/$sess/session.json"
-  rf="$SESSIONS_DIR/$sess/record.json"
   preview="$(jq -r '.last_user_message_preview // ""' "$sf" 2>/dev/null || true)"
-  title_part="$(jq -r '.session_title // ""' "$rf" 2>/dev/null || true)"
-  [ -n "$title_part" ] || title_part="$preview"
   # Last assistant text says what the agent was doing when it died.
   body="$(grep '"type":"assistant"' "$SESSIONS_DIR/$sess/log.jsonl" 2>/dev/null | tail -5 |
     jq -r '[(.blocks // .message.content // [])[] | select(.type=="text") | .text] | last // empty' 2>/dev/null | tail -1)"
   [ -n "$body" ] || body="$preview"
   [ -n "$body" ] || body="session=$sess"
   project="$(jq -r '.project_path // ""' "$sf" 2>/dev/null || true)"
+  # Title carries the identity (resolver derives repo/branch + basename
+  # fallback; the enrichment helper supplies the session title); the glanceable
+  # human lead-in stays in the tagged body. Fail-open: any title failure falls
+  # back to "(<sid>)" — the alert is never suppressed by formatting.
+  title="$(notify_identity_resolve "$sess" "$project" "$(notify_identity_session_title "$SESSIONS_DIR" "$sess")")" || title=""
+  [ -n "$title" ] || title="($sess)"
   project="$(sanitize "${project##*/}" 64)"; [ -n "$project" ] || project="unknown"
-  t="$(sanitize "${title_part:-}" 48)"
-  title="${t:+$t }Agent Died"
-  message="$(printf '%s: %s (last activity %dm ago)' "$project" "$(sanitize "$body" 160)" "$((idle / 60))")"
+  message="$(notify_alert_tag watchdog agent_died)$(printf 'Agent died — %s: %s (last activity %dm ago)' "$project" "$(sanitize "$body" 160)" "$((idle / 60))")"
   # Claim the episode before delivering: a concurrent scanner sharing this
   # state must not double-ping the same death. Release the claim on failure
   # so the retry can run.
@@ -208,25 +213,25 @@ send_ping() {  # $1 session, $2 idle seconds
 }
 
 send_crash_ping() {  # $1 session, $2 crash-log stem, $3 crash-log path, $4 age seconds
-  local sess="$1" stem="$2" crash="$3" age="$4" sessfile att n sf rf preview title_part msg project title message
+  local sess="$1" stem="$2" crash="$3" age="$4" sessfile att n sf preview project msg title message
   att="$STATE_DIR/att-crash-$stem"
   n="$(cat "$att" 2>/dev/null || echo 0)"
   if [ "${n:-0}" -ge 3 ]; then
     : > "$STATE_DIR/crash-$stem"; rm -f "$att"; return 0
   fi
   sf="$SESSIONS_DIR/$sess/session.json"
-  rf="$SESSIONS_DIR/$sess/record.json"
   preview="$(jq -r '.last_user_message_preview // ""' "$sf" 2>/dev/null || true)"
-  title_part="$(jq -r '.session_title // ""' "$rf" 2>/dev/null || true)"
-  [ -n "$title_part" ] || title_part="$preview"
   # The panic line says what died; session metadata says where.
   msg="$(sed -n 's/^Message:[[:space:]]*//p' "$crash" 2>/dev/null | head -1)"
   [ -n "$msg" ] || msg="$preview"
   [ -n "$msg" ] || msg="session=$sess"
   project="$(jq -r '.project_path // ""' "$sf" 2>/dev/null || true)"
+  # Identity title via the shared resolver + enrichment helper (see send_ping);
+  # the tagged human lead-in stays in the body. Fail-open "(<sid>)" fallback.
+  title="$(notify_identity_resolve "$sess" "$project" "$(notify_identity_session_title "$SESSIONS_DIR" "$sess")")" || title=""
+  [ -n "$title" ] || title="($sess)"
   project="$(sanitize "${project##*/}" 64)"; [ -n "$project" ] || project="unknown"
-  title="$(sanitize "${title_part:-Agent}" 48) TUI Crashed"
-  message="$(printf '%s: %s (last activity %dm ago)' "$project" "$(sanitize "$msg" 160)" "$((age / 60))")"
+  message="$(notify_alert_tag watchdog tui_crash)$(printf 'TUI crashed — %s: %s (last activity %dm ago)' "$project" "$(sanitize "$msg" 160)" "$((age / 60))")"
   # Claim the crash episode before delivering (same anti-double-ping rule
   # as daemon deaths); release the claim on failure so the retry can run.
   : > "$STATE_DIR/crash-$stem"

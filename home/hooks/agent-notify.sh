@@ -5,6 +5,8 @@
 set -u
 
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)"
+# The shared identity library is sourced AND called: it is the sole formatter
+# for the alert title and the canonical [source:type] body tag.
 [ -f "$_LIB_DIR/notify-identity.sh" ] && . "$_LIB_DIR/notify-identity.sh"
 [ -f "$_LIB_DIR/notify-send.sh" ] && . "$_LIB_DIR/notify-send.sh"
 # Direct guarded source so the installed polytoken copy (which ships no
@@ -163,11 +165,6 @@ if [ -z "$PROJECT_DIR" ] && [ "$HARNESS" = polytoken ]; then
   PROJECT_DIR="${POLYTOKEN_PROJECT_DIR:-}"
 fi
 [ -n "$PROJECT_DIR" ] || PROJECT_DIR="${POLYTOKEN_PROJECT_PATH:-}"
-# Push content. Title names the conversation; body says where and what.
-#   body:  <repo>[/<branch>]: <claude notice text | last assistant transcript
-#          text | polytoken session.json preview/title | session id>
-#   title: <claude transcript summary | polytoken record.json session_title |
-#           polytoken session.json preview | "Agent"> Needs Input
 SESSIONS_DIR=""
 SESS_FILE_ID="${SAFE_SESSION//\//_}"
 TRANSCRIPT=""
@@ -194,6 +191,12 @@ if [ -z "$RESP" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
        jq -r '[(.blocks // .message.content // [])[] | select(.type=="text") | .text] | first // empty' 2>/dev/null | tail -1)"
   RESP="$(trunc "$L" 160)"
 fi
+# Push content. Title carries the identity: <repo>[/<branch>] (<session_id>)
+# [ - <session-title>] via notify_identity_title. Body is the tagged preview:
+#   body:  [hook:needs_input] <claude notice text | last assistant transcript
+#          text | polytoken session.json preview/title | session id>
+#   title component: <claude transcript summary | polytoken record.json
+#           session_title | session.json inferred_title | preview>
 TITLE_PART=""
 if [ "$HARNESS" = polytoken ]; then
   [ -z "$RESP" ] && {
@@ -201,11 +204,15 @@ if [ "$HARNESS" = polytoken ]; then
     [ -n "$L" ] || L="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
     RESP="$(trunc "$L" 160)"
   }
-  TITLE_PART="$(jq -r '.session_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/record.json" 2>/dev/null || true)"
-  [ -n "$TITLE_PART" ] || TITLE_PART="$(jq -r '.inferred_title // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
-  [ -n "$TITLE_PART" ] || TITLE_PART="$(jq -r '.last_user_message_preview // ""' "$SESSIONS_DIR/$SESS_FILE_ID/session.json" 2>/dev/null || true)"
+  # Session-title enrichment is delegated to the shared identity library
+  # (record.json .session_title -> .inferred_title -> .preview; sanitized,
+  # bounded to 48, empty on any failure).
+  TITLE_PART="$(notify_identity_session_title "$SESSIONS_DIR" "$SAFE_SESSION")"
 elif [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-  TITLE_PART="$(grep '"type":"summary"' "$TRANSCRIPT" 2>/dev/null | tail -1 | jq -r '.summary // empty' 2>/dev/null || true)"
+  # Transcript summary as today (sanitize + ellipsis on cut), with the WHOLE
+  # component bounded to 48: trunc caps the source at 45 so source+ellipsis
+  # never exceeds the 48-char title-component contract.
+  TITLE_PART="$(trunc "$(grep '"type":"summary"' "$TRANSCRIPT" 2>/dev/null | tail -1 | jq -r '.summary // empty' 2>/dev/null || true)" 45)"
 fi
 # A polytoken session may have moved into a worktree after start; the session
 # log's cwd trail is where the agent most recently worked, so prefer it over
@@ -227,14 +234,17 @@ if [ -n "$PROJECT_DIR" ] && command -v git >/dev/null 2>&1; then
   COMMON_DIR="${COMMON_DIR%.git}"; COMMON_DIR="${COMMON_DIR%/}"
   [ -n "$COMMON_DIR" ] && REPO_NAME="${COMMON_DIR##*/}"
 fi
-PROJECT="$(sanitize "${REPO_NAME:-${PROJECT_DIR##*/}}")"; [ -n "$PROJECT" ] || PROJECT="unknown"
-TITLE="$(trunc "${TITLE_PART:-Agent}" 48)"
-PREVIEW="${RESP:-session=$SAFE_SESSION}"
-if [ -n "$BRANCH" ]; then
-  MESSAGE="$PROJECT/$BRANCH: $PREVIEW"
-else
-  MESSAGE="$PROJECT: $PREVIEW"
-fi
+# Non-git project dirs keep their basename as the repo (mirrors the identity
+# library's resolver fallback), so the title never loses project identity.
+REPO_NAME="${REPO_NAME:-$(sanitize "${PROJECT_DIR##*/}" 64)}"
+# Overlength contract: the title component is pre-bound (sanitized, <=48), so
+# a rejection implies pathological repo/branch/sid. On return 3 retry once
+# with a shortened title component; the final fallback is "(<sid>)". An
+# old-format title is never emitted.
+TITLE="$(notify_identity_title "$SAFE_SESSION" "$REPO_NAME" "$BRANCH" "$TITLE_PART")" || TITLE=""
+[ -n "$TITLE" ] || TITLE="$(notify_identity_title "$SAFE_SESSION" "$REPO_NAME" "$BRANCH" "${TITLE_PART:0:16}")" || TITLE=""
+[ -n "$TITLE" ] || TITLE="($SAFE_SESSION)"
+MESSAGE="$(notify_alert_tag hook needs_input)${RESP:-session=$SAFE_SESSION}"
 lock || exit 0
 printf '%s\n' "$GEN" > "$STATE.gen.tmp" && mv -f "$STATE.gen.tmp" "$STATE.gen"
 unlock

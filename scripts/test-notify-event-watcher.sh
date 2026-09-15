@@ -143,15 +143,35 @@ else
   no "watcher library sources (discovery)"
 fi
 
-# --- production sender wiring: notify_identity_title + notify_send ----------
+# --- production sender wiring: enriched identity title + [sse:*] body tag ---
 SEND_LOG="$TMP/send.log"
-NOTIFY_SEND_CAP="$SEND_LOG" bash -c '
-  source "$1" || exit 9
-  notify_send(){ printf "%s\n" "title=$notify_title body=$notify_body" >> "$NOTIFY_SEND_CAP"; }
-  notify_watcher_default_send sess-1 question_pending k1 "1 question needs your answer"
-' _ "$NW_LIB" >/dev/null 2>&1
-assert_eq "$(cat "$SEND_LOG" 2>/dev/null)" "title=(sess-1) body=1 question needs your answer" \
-  "default sender composes identity title and sends via notify_send"
+nw_send(){ # <kind> <key> <body> — runs the default sender with a notify_send capture
+  NOTIFY_WATCHER_SESSIONS_DIR="$FIXSD" NOTIFY_SEND_CAP="$SEND_LOG" bash -c '
+    source "$1" || exit 9
+    notify_send(){ printf "%s\n" "title=$notify_title body=$notify_body" >> "$NOTIFY_SEND_CAP"; }
+    notify_watcher_default_send "$2" "$3" "$4" "$5"
+  ' _ "$NW_LIB" "$@" >/dev/null 2>&1
+}
+# No session metadata at all: identity falls back to "(sid)"; the body is tagged.
+: > "$SEND_LOG"; FIXSD="$TMP/empty-sessions"; mkdir -p "$FIXSD"
+nw_send sess-1 question_pending k1 "1 question needs your answer"
+assert_eq "$(cat "$SEND_LOG" 2>/dev/null)" "title=(sess-1) body=[sse:question_pending] 1 question needs your answer" \
+  "default sender composes identity title and tagged body via notify_send"
+# Fixture sessions dir (never operator data): record.json .session_title beats
+# session.json .inferred_title; project basename names a non-git project; the
+# enriched title is asserted exactly for the pending + completed kinds.
+FIXSD="$TMP/watchsessions"; mkdir -p "$FIXSD/sess-1"
+printf '%s' '{"session_title":"my title"}' > "$FIXSD/sess-1/record.json"
+printf '%s' '{"project_path":"'"$TMP"'/projx","inferred_title":"ignored"}' > "$FIXSD/sess-1/session.json"
+: > "$SEND_LOG"; nw_send sess-1 question_pending k1 "1 question needs your answer"
+assert_eq "$(cat "$SEND_LOG" 2>/dev/null)" "title=projx (sess-1) - my title body=[sse:question_pending] 1 question needs your answer" \
+  "enriched title (record.json wins) for question_pending"
+: > "$SEND_LOG"; nw_send sess-1 goal_completed k2 "goal completed: ship it"
+assert_eq "$(cat "$SEND_LOG" 2>/dev/null)" "title=projx (sess-1) - my title body=[sse:goal_completed] goal completed: ship it" \
+  "enriched title for goal_completed"
+: > "$SEND_LOG"; nw_send sess-1 approval_pending k3 "approve plan handoff"
+assert_eq "$(cat "$SEND_LOG" 2>/dev/null)" "title=projx (sess-1) - my title body=[sse:approval_pending] approve plan handoff" \
+  "approval_pending body carries the sse tag"
 
 # --- nothing dialed out -----------------------------------------------------
 [ -e "$TMP/curl.calls" ] && no "suite made no network calls" || ok "suite made no network calls"
