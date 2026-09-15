@@ -37,6 +37,13 @@
     "name": "session-watchdog-keepalive"
   },
   {
+    "event": "session_start",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/notify-watcher-keepalive.sh\""
+    },
+    "name": "notify-watcher-keepalive"
+  },
+  {
     "event": "pre_tool_use",
     "handler": {
       "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" grep-guard/hook.sh grep"

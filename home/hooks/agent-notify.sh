@@ -4,11 +4,11 @@
 # native mac host) plus the optional Pushover sender.
 set -u
 
+# Single lib dependency: the credential-free mac Notification Center lane
+# (notify_mac_available / notify_mac_send). notify-identity.sh and
+# notify-send.sh are deliberately NOT sourced — the hook calls none of their
+# functions (the push is inline curl below).
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)"
-[ -f "$_LIB_DIR/notify-identity.sh" ] && . "$_LIB_DIR/notify-identity.sh"
-[ -f "$_LIB_DIR/notify-send.sh" ] && . "$_LIB_DIR/notify-send.sh"
-# Direct guarded source so the installed polytoken copy (which ships no
-# notify-send.sh) still gets the mac Notification Center module.
 [ -f "$_LIB_DIR/notify-mac.sh" ] && . "$_LIB_DIR/notify-mac.sh"
 unset _LIB_DIR
 
@@ -21,7 +21,7 @@ case "$HARNESS" in
   *) exit 0 ;;
 esac
 STATE_DIR="${AGENT_NOTIFY_STATE_DIR:-$DEFAULT_CONFIG_DIR/.agent-notify}"
-DELAY="${AGENT_NOTIFY_DELAY:-60}"
+DELAY="${AGENT_NOTIFY_DELAY:-180}"
 INPUT="$(cat 2>/dev/null || true)"
 
 # pre_user_prompt must always allow, even when optional dependencies are absent.

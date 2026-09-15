@@ -57,196 +57,21 @@ default to `/dev/tty`.
 
 ### Attention notifications (agent-notify)
 
-Attention alerts are dual-channel on a native macOS host: the local
-**Notification Center** (credential-free, on by default) plus the optional
-**Pushover** push. Both fire for the same event; mute the Notification Center
-per-app if you only want Pushover. Wherever the mac lane is unavailable
-(non-macOS, the Linux container, or `AGENT_NOTIFY_MAC=0`) the system behaves
-exactly as before: fully fail-open — hooks still succeed, nothing is sent,
-nothing blocks. Pushover credentials are read from the environment only —
-never from files this repo manages — and must never be committed:
+Both harnesses can push you when a run needs input or has died: the local
+Notification Center (credential-free on a mac, on by default) plus the
+optional Pushover. Install just the notification stack — none of the guards,
+skills, statusline, or instruction files — for either or both harnesses:
 
 ```bash
-export PUSHOVER_APP_TOKEN=your-application-token
-export PUSHOVER_USER_KEY=your-user-key
+./install.sh --notify-hook-only --target all
 ```
 
-#### What alerts you
-
-| Surface | Alert | Where | Notes |
-|---|---|---|---|
-| Claude Code: turn ends needing input, or a `Notification` fires | one consolidated alert after ~60s | Notification Center + Pushover | your next prompt cancels the pending send |
-| Polytoken: end of turn awaiting you | same consolidation + cancel | Notification Center + Pushover | suppressed while a saved-session goal is active (the goal driver continues without you) |
-| Polytoken: `ask_user_question` pending | alert with the first question's text | Notification Center + Pushover | your answer cancels it; ambient/background notifications cancel rather than add |
-| Polytoken: TUI or container killed (SIGKILL) | "abnormal exit" alert | Notification Center + Pushover | at most one per 15s window, with the affected-session count; normal quits, Ctrl-C/TERM/HUP exits, and TUI launch failures stay silent |
-| Polytoken: plan-handoff approval pending, goal-acceptance pending, goal completed | one alert each | Notification Center + Pushover | requires the optional SSE watcher (below); everything else on the stream — cancellations, provider errors, ambient events — stays silent |
-| Watchdog: a session's daemon died mid-work | "Agent Died" | Notification Center + Pushover | see the session watchdog (below); Pushover retries up to 3×, the mac lane sends once per episode |
-| Watchdog: a Polytoken TUI panic | "TUI Crashed" | Notification Center + Pushover | same claim/retry model as "Agent Died" |
-
-Titles carry the session title (or "Agent"); bodies carry `repo/branch:` plus
-a bounded, sanitized preview. No transcript text beyond the bounded preview
-ever leaves the machine — the same sanitized title/body reaches both
-Notification Center and Pushover.
-
-#### Installing
-
-```bash
-./install.sh --target claude       # Claude Code hooks (UserPromptSubmit/Stop/Notification)
-./install.sh --target polytoken    # native Polytoken hooks (see below)
-./install.sh --target all          # both, independently
-```
-
-- **Claude Code**: `home/` is copied into `CLAUDE_CONFIG_DIR` (default
-  `~/.claude`) and `settings.recommended.json` adds the three
-  `agent-notify.sh claude` hooks (Stop and Notification run async). The script
-  reads its session id from the event JSON and the repo/branch from the
-  transcript's working directory.
-- **Polytoken**: `agent-notify.sh polytoken` is installed into
-  `POLYTOKEN_CONFIG_DIR` (default `~/.config/polytoken`) and `hooks.json`
-  gains the `agent-notify`, `agent-notify-cancel` (pre_user_prompt),
-  `agent-notify-stop` (stop), `agent-notify-ask` (pre_tool_use on
-  `ask_user_question`), `agent-notify-answer` (post_tool_use), and
-  `session-watchdog-keepalive` entries. Hooks load at the next session start
-  or config reload. The session id comes from `POLYTOKEN_SESSION_ID`, and
-  repo/branch resolution follows the session log's most recent working
-  directory, so worktree sessions still name their repo.
-
-#### Configuring credentials
-
-- **Notification Center (macOS)**: needs **no credentials**. It is on by
-  default whenever the hooks run natively on a mac (Darwin with `osascript`,
-  both built into macOS — `perl` too, which bounds every `osascript` call to
-  5s). Set `AGENT_NOTIFY_MAC=0` in the environment to disable the mac lane.
-  The first alert may require approving a per-app Notification Center
-  permission dialog (attributed to whatever process runs `osascript`); until
-  approved, macOS may silently suppress the banners.
-- **Pushover (optional)**: export both variables in the environment that
-  launches the harness (shell profile, LaunchAgent environment, and so on).
-  Hooks inherit it. With no Pushover credentials the mac lane alone delivers.
-- **Dockerized Polytoken** (`polytoken-container/run.sh`): put the two exports
-  in the env file run.sh injects — `POLY_ENV_FILE`, default
-  `~/.config/polytoken-container.env`:
-
-  ```bash
-  echo 'export PUSHOVER_APP_TOKEN=your-application-token' >> ~/.config/polytoken-container.env
-  echo 'export PUSHOVER_USER_KEY=your-user-key' >> ~/.config/polytoken-container.env
-  ```
-
-  Each container session's hooks run inside the container with that env, so
-  alerts work per session with no host-side daemon.
-
-#### Death alerts (lifecycle shipper)
-
-- **Dockerized**: built into `polytoken-container/run.sh` — its cleanup path
-  records how the container ended and sends the abnormal-exit alert when the
-  container was SIGKILLed. Nothing extra to run.
-- **Native**: opt-in — launch sessions with the wrapper instead of bare
-  `polytoken`: `bash home/bin/polytoken-notify-wrapper.sh new` (same arguments;
-  exit status and foreground behavior are preserved). Without the wrapper,
-  native sessions have no death alerts.
-
-Both lanes append a `notify-exit-record/v1` JSON line per launch — native to
-`~/.local/share/polytoken/notify-exit/`, container to the host store
-`~/.local/share/polytoken-dev/notify-exit/` (dir 700, file 600, size-capped).
-Records whose timestamps could not be rendered faithfully carry
-`"ts_fidelity":"degraded"` and never alert.
-
-#### Optional SSE watcher (approvals + goal completion)
-
-`home/lib/notify-event-watcher.sh` is a per-host loop that discovers live
-session daemons (`sessions/*/startup.json`), follows each daemon's `/events`
-stream, and pushes on plan-handoff approvals, goal-acceptance approvals, goal
-completion, and questions. It ships without an installer **by design** — start
-it manually. Note on questions: the ask hook (above) and the watcher do not
-share dedup state, so with both active an unanswered question can alert twice
-— immediately from the watcher, and once more from the hook's ~60s
-consolidation if it is still pending (answering cancels the hook's send). If
-you prefer single-alert questions, either skip the watcher's question mapping
-or uninstall the `agent-notify-ask` entry.
-
-```bash
-nohup bash /path/to/claude-config/home/lib/notify-event-watcher.sh >/dev/null 2>&1 &
-```
-
-Knobs: `NOTIFY_WATCHER_SESSIONS_DIR` (sessions root to watch — for
-containerized sessions run the watcher where the daemon's loopback port is
-reachable and point this at that container's sessions root),
-`NOTIFY_WATCHER_POLL_SECONDS` (5), `NOTIFY_WATCHER_FRESH_SECONDS` (120).
-Events older than 120s, future timestamps, clock discontinuities, and any
-event outside the four mappings are silently ignored.
-
-#### Session watchdog ("Agent Died" scan)
-
-A host-side scan alerts "Agent Died" when a Polytoken session's daemon dies
-mid-work (a crash or replacement kills the process that would run hooks, so a
-host-side watcher is the only sensor). It runs as a macOS LaunchAgent
-(`scripts/install-session-watchdog.sh`) scanning every 30s. Each daemon keeps a
-continuously-updated liveness journal beside its log at
-`~/.local/share/polytoken/logs/<started-at>-<pid>.liveness.jsonl` (the paired
-`<started-at>-<pid>.log` names the session it served).
-
-On a native mac the watchdog delivers through the same dual channel as the
-hooks: Notification Center first (credential-free, so the watchdog works with
-no Pushover account), plus Pushover when credentials are configured. The mac
-lane sends once per episode; only Pushover owns the retry counter, so a failed
-mac send never re-arms an episode. Both the watchdog and agent-notify require
-`jq` even in mac-only mode (it enriches titles/bodies) — the LaunchAgent plist
-ships a `PATH` that includes `/opt/homebrew/bin` and `/usr/local/bin`, so make
-sure `jq` is reachable there. **Stale installs:** an already-installed copy of
-`session-watchdog.sh` / `agent-notify.sh` keeps its old single-channel behavior
-until you re-run `scripts/install-session-watchdog.sh` (or `install.sh`).
-
-**Per-session liveness.** A session is treated as **alive** when *any* of its
-liveness journals is fresh. When a daemon is replaced, the old daemon's
-leftover journal lingers beside the new one; this per-session alive check means
-a live session is never re-armed or re-pinged because a stale sibling exists
-(this stopped a recurring "Agent Died" flood from a stale leftover journal
-re-queuing a death every scan). Only when *every* journal for a session is
-stale is a death evaluated, and it pings at most once per episode (then
-tombstoned).
-
-**Suppression knobs:** `WATCHDOG_IDLE_LIMIT` (a daemon that died while the
-session was already long idle stays silent), `WATCHDOG_MASS` (many simultaneous
-deaths read as one host/container event), a boot-grace first scan, and a
-3-attempt send retry.
-
-**Stale-journal cleanup.** Long-stale leftover journals for dead daemons are
-purged automatically (`WATCHDOG_PURGE_OLD_DAYS`, default 7, 0 disables). A live
-session's journal is never removed — a journal is purged only when its session
-has no fresh journal. Manual cleanup for a specific leftover journal:
-
-```bash
-rm -f ~/.local/share/polytoken/logs/2026-09-14T00-08-58Z-10.liveness.jsonl \
-      ~/.local/share/polytoken/logs/2026-09-14T00-08-58Z-10.log
-```
-
-**Silence immediately** (stop the scan loop; it resumes at the next
-session_start keepalive):
-
-```bash
-kill $(cat $HOME/.local/share/polytoken/.session-watchdog/loop.pid) 2>/dev/null
-```
-
-That `kill` targets the keepalive-spawned loop (containers/Linux, which write
-`loop.pid`). On a native macOS LaunchAgent install there is no loop or
-`loop.pid`; pause the scan instead with:
-
-```bash
-launchctl unload ~/Library/LaunchAgents/dev.gf.polytoken-session-watchdog.plist  # pause
-launchctl load -w   ~/Library/LaunchAgents/dev.gf.polytoken-session-watchdog.plist  # resume
-```
-
-#### Diagnostics and verification
-
-- Sender decisions (sent/rejected/no-creds): `~/.local/share/polytoken/logs/notify/notify.log`
-  (bounded, rotated; `source|event|session|result|http_status`).
-- SSE adapter decision log: `~/.local/share/polytoken/logs/notify-adapter/notify.log`.
-- Exit records: `notify-exit/notify-exit.log` in either data root.
-- Test suites: `bash scripts/test-agent-notify.sh`,
-  `scripts/test-notify-exit-record.sh`, `scripts/test-notify-libs.sh`,
-  `scripts/test-notify-adapter.sh`, `scripts/test-notify-event-watcher.sh`,
-  `scripts/test-session-watchdog.sh`, `scripts/test-watchdog-keepalive.sh` —
-  all run offline with mock senders and assert no network egress.
+With containerized Polytoken sessions, add `--containerized-polytoken` (it
+skips the macOS LaunchAgent and installs the keepalive hooks instead).
+Pushover credentials are environment-only: `PUSHOVER_APP_TOKEN` and
+`PUSHOVER_USER_KEY`. What alerts you under each harness, credentials, death
+alerts, the session watchdog, the SSE event watcher, and diagnostics live in
+one place: **[docs/agent-notify.md](docs/agent-notify.md)**.
 
 ### Requirements
 
@@ -255,7 +80,7 @@ launchctl load -w   ~/Library/LaunchAgents/dev.gf.polytoken-session-watchdog.pli
 | **bash 4+** | Claude status line (`mapfile`) | macOS ships bash 3.2 — install a newer one via Homebrew. The notify/watchdog scripts are bash 3.2-safe. |
 | **jq** | both targets | settings/hooks merge and JSON processing; also required by agent-notify and the session watchdog in mac-only mode (title/body enrichment). |
 | **osascript + perl** | Notification Center lane | built into macOS — nothing to install; every `osascript` call is bounded by a 5s `perl` alarm. |
-| **mikefarah/yq v4** | Polytarget YAML merge | the Go-based `yq`; the Python `yq` wrapper does **not** support the required `eval-all` + `*` deep-merge and is rejected. |
+| **mikefarah/yq v4** | Polytarget YAML merge | the Go-based `yq`; the Python `yq` wrapper does **not** support the required `eval-all` + `*` deep-merge and is rejected. Full Polytoken installs only — the notify-only install needs jq + curl, not yq. |
 | **Polytoken CLI** | Polytarget target | `polytoken config validate --user` validates structured writes in context; `polytoken validate skill` checks skills. |
 | **python3** | Polytoken hook adapter | validates canonical hook paths stay under the config root. |
 
@@ -275,6 +100,7 @@ Copies everything under `home/` into `CLAUDE_CONFIG_DIR`, then merges
 | `bash-guard`, `branch-guard`, `git-safe` | Block risky bash, commits to protected branches, and destructive git ops. |
 | `hooks/no-remote-writes.sh` | Blocks unsolicited `git push` / `gh` writes. |
 | `hooks/agent-state.sh` | Writes the working/idle badge the status line shows. |
+| `hooks/agent-notify.sh` + `lib/notify-mac.sh` | Attention notifications (turn-end/question pushes; Notification Center + optional Pushover) — see [docs/agent-notify.md](docs/agent-notify.md). |
 | `read-once/` | De-duplicates repeated file reads to save context. |
 | `skill-once/` | Checks successful loads at `PreToolUse` and records only successful `PostToolUse` deliveries; deduplication is per Claude agent, compaction resets it, and `--force` removes a prior entry before a successful reload records it again. |
 | `agent-join/` | Emits an `<orchestration-status>` block when a Claude Agent subagent joins, so the main session can correlate work by id. |
@@ -294,8 +120,9 @@ with Polytoken-native equivalents.
 |---|---|---|
 | `config.yaml` | `polytoken/config.recommended.yaml` | `version: 3` + the single `mcp_servers.ratatoskr` gateway entry (see below). |
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
-| `hooks.json` | `polytoken/hooks.json` | Nine native hooks, including the metadata-only `large-read-guard`. Skill-once is omitted because per-agent hook identity is unavailable. |
+| `hooks.json` | `polytoken/hooks.json` | Native hooks merged by unique name, including the notification entries documented in [docs/agent-notify.md](docs/agent-notify.md). Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
+| `hooks/agent-notify.sh`, `hooks/session-watchdog.sh`, `hooks/*keepalive.sh`, `lib/notify-*.sh` | `home/` | The notification stack (hooks, session watchdog, SSE event watcher) — see [docs/agent-notify.md](docs/agent-notify.md). |
 | `facets/` | `polytoken/facets/` | The `workflow-designer`, `workflow-project-manager`, `product-design`, and `project-manager` workflow facets described below. |
 | `subagents/` | `polytoken/subagents/` | Managed built-in and workflow-specialist roles, including `agent-workflow-architect` and `agent-workflow-engineer`. |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
@@ -426,7 +253,7 @@ custom scripts, so the Polytoken target does not install the Claude versions:
 
 #### Wrapped hook families (canonical logic, shared with Claude)
 
-The seven native hooks run the **same canonical policy logic** as the Claude
+The native wrapped hooks run the **same canonical policy logic** as the Claude
 hooks through a thin adapter (`hooks/adapter.sh`) that translates Polytoken's
 event input and decision output. They are installed as named entries merged
 into your `hooks.json`:
