@@ -7,6 +7,13 @@ P=0; F=0; ok(){ echo "ok: $1"; P=$((P+1)); }; no(){ echo "FAIL: $1"; F=$((F+1));
 . "$R/home/lib/notify-exit-record.sh"
 # All shipper/sender diagnostics stay in the temp tree, never the real HOME.
 export AGENT_NOTIFY_LOG_DIR="$T/logs"
+# Hygiene (AC6): notify_send now also carries the default-on mac Notification
+# Center lane. Record osascript calls instead of ever popping a real alert on a
+# mac dev host. (Only osascript is stubbed — a uname stub would break the
+# host-switching date stubs below.) No assertion changes.
+MACSTUB="$T/macstub"; mkdir -p "$MACSTUB"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${2:-}|${3:-}" >> "${OSA_LOG:-/dev/null}"\n' > "$MACSTUB/osascript"; chmod +x "$MACSTUB/osascript"
+export PATH="$MACSTUB:$PATH"
 
 # Emitter: valid v1 line with signal derivation and identity fields.
 export POLY_NOTIFY_EXIT_DIR="$T/exit"

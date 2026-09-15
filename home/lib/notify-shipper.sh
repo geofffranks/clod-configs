@@ -23,8 +23,9 @@
 #     affected-session count in the body.
 #   - Title via notify_identity_title: repo/branch (session_id), no fallbacks;
 #     a title failure suppresses.
-#   - Fail-open: never changes the launcher exit status; the shared sender is
-#     an immediate detached <=10s attempt.
+#   - Fail-open: never changes the launcher exit status; the shared sender
+#     (local macOS Notification Center + optional Pushover) is an immediate
+#     detached attempt bounded by the sender's own timeouts.
 # Portable bash 3.2+, jq-free; safe under `set -euo pipefail` callers.
 set -u
 

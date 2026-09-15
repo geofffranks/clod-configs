@@ -504,6 +504,9 @@ copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/co
 copy_managed_file "$ROOT/home/hooks/agent-notify.sh" "$DEST/hooks/agent-notify.sh"
 copy_managed_file "$ROOT/home/session-watchdog.sh" "$DEST/hooks/session-watchdog.sh"
 copy_managed_file "$ROOT/home/hooks/watchdog-keepalive.sh" "$DEST/hooks/watchdog-keepalive.sh"
+# The credential-free mac Notification Center lane, resolved by the installed
+# hooks under $DEST/hooks/ via ../lib.
+copy_managed_file "$ROOT/home/lib/notify-mac.sh" "$DEST/lib/notify-mac.sh"
 for d in "${COMPAT_DIRS[@]}"; do
   if [ -d "$ROOT/home/$d" ]; then
     while IFS= read -r -d '' src; do
