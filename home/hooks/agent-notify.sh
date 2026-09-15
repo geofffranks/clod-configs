@@ -23,7 +23,7 @@ case "$HARNESS" in
   *) exit 0 ;;
 esac
 STATE_DIR="${AGENT_NOTIFY_STATE_DIR:-$DEFAULT_CONFIG_DIR/.agent-notify}"
-DELAY="${AGENT_NOTIFY_DELAY:-180}"
+DELAY="${AGENT_NOTIFY_DELAY:-60}"
 INPUT="$(cat 2>/dev/null || true)"
 
 # pre_user_prompt must always allow, even when optional dependencies are absent.
