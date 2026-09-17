@@ -144,6 +144,12 @@ cp .env.example ~/.config/polytoken-container.env && $EDITOR $_
 run.sh also forwards provider tokens already exported in your shell
 (`ANTHROPIC_API_KEY`, `ZAI_API_KEY`, `FOUNDRY_API_KEY`, … — see `POLY_PASS_ENV`).
 
+The env file is also the container side of the Discord bridge connector
+auto-start: adding `BRIDGE_RELAY_TOKEN` (plus `BRIDGE_RELAY_ADDRESS`, default
+`ws://host.docker.internal:8765`) makes the `bridge-connector-autostart`
+session_start hook launch a connector in every container, fail-open and
+non-blocking. See `../discord-bridge/README.md` for the host side and rotation.
+
 ### Polytoken config + permissions (via the claude-config installer)
 ```bash
 ./install.sh --target polytoken --overwrite
