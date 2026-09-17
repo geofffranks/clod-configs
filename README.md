@@ -141,9 +141,20 @@ Before implementation, the designer sends the saved plan to
 `agent-workflow-architect` for one bounded workflow review covering plan
 coherence and scope, authority, approval, delegation, MCP routing, host
 boundaries, usability, operational risks, and compliance with the requested
-design. Blocking findings are fixed or rebutted and the revised plan receives a
-fresh architect rereview before the designer presents it to the operator and
-waits for approval. After approval it hands the plan to `workflow-project-manager`; it
+design. The design-time lane affords one initial architect review and, when
+needed, at most one focused delta re-review per scope and plan revision over
+unresolved finding IDs and changed sections. A blocker is an evidenced
+violation of an agreed requirement, feasibility constraint, or material
+safety/authority boundary; preferences, speculative future-proofing, and
+optional polish are nonblocking. After the follow-up, any blocker that remains
+unfixed or unrebutted, or substantive disagreement that remains unresolved,
+escalates to the operator rather than triggering another pass or automatic
+approval — never auto-approve, and never silently suppress a newly evidenced
+critical risk. The independent final implementation review remains required
+and is a separate lane, including a conditional second safety review for
+authority, approval, delegation, autonomous behavior, MCP-routing, or
+destructive-capability changes. The designer presents the plan to the
+operator and waits for approval. After approval it hands the plan to `workflow-project-manager`; it
 cannot switch facets itself. Directly invoking `workflow-project-manager` is also
 supported and authorizes the requested execution, but it does not prove that a
 plan was reviewed or approved. Delivery reports that provenance honestly.
@@ -167,7 +178,10 @@ write-capable `agent-workflow-engineer`, with these gates:
 - substantive work gets an independent workflow-architecture review, with a
   second fresh review when authority, permissions, autonomous behavior,
   approval gates, delegation, destructive capability, or MCP routing changes;
-- pushing and other remote writes always require separate operator action.
+- `gh project` bookkeeping via the `github-project-backlog` skill (planning
+  bookkeeping and `[process-friction]` capture under its standing authorization)
+  is the sole standing remote-write exception; pushing, opening a PR, and all
+  other remote writes require separate operator action.
 
 Reviewers are routed to one bounded question and named evidence. They identify
 risks and missing evidence rather than prescribing unit tests by default. The
@@ -186,8 +200,13 @@ unknown jobs are resolved to terminal state before retry. Approval is explicit
 (`draft -> reviewed -> operator_approved -> handed_off`) and is invalidated by
 material scope, authority, permission, delegation, MCP, or acceptance changes.
 
-Review convergence is bounded: one initial broad reviewer, one batched focused
-fix, and at most one focused delta re-review against the resulting revision. A
+Review convergence is bounded per lane: one initial broad reviewer, one batched
+focused fix, and then each review lane — the design-time plan review and each
+independent final review — permits at most one focused delta re-review against
+the resulting revision, per scope and plan revision. A required second fresh
+safety review (authority, permissions, approval gates, delegation, autonomous
+behavior, MCP routing, or destructive capabilities) is a separate lane with its
+own single delta budget. A
 stale, unavailable, or still-blocking delta review fails closed and escalates to
 the operator. Rocket-derived decision behaviors mean inspect before acting,
 choose the smallest reversible change, preserve operator control at irreversible

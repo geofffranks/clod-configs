@@ -110,8 +110,12 @@ before dispatching replacements.
 
 ## Review convergence policy
 Use one planner and one broad initial reviewer for the approved change. Batch
-valid blocking findings into one focused fix round and allow at most one focused
-delta re-review against the resulting revision. If the delta review is stale,
+valid blocking findings into one focused fix round; each review lane — the
+design-time plan review and each independent final review — permits at most
+one focused delta re-review per scope and plan revision, and a required second
+fresh safety review (authority, permissions, approval gates, delegation,
+autonomous behavior, MCP routing, or destructive capabilities) is a separate
+lane with its own single delta budget. If the delta review is stale,
 unavailable, or remains blocking, fail closed and escalate to the operator; do
 not start another review lane or claim convergence. Reviewers report evidence
 and do not fix their own findings.
@@ -200,19 +204,28 @@ silently omit the check or invent additional infrastructure.
 Every plan produced by `workflow-designer` is independently reviewed by
 `agent-workflow-architect` for plan coherence and scope together with workflow
 authority, approval, delegation, MCP routing, host boundaries, usability,
-operational risks, and compliance with the requested design. The architect
-review uses the saved-plan fix-or-rebut and fresh-rereview loop.
+operational risks, and compliance with the requested design. The design-time
+lane affords one initial saved-plan review and, when needed, at most one
+focused delta re-review per scope and plan revision over unresolved finding
+IDs and changed sections. A blocker must be an evidenced violation of an
+agreed requirement, feasibility constraint, or material safety/authority
+boundary; preferences, speculative future-proofing, and optional polish are
+nonblocking. After the follow-up, any blocker that remains unfixed or
+unrebutted, or substantive disagreement that remains unresolved, escalates to
+the operator and never becomes auto-approval. This bounded design review does
+not replace the independent final implementation review or its conditional
+second review.
 
 Every substantive final change receives one independent
 `agent-workflow-architect` review against the approved scope and final revision.
 A second fresh workflow review is additionally required for changes to
 permissions, authority, approval gates, delegation, autonomous behavior, MCP
-routing, or destructive capabilities. This is a separate final-review lane, not
-an extra plan re-review. Maintain one global re-review counter per scope and
-plan revision across all lanes: it permits zero or one focused delta re-review
-total. Optional specialists are selected only for a distinct bounded question,
-with named evidence and explicit exclusions; no specialist performs
-carte-blanche or duplicate plan review.
+routing, or destructive capabilities. Each review lane — the design-time plan
+review and each independent final review — permits at most one focused delta
+re-review per scope and plan revision, and this separate safety-review lane
+has its own single delta budget. Optional specialists are selected only for a
+distinct bounded question, with named evidence and explicit exclusions; no
+specialist performs carte-blanche or duplicate plan review.
 
 Reviewers never fix their own findings. Batch valid blocking findings into one
 coherent fix, rerun only affected checks, and permit at most one focused delta
@@ -225,8 +238,10 @@ approval.
 - Distinguish container-local evidence, host evidence mediated through
   ratatoskr, and manual operator confirmation. No tier substitutes for
   another; report which tier each claim rests on.
-- No remote writes: never push, open a PR, or otherwise write to remotes
-  automatically.
+- `gh project` bookkeeping via the `github-project-backlog` skill (planning
+  bookkeeping and `[process-friction]` capture under its standing authorization)
+  is the sole standing remote-write exception; pushing, opening a PR, and all
+  other remote writes require separate operator action.
 - Verify before `complete_goal`: name the exact checks run and their results,
   the limitations, and any manual steps the operator must perform.
 

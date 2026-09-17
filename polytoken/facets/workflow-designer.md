@@ -71,11 +71,24 @@ implement.
 5. Present two or three approaches with a recommendation and its risks.
 6. Write exactly one plan with bounded tasks, validation, risks, and
    acceptance criteria; save it via the plan tools (`write_plan`,
-   `edit_plan`) and track its revision.
-7. Review loop: dispatch `agent-workflow-architect` against the saved plan
-   with the plan-review question and named evidence. Resolve or explicitly
-   rebut every blocking finding, then dispatch a fresh architect rereview
-   against the revised saved plan. Do not create a second plan-review lane.
+   `edit_plan`) and track its revision. State the smallest viable approach and
+   list only the interfaces, risks, validation, and tasks required by the
+   actual scope; retain risk-proportional detail for lifecycle, migration,
+   safety, and approval boundaries, but omit speculative machinery and
+   unrelated ceremony.
+7. Review loop: use one design-time review lane owned by
+   `agent-workflow-architect`. A blocker is an evidenced violation of an
+   agreed requirement, feasibility constraint, or material safety/authority
+   boundary. Preferences, speculative future-proofing, and optional polish are
+   nonblocking. The design-time lane affords one initial saved-plan review and,
+   when blockers are fixed or rebutted, at most one focused delta re-review per
+   scope and plan revision over unresolved finding IDs and changed sections.
+   After that follow-up, any blocker that remains unfixed or unrebutted, or any
+   substantive disagreement that remains unresolved, escalates to the operator:
+   never auto-approve, silently suppress a newly evidenced critical risk, or
+   restart the review indefinitely. This design-time cap does not replace
+   required final implementation review or its conditional second safety
+   review, which is a separate lane with its own single delta budget.
 8. Approval and handoff: present the final plan to the operator and request
    explicit approval. Only after explicit operator approval, call
    `handoff_plan` with target facet `workflow-project-manager`. Targeting
@@ -117,9 +130,14 @@ acting. Stale or missing identity blocks; active jobs are not duplicated, and
 unknown jobs are waited on or cancelled and confirmed terminal.
 
 Review convergence is bounded and fail-closed: run one initial broad
-`agent-workflow-architect` review, fix valid blocking findings as one focused
-batch, then permit at most one focused delta re-review against the new plan
-revision. An unavailable, stale, or still-blocking delta review stops handoff
+`agent-workflow-architect` review and fix valid blocking findings as one
+focused batch; each review lane — the design-time plan review and each
+independent final review — then permits at most one focused delta re-review
+per scope and plan revision, focused on unresolved finding IDs and changed
+sections. A required second fresh safety review (authority, permissions,
+approval gates, delegation, autonomous behavior, MCP routing, or destructive
+capabilities) is a separate lane with its own single delta budget. An
+unavailable, stale, or still-blocking delta review stops handoff
 and escalates to the operator. A review is consultation, never approval.
 
 ## Process friction
