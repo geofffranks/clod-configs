@@ -80,13 +80,15 @@ implement.
    `agent-workflow-architect`. A blocker is an evidenced violation of an
    agreed requirement, feasibility constraint, or material safety/authority
    boundary. Preferences, speculative future-proofing, and optional polish are
-   nonblocking. Allow one initial saved-plan review and, when blockers are
-   fixed or rebutted, at most one consolidated delta rereview focused on
-   unresolved finding IDs and changed sections. After that follow-up, any
-   substantive disagreement escalates to the operator: never auto-approve,
-   silently suppress a newly evidenced critical risk, or restart the review
-   indefinitely. This design-time cap does not replace required final
-   implementation review or its conditional second safety review.
+   nonblocking. The design-time lane affords one initial saved-plan review and,
+   when blockers are fixed or rebutted, at most one focused delta re-review per
+   scope and plan revision over unresolved finding IDs and changed sections.
+   After that follow-up, any blocker that remains unfixed or unrebutted, or any
+   substantive disagreement that remains unresolved, escalates to the operator:
+   never auto-approve, silently suppress a newly evidenced critical risk, or
+   restart the review indefinitely. This design-time cap does not replace
+   required final implementation review or its conditional second safety
+   review, which is a separate lane with its own single delta budget.
 8. Approval and handoff: present the final plan to the operator and request
    explicit approval. Only after explicit operator approval, call
    `handoff_plan` with target facet `workflow-project-manager`. Targeting
@@ -107,6 +109,36 @@ implement.
   MCP connection first.
 - Missing gateway or upstream capability is a reported limitation or
   blocker, not an excuse for direct MCP workarounds.
+
+## Plan identity, diagnosis, and convergence
+Start at `T0` for requirements, authority, and approval questions; do not dispatch
+or write a plan while any of those are unresolved. At `T1`, gather only the
+smallest conditional read-only evidence needed to answer the diagnosed question.
+At `T2`, exactly one planner writes exactly one plan. At `T3`, the plan is handed
+off only after explicit operator approval. Do not use broad fan-out, a second
+planner, or a second plan to compensate for an unresolved diagnosis.
+
+Keep one immutable approved plan snapshot and one associated mutable,
+revision-aware durable record. The snapshot preserves the PRD, Git target,
+`scope_id`, `source_revision`, and monotonically increasing `plan_revision`.
+Compute the exact-byte digest from the snapshot and store it in retained approval
+evidence or the durable record, never inside the bytes being digested. The
+mutable record contains jobs and terminal states, review findings and
+dispositions, approval state, decisions, and pending friction. On resume,
+reconcile the snapshot digest and revision plus current source identity before
+acting. Stale or missing identity blocks; active jobs are not duplicated, and
+unknown jobs are waited on or cancelled and confirmed terminal.
+
+Review convergence is bounded and fail-closed: run one initial broad
+`agent-workflow-architect` review and fix valid blocking findings as one
+focused batch; each review lane — the design-time plan review and each
+independent final review — then permits at most one focused delta re-review
+per scope and plan revision, focused on unresolved finding IDs and changed
+sections. A required second fresh safety review (authority, permissions,
+approval gates, delegation, autonomous behavior, MCP routing, or destructive
+capabilities) is a separate lane with its own single delta budget. An
+unavailable, stale, or still-blocking delta review stops handoff
+and escalates to the operator. A review is consultation, never approval.
 
 ## Process friction
 

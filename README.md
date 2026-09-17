@@ -141,16 +141,19 @@ Before implementation, the designer sends the saved plan to
 `agent-workflow-architect` for one bounded workflow review covering plan
 coherence and scope, authority, approval, delegation, MCP routing, host
 boundaries, usability, operational risks, and compliance with the requested
-design. The design-time budget is one initial architect review and, when
-needed, one consolidated delta follow-up focused on unresolved finding IDs and
-changed sections. A blocker is an evidenced violation of an agreed requirement,
-feasibility constraint, or material safety/authority boundary; preferences,
-speculative future-proofing, and optional polish are nonblocking. Unresolved
-substantive disagreement after the follow-up escalates to the operator rather
-than triggering another pass or automatic approval. The independent final
-implementation review remains required, including a conditional second safety
-review for authority, approval, delegation, autonomous behavior, MCP-routing,
-or destructive-capability changes. The designer presents the plan to the
+design. The design-time lane affords one initial architect review and, when
+needed, at most one focused delta re-review per scope and plan revision over
+unresolved finding IDs and changed sections. A blocker is an evidenced
+violation of an agreed requirement, feasibility constraint, or material
+safety/authority boundary; preferences, speculative future-proofing, and
+optional polish are nonblocking. After the follow-up, any blocker that remains
+unfixed or unrebutted, or substantive disagreement that remains unresolved,
+escalates to the operator rather than triggering another pass or automatic
+approval — never auto-approve, and never silently suppress a newly evidenced
+critical risk. The independent final implementation review remains required
+and is a separate lane, including a conditional second safety review for
+authority, approval, delegation, autonomous behavior, MCP-routing, or
+destructive-capability changes. The designer presents the plan to the
 operator and waits for approval. After approval it hands the plan to `workflow-project-manager`; it
 cannot switch facets itself. Directly invoking `workflow-project-manager` is also
 supported and authorizes the requested execution, but it does not prove that a
@@ -175,12 +178,39 @@ write-capable `agent-workflow-engineer`, with these gates:
 - substantive work gets an independent workflow-architecture review, with a
   second fresh review when authority, permissions, autonomous behavior,
   approval gates, delegation, destructive capability, or MCP routing changes;
-- `gh project` process-friction bookkeeping is the sole standing-authorized
-  remote-write exception; pushing, opening a PR, and all other remote writes
-  require separate operator action.
+- `gh project` bookkeeping via the `github-project-backlog` skill (planning
+  bookkeeping and `[process-friction]` capture under its standing authorization)
+  is the sole standing remote-write exception; pushing, opening a PR, and all
+  other remote writes require separate operator action.
 
 Reviewers are routed to one bounded question and named evidence. They identify
-risks and missing evidence rather than prescribing unit tests by default.
+risks and missing evidence rather than prescribing unit tests by default. The
+workflow is diagnosis-first: T0 clarifies requirements and authority, T1 gathers
+only the smallest conditional evidence, T2 uses one planner for one durable plan,
+and T3 delivers only after approval. Broad fan-out, parallel planners, and
+carte-blanche review are not substitutes for diagnosis.
+
+Each material request has a PRD separate from its implementation checklist. The
+single plan/record carries the exact Git target, `scope_id`, `source_revision`,
+monotonic `plan_revision`, exact-byte digest, approval state, job IDs and terminal
+states, review dispositions, validation evidence, and pending friction. Resume
+reconciliation compares the current plan bytes and source revision before any
+dispatch; stale or missing identity blocks, active jobs are not duplicated, and
+unknown jobs are resolved to terminal state before retry. Approval is explicit
+(`draft -> reviewed -> operator_approved -> handed_off`) and is invalidated by
+material scope, authority, permission, delegation, MCP, or acceptance changes.
+
+Review convergence is bounded per lane: one initial broad reviewer, one batched
+focused fix, and then each review lane — the design-time plan review and each
+independent final review — permits at most one focused delta re-review against
+the resulting revision, per scope and plan revision. A required second fresh
+safety review (authority, permissions, approval gates, delegation, autonomous
+behavior, MCP routing, or destructive capabilities) is a separate lane with its
+own single delta budget. A
+stale, unavailable, or still-blocking delta review fails closed and escalates to
+the operator. Rocket-derived decision behaviors mean inspect before acting,
+choose the smallest reversible change, preserve operator control at irreversible
+boundaries, keep evidence beside decisions, and stop/escalate rather than infer.
 
 The second workflow pair is `product-design`, which plans the product approval
 lifecycle and hands off via an approved plan to `project-manager`, which
@@ -396,3 +426,10 @@ These are referenced by or complement this config but are not bundled:
   cavemem's docs.
 - **tk** — minimal local ticket system.
 - **herdle** — cross-project work dashboard built on `tk`.
+- **discord-pt-stream + `discord-bridge/`** — attach-only Discord control
+  surface for Polytoken sessions. The Mac host runs as a launchd agent via
+  `discord-bridge/setup-bridge-host.sh` (dedicated 0600 env, KeepAlive, PATH
+  incl. podman); connectors auto-start in every dev container via the
+  `bridge-connector-autostart` `session_start` hook. See
+  [`discord-bridge/README.md`](discord-bridge/README.md) and the
+  `polytoken-container/.env.example` bridge section.
