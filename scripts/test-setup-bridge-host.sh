@@ -190,6 +190,27 @@ grep -q 'BRIDGE_RELAY_TOKEN=quoted-secret' "$SBX/.config/polytoken-discord.env" 
   && ok "existing relay token preserved (not overwritten)" || no "existing relay token preserved"
 rm -rf "$SBX"
 
+# --- B7: BRIDGE_REPO_DIR override is reflected in the installed plist (BRD-6) ---
+sc "B7 non-default BRIDGE_REPO_DIR -> plist wrapper path honors the override"
+SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"
+# A non-default repo location: the plist must point at it, not at the default.
+ALT="$SBX/alt/bridge-repo"
+mkdir -p "$ALT/scripts"
+cp "$SBX/workspace/discord-pt-stream/scripts/bridge-host.sh" "$ALT/scripts/bridge-host.sh"
+cp "$SBX/workspace/discord-pt-stream/pyproject.toml" "$ALT/pyproject.toml"
+HOME="$SBX" PATH="$STUB:$PATH" \
+  BRIDGE_REPO_DIR="$ALT" \
+  BRIDGE_SETUP_HOSTS_FILE="$SBX/hosts" \
+  BRIDGE_SETUP_SKIP_VENV=1 BRIDGE_SETUP_SKIP_LAUNCHCTL=1 \
+  WRAPPERLOG="$SBX/wrapper.log" PODMANLOG="$SBX/podman.log" \
+  CURLLOG="$SBX/curl.log" LCTLLOG="$SBX/lctllog" \
+  bash "$SCRIPT" >/dev/null 2>&1
+PLIST="$SBX/Library/LaunchAgents/local.polytoken-discord-bridge.plist"
+grep -q "$ALT/scripts/bridge-host.sh" "$PLIST" \
+  && ok "plist wrapper path honors BRIDGE_REPO_DIR override" \
+  || no "plist wrapper path honors BRIDGE_REPO_DIR override"
+rm -rf "$SBX"
+
 echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

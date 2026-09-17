@@ -70,6 +70,17 @@ run() {
 }
 require() { command -v "$1" >/dev/null 2>&1; }
 
+# sha256 of a file, portable to macOS (no sha256sum; shasum -a 256 is BSD).
+hash256() { # hash256 FILE -> hex digest (empty on failure)
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
 if [ "$UNINSTALL" -eq 1 ]; then
   say "uninstalling $LABEL"
   if require launchctl; then
@@ -102,7 +113,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "${BRIDGE_SETUP_SKIP_VENV:-0}" != "1" ]; then
   say "ensuring Mac venv at $VENV_DIR (editable $BRIDGE_REPO_DIR[live])"
   mkdir -p "$(dirname "$VENV_DIR")" "$(dirname "$FPRINT")"
   venv_python="$VENV_DIR/bin/python3"
-  fp="$( (sha256sum "$BRIDGE_REPO_DIR/pyproject.toml" 2>/dev/null | awk '{print $1}'); python3 --version )"
+  fp="$( (hash256 "$BRIDGE_REPO_DIR/pyproject.toml"); python3 --version )"
   need_rebuild=0
   if [ ! -x "$venv_python" ]; then need_rebuild=1
   elif [ ! -f "$FPRINT" ] || [ "$(cat "$FPRINT" 2>/dev/null)" != "$fp" ]; then need_rebuild=1
@@ -147,6 +158,14 @@ if [ -z "$relay_token" ] && [ -r "$CONTAINER_ENV" ]; then
 fi
 
 generate_env() {
+  # BRIDGE_RELAY_BIND/ADVERTISE need non-empty defaults: host.py's
+  # os.environ.get(name, default) returns "" for a set-but-empty line, which
+  # _relay_bind() then rejects ("must be HOST:PORT") and bot's relay_advertise
+  # falls back to ws://127.0.0.1:8765 — both wrong. Preserve any existing value
+  # (env_get) and fall back to the documented defaults.
+  local bind addr
+  bind="$(env_get BRIDGE_RELAY_BIND)"; [ -n "$bind" ] || bind="127.0.0.1:8765"
+  addr="$(env_get BRIDGE_RELAY_ADVERTISE)"; [ -n "$addr" ] || addr="ws://host.docker.internal:8765"
   cat <<EOF
 # Polytoken Discord bridge host env (DEDICATED; not the container --env-file).
 # Source of truth for the Mac host. 0600. Edit + kickstart to rotate:
@@ -156,8 +175,8 @@ DISCORD_GUILD_ID=$(env_get DISCORD_GUILD_ID)
 DISCORD_CONTROL_CHANNEL_ID=$(env_get DISCORD_CONTROL_CHANNEL_ID)
 DISCORD_OPERATOR_USER_ID=$(env_get DISCORD_OPERATOR_USER_ID)
 DISCORD_CONTROL_CHANNEL_NAME=$(env_get DISCORD_CONTROL_CHANNEL_NAME)
-BRIDGE_RELAY_BIND=$(env_get BRIDGE_RELAY_BIND)
-BRIDGE_RELAY_ADVERTISE=$(env_get BRIDGE_RELAY_ADVERTISE)
+BRIDGE_RELAY_BIND=$bind
+BRIDGE_RELAY_ADVERTISE=$addr
 BRIDGE_RELAY_TOKEN=$relay_token
 BRIDGE_STATE_DB=$(env_get BRIDGE_STATE_DB)
 BRIDGE_HOST_PYTHON=$MAC_PYTHON
@@ -198,7 +217,11 @@ fi
 say "installing $PLIST_DST (PATH captured from this shell so podman/the venv resolve)"
 render_plist() {
   local escaped_path="${PATH//&/&amp;}"; escaped_path="${escaped_path//</&lt;}"; escaped_path="${escaped_path//>/&gt;}"
-  sed "s|@HOME@|$HOME|g; s|@PATH@|$escaped_path|g" "$PLIST_SRC"
+  # @HOME@ is substituted literally, so a $HOME containing &/</> would corrupt the
+  # plist; escape those too (the XML lint below is the safety net).
+  local esc_home="${HOME//&/&amp;}"; esc_home="${esc_home//</&lt;}"; esc_home="${esc_home//>/&gt;}"
+  local esc_repo="${BRIDGE_REPO_DIR//&/&amp;}"; esc_repo="${esc_repo//</&lt;}"; esc_repo="${esc_repo//>/&gt;}"
+  sed "s|@HOME@|$esc_home|g; s|@REPO@|$esc_repo|g; s|@PATH@|$escaped_path|g" "$PLIST_SRC"
 }
 if [ "$DRY_RUN" -eq 1 ]; then
   render_plist | python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.stdin)' \

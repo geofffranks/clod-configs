@@ -112,6 +112,7 @@ run_hook() {
   set +e
   stdout="$(printf '%s' '{"session_id":"a-session"}' | env \
     HOME="$TMP/home" \
+    PATH="$TMP/devbin:$PATH" \
     POLYTOKEN_CONFIG_DIR="$TMP/config" \
     POLYTOKEN_SESSIONS_DIR="$TMP/sessions" \
     BRIDGE_CONNECTOR_LOG="$LOG" \
@@ -129,6 +130,11 @@ run_hook() {
 mkdir -p "$TMP/hostbin"
 printf '#!/usr/bin/env bash\necho hostuser\n' > "$TMP/hostbin/id"
 chmod +x "$TMP/hostbin/id"
+# dev-role id stub: makes the container sections hermetic (the hook's container
+# gate is `id -un == dev || -f /.dockerenv`; sections 3-10 must run as dev).
+mkdir -p "$TMP/devbin"
+printf '#!/usr/bin/env bash\necho dev\n' > "$TMP/devbin/id"
+chmod +x "$TMP/devbin/id"
 
 # ---- 1. host no-op ----
 sc "1. host session -> bare allow, no spawn, <1s"
@@ -145,7 +151,7 @@ rc=$?
 
 # ---- 2. container without bridge env -> bare allow, no spawn ----
 sc "2. container, no BRIDGE_RELAY_TOKEN -> bare allow, no spawn"
-out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" POLYTOKEN_CONFIG_DIR="$TMP/config" \
+out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" PATH="$TMP/devbin:$PATH" POLYTOKEN_CONFIG_DIR="$TMP/config" \
   POLYTOKEN_SESSIONS_DIR="$TMP/sessions" BRIDGE_CONNECTOR_LOG="$LOG" \
   bash "$HOOK" 2>/dev/null)"
 rc=$?
@@ -157,7 +163,7 @@ sc "3. container with env + session id -> connector execs with derived identity"
 mkdir -p "$TMP/sessions/sessions-v1/a-session"
 printf '%s\n' '{"state":"ready","session_id":"a-session"}' > "$TMP/sessions/sessions-v1/a-session/startup.json"
 reset_state
-out="$(printf '%s' '{"session_id":"a-session"}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" POLYTOKEN_CONFIG_DIR="$TMP/config" \
+out="$(printf '%s' '{"session_id":"a-session"}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" PATH="$TMP/devbin:$PATH" POLYTOKEN_CONFIG_DIR="$TMP/config" \
   POLYTOKEN_SESSIONS_DIR="$TMP/sessions" BRIDGE_CONNECTOR_LOG="$LOG" \
   BRIDGE_RELAY_TOKEN=test-relay-token POLYTOKEN_SESSION_ID=a-session \
   BRIDGE_CONTAINER_ID="$(hostname)" BRIDGE_CONNECTOR_READY_ATTEMPTS=1 \
@@ -178,6 +184,7 @@ sc "4. missing POLYTOKEN_SESSION_ID -> derived via newest-ready fallback"
 # a-session already ready; drop env var
 reset_state
 out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN -u POLYTOKEN_SESSION_ID HOME="$TMP/home" \
+  PATH="$TMP/devbin:$PATH" \
   POLYTOKEN_CONFIG_DIR="$TMP/config" POLYTOKEN_SESSIONS_DIR="$TMP/sessions" BRIDGE_CONNECTOR_LOG="$LOG" \
   BRIDGE_RELAY_TOKEN=test-relay-token BRIDGE_CONNECTOR_READY_ATTEMPTS=1 \
   BRIDGE_CONNECTOR_PYTHON="$TMP/config/hooks/fake-connector-python" \
@@ -186,12 +193,17 @@ out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN -u POLYTOKEN_SESSION_ID HOME
 rc=$?
 [ "$rc" -eq 0 ] && [ "$out" = '{"outcome":"allow"}' ] && ok "allow emitted without env session id" || no "allow emitted without env session id"
 wait_log "derived session a-session" && ok "session_select fallback picked a-session" || no "session_select fallback picked a-session"
-[ "$(connector_count)" = 1 ] && ok "exactly one connector after fallback" || no "exactly one connector after fallback"
+# Wait for the connector to actually exec (the "derived session" line is logged
+# before the readiness poll + exec), then confirm exactly one record, and let
+# the orphan settle so the next reset_state can kill it deterministically.
+wait_log "exec connector"
+wait_until connector_alive
+[ "$(connector_count)" = 1 ] && ok "exactly one connector after fallback" || no "exactly one connector after fallback ($(connector_count))"
 
 # ---- 5. missing python/venv -> allow + loud log, no connector, session fine ----
 sc "5. missing python/venv -> allow + loud log, no connector"
 reset_state
-out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" POLYTOKEN_CONFIG_DIR="$TMP/config" \
+out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" PATH="$TMP/devbin:$PATH" POLYTOKEN_CONFIG_DIR="$TMP/config" \
   POLYTOKEN_SESSIONS_DIR="$TMP/sessions" BRIDGE_CONNECTOR_LOG="$LOG" \
   BRIDGE_RELAY_TOKEN=test-relay-token POLYTOKEN_SESSION_ID=a-session \
   BRIDGE_CONNECTOR_PYTHON="$TMP/config/hooks/does-not-exist" \
@@ -239,7 +251,7 @@ set -e
 grep -q "did not reach ready" "$LOG" && ok "timeout logged" || no "timeout logged"
 [ ! -f "$PIDFILE" ] && ok "no connector spawned on timeout" || no "no connector spawned on timeout"
 # The hook itself must still return allow even while the launcher times out.
-out="$(printf '%s' '{}' | env HOME="$TMP/home" POLYTOKEN_CONFIG_DIR="$TMP/config" \
+out="$(printf '%s' '{}' | env HOME="$TMP/home" PATH="$TMP/devbin:$PATH" POLYTOKEN_CONFIG_DIR="$TMP/config" \
   POLYTOKEN_SESSIONS_DIR="$TMP/sessions2" BRIDGE_CONNECTOR_LOG="$LOG" BRIDGE_RELAY_TOKEN=test-relay-token \
   POLYTOKEN_SESSION_ID=nr-session BRIDGE_CONNECTOR_READY_ATTEMPTS=1 BRIDGE_CONNECTOR_READY_INTERVAL=0 \
   bash "$HOOK" 2>/dev/null)"
@@ -271,7 +283,7 @@ fi
 # ---- 10. exact one-line allow on a normal path ----
 sc "10. exactly one allow JSON line, no trailing content"
 reset_state
-out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" POLYTOKEN_CONFIG_DIR="$TMP/config" \
+out="$(printf '%s' '{}' | env -u BRIDGE_RELAY_TOKEN HOME="$TMP/home" PATH="$TMP/devbin:$PATH" POLYTOKEN_CONFIG_DIR="$TMP/config" \
   POLYTOKEN_SESSIONS_DIR="$TMP/sessions" BRIDGE_CONNECTOR_LOG="$LOG" BRIDGE_RELAY_TOKEN=test-relay-token \
   POLYTOKEN_SESSION_ID=a-session BRIDGE_CONNECTOR_READY_ATTEMPTS=1 bash "$HOOK" 2>/dev/null)"
 lines="$(printf '%s\n' "$out" | grep -c . )"
