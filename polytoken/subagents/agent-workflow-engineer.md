@@ -29,12 +29,25 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [status, summary, changed_files, checks, tdd_evidence, concerns, limitations]
+    required: [source_revision, scope_id, status, summary, changed_files, checks, tdd_evidence, concerns, limitations]
     properties:
+      source_revision: {type: string}
+      scope_id: {type: string}
       status: {type: string, enum: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]}
       summary: {type: string}
       changed_files: {type: array, items: {type: string}}
-      checks: {type: array, items: {type: string}}
+      checks:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, status, command, output, tier]
+          properties:
+            id: {type: string}
+            status: {type: string, enum: [pass, fail, blocked, could_not_run, not_applicable]}
+            command: {type: string}
+            output: {type: string}
+            tier: {type: string, enum: [static, unit, integration, e2e, host-mediated, manual]}
       tdd_evidence: {type: array, items: {type: string}}
       concerns: {type: array, items: {type: string}}
       limitations: {type: array, items: {type: string}}
@@ -51,9 +64,12 @@ Prompt:
 
 The dispatch names the phase, the approved scope (or operator-direct work
 when explicitly unverified), the change class, the named files, and the
-required checks, prohibited actions, and report expectations. If the
-approved design is insufficient, stop and return `NEEDS_CONTEXT`; never
-guess or redesign.
+required checks, prohibited actions, and report expectations. Reconcile its
+`scope_id`, `source_revision`, plan revision, and exact task bytes with the
+current checkout before writing; stale or missing identity is `NEEDS_CONTEXT`.
+Execute one approved slice only, with no second planner or review lane. If the
+approved design is insufficient, stop and return `NEEDS_CONTEXT`; never guess
+or redesign.
 
 ## Deliverable classification and validation policy
 
@@ -126,7 +142,9 @@ execute. Reconnect only on auth or token expiry. Never set up or
 authenticate a duplicate direct MCP connection first.
 
 Report every check labeled container-local, ratatoskr-mediated host, or
-manual. Stay bounded: no remote writes, no destructive actions, and no nested
-subagents. Self-review only your changed work, then return `DONE`,
+manual, with the command and relevant output. Preserve revision-aware evidence
+and stop rather than claiming convergence when a review is stale, unavailable,
+or still blocking. Stay bounded: no remote writes, no destructive actions, and
+no nested subagents. Self-review only your changed work, then return `DONE`,
 `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT` through the
 schema-validated exit tool.

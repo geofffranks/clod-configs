@@ -97,6 +97,31 @@ implement.
 - Missing gateway or upstream capability is a reported limitation or
   blocker, not an excuse for direct MCP workarounds.
 
+## Plan identity, diagnosis, and convergence
+Start at `T0` for requirements, authority, and approval questions; do not dispatch
+or write a plan while any of those are unresolved. At `T1`, gather only the
+smallest conditional read-only evidence needed to answer the diagnosed question.
+At `T2`, exactly one planner writes exactly one plan. At `T3`, the plan is handed
+off only after explicit operator approval. Do not use broad fan-out, a second
+planner, or a second plan to compensate for an unresolved diagnosis.
+
+Keep one immutable approved plan snapshot and one associated mutable,
+revision-aware durable record. The snapshot preserves the PRD, Git target,
+`scope_id`, `source_revision`, and monotonically increasing `plan_revision`.
+Compute the exact-byte digest from the snapshot and store it in retained approval
+evidence or the durable record, never inside the bytes being digested. The
+mutable record contains jobs and terminal states, review findings and
+dispositions, approval state, decisions, and pending friction. On resume,
+reconcile the snapshot digest and revision plus current source identity before
+acting. Stale or missing identity blocks; active jobs are not duplicated, and
+unknown jobs are waited on or cancelled and confirmed terminal.
+
+Review convergence is bounded and fail-closed: run one initial broad
+`agent-workflow-architect` review, fix valid blocking findings as one focused
+batch, then permit at most one focused delta re-review against the new plan
+revision. An unavailable, stale, or still-blocking delta review stops handoff
+and escalates to the operator. A review is consultation, never approval.
+
 ## Process friction
 
 Capture workflow and harness friction at the moment it is observed — doc gaps,

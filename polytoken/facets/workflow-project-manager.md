@@ -83,6 +83,39 @@ decisions within the approved scope can proceed without returning.
 - Select existing reviewers and validators from the changed-contract review and
   validation manifests below; remain accountable for the final result.
 
+## T0–T3 diagnosis-first delivery
+For an approved handoff, delivery begins by reconciling the approved record, not
+by dispatching a job. `T0` confirms PRD, exact scope, approval provenance, and
+Git target; `T1` maps changed contracts to the smallest validation/review set;
+`T2` executes one approved implementation slice at a time; `T3` synthesizes
+evidence and asks for operator signoff. A direct operator invocation is a
+separate authorized path: initialize a durable record with the operator-provided
+scope and Git target, mark plan-review and handoff provenance `not applicable`
+and approval provenance `unverified`, and require explicit scope confirmation
+before mutation. Never manufacture a reviewed or approved plan. For either path,
+a missing, stale, or contradictory record is `blocked` and must not be resolved
+by inference.
+
+Persist an append-only, revision-aware journal before and after every state
+transition. The approved plan is an immutable saved snapshot with a monotonic
+`plan_revision`; compute its digest from the exact snapshot bytes and store that
+identity in the journal or retained evidence, never inside the bytes being
+digested. The journal must carry and reconcile `plan_revision` monotonically.
+Keep mutable approval, job, review, validation, decision, and friction state in
+the journal, not in the approved snapshot. Direct records use a generated
+`plan_revision` only for the execution record and mark plan review not applicable.
+On resume, compare the snapshot identity and current source identity before continuing; invalidate prior approval on any material change,
+never duplicate active assignments, and resolve unknown jobs to terminal state
+before dispatching replacements.
+
+## Review convergence policy
+Use one planner and one broad initial reviewer for the approved change. Batch
+valid blocking findings into one focused fix round and allow at most one focused
+delta re-review against the resulting revision. If the delta review is stale,
+unavailable, or remains blocking, fail closed and escalate to the operator; do
+not start another review lane or claim convergence. Reviewers report evidence
+and do not fix their own findings.
+
 ## Review and validation manifests
 
 Before dispatching reviewers or validators, publish two bounded manifests tied
@@ -174,13 +207,18 @@ Every substantive final change receives one independent
 `agent-workflow-architect` review against the approved scope and final revision.
 A second fresh workflow review is additionally required for changes to
 permissions, authority, approval gates, delegation, autonomous behavior, MCP
-routing, or destructive capabilities. Optional specialists are selected only
-for a distinct bounded question, with named evidence and explicit exclusions;
-no specialist performs carte-blanche or duplicate plan review.
+routing, or destructive capabilities. This is a separate final-review lane, not
+an extra plan re-review. Maintain one global re-review counter per scope and
+plan revision across all lanes: it permits zero or one focused delta re-review
+total. Optional specialists are selected only for a distinct bounded question,
+with named evidence and explicit exclusions; no specialist performs
+carte-blanche or duplicate plan review.
 
 Reviewers never fix their own findings. Batch valid blocking findings into one
-coherent fix, rerun only affected checks, and rereview the changed revision.
-Repeat until no blocking finding remains.
+coherent fix, rerun only affected checks, and permit at most one focused delta
+re-review against the resulting revision. If blockers remain, or the delta
+review is stale or unavailable, stop and escalate; exhaustion never implies
+approval.
 
 ## Evidence and completion
 

@@ -17,13 +17,27 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [verdict, summary]
+    required: [source_revision, scope_id, verdict, summary, evidence]
     properties:
+      source_revision: {type: string}
+      scope_id: {type: string}
       verdict:
         type: string
         enum: [pass, fail, partial]
       summary:
         type: string
+      evidence:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [item_id, status, command, output, tier]
+          properties:
+            item_id: {type: string}
+            status: {type: string, enum: [pass, fail, could_not_run, not_applicable]}
+            command: {type: string}
+            output: {type: string}
+            tier: {type: string, enum: [container_local, ratatoskr_host, manual]}
       report_file:
         type: string
 ---
@@ -51,7 +65,10 @@ Prompt:
 Before running the plan, compare every item with the changed paths, consumed
 contract classes, and directly affected consumers named in the dispatch. The
 validation plan must identify focused checks, runtime checks, broader checks,
-and explicit not-applicable suites.
+and explicit not-applicable suites. Echo the dispatch `source_revision` and
+`scope_id` in every result and bind each evidence item to the exact validation
+item, command, output, and evidence tier. Never report a pass from an
+unattributed assertion.
 
 Execute repository-wide or full-suite items only when the plan names an affected
 application or integration path and explains why the broader check can detect a

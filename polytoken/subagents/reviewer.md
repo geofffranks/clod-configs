@@ -16,8 +16,10 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [verdict, summary]
+    required: [source_revision, scope_id, verdict, summary, evidence]
     properties:
+      source_revision: {type: string}
+      scope_id: {type: string}
       verdict:
         type: string
         enum: [approved, needs_fixes]
@@ -26,6 +28,18 @@ polytoken:
         enum: [compliant, issues_found]
       summary:
         type: string
+      evidence:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [finding_id, path, line, observation, tier]
+          properties:
+            finding_id: {type: string}
+            path: {type: string}
+            line: {type: integer}
+            observation: {type: string}
+            tier: {type: string, enum: [container_local, ratatoskr_host, manual]}
       report_file:
         type: string
 ---
@@ -46,7 +60,7 @@ The dispatch supplies paths to the review index, task brief, diff shards, and
 report file. Consume those named artifacts rather than requiring task data or
 history to be pasted into the dispatch prompt.
 
-The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integration`, or `final-incremental-rereview`.
+The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integration`, or `final-incremental-rereview`. The controller permits one initial broad review and at most one focused delta rereview; stale, unavailable, or still-blocking convergence is fail-closed escalation, never a new review lane.
 
 **`initial-task`:** review every changed hunk against the task brief and global constraints.
 
@@ -60,7 +74,7 @@ The mode is exactly one of: `initial-task`, `incremental-rereview`, `final-integ
 - unresolved Minor findings that become important in aggregate;
 - requirements that could not be attributed to one task.
 
-Do not repeat task-local checks without naming a cross-task risk.
+Do not repeat task-local checks without naming a cross-task risk. Echo the dispatch `source_revision` and `scope_id`; bind every finding to a concrete path/line observation and evidence tier. A delta rereview must identify the prior review revision and inspect only its unresolved findings plus changed hunks.
 
 **`final-incremental-rereview`:** review final-review findings and the changed hunks since the previously reviewed head after branch-level fixes.
 

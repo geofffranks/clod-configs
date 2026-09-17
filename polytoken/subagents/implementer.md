@@ -21,8 +21,24 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [status, summary]
+    required: [source_revision, scope_id, status, summary, evidence]
     properties:
+      source_revision:
+        type: string
+      scope_id:
+        type: string
+      evidence:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, status, command, output, tier]
+          properties:
+            id: {type: string}
+            status: {type: string, enum: [pass, fail, blocked, could_not_run, not_applicable]}
+            command: {type: string}
+            output: {type: string}
+            tier: {type: string, enum: [static, unit, integration, e2e, host-mediated, manual]}
       status:
         type: string
         enum: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]
@@ -53,7 +69,11 @@ Prompt:
 
 The dispatch supplies paths to the manifest, task brief, and report file. Consume
 those paths and the named artifacts; do not require the task or repository
-history to be pasted into the dispatch prompt.
+history to be pasted into the dispatch prompt. Before writing, reconcile the
+manifest `scope_id`, `source_revision`, plan revision, and exact task bytes with
+the current checkout; stale or missing identity is `NEEDS_CONTEXT`, not a reason
+to guess. Work one approved slice only and never create a second plan or review
+lane.
 
 Execute the task in these phases, in order: Orient → RED/GREEN → Verify → Report.
 
@@ -67,7 +87,9 @@ Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged 
 
 When the brief requires TDD, write a focused failing test first and run it,
 confirming the expected failure. Then implement the minimum change, run the same
-focused test to GREEN, and refactor only while it remains green.
+focused test to GREEN, and refactor only while it remains green. Record command,
+result, output excerpt, and evidence tier for every check; do not claim runtime,
+host, or manual evidence from source inspection alone.
 
 ### Verify
 
