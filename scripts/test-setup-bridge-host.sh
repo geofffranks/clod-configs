@@ -132,6 +132,12 @@ ENV="$SBX/.config/polytoken-discord.env"
 grep -q 'BRIDGE_RELAY_TOKEN=quoted-secret' "$ENV" \
   && ok "relay token seeded from container env, quotes stripped" \
   || no "relay token seeded from container env"
+grep -q '^BRIDGE_RELAY_BIND=127.0.0.1:8765$' "$ENV" \
+  && ok "BRIDGE_RELAY_BIND defaults to 127.0.0.1:8765 (non-empty)" \
+  || no "BRIDGE_RELAY_BIND defaults to 127.0.0.1:8765 (non-empty)"
+grep -q '^BRIDGE_RELAY_ADVERTISE=ws://host.docker.internal:8765$' "$ENV" \
+  && ok "BRIDGE_RELAY_ADVERTISE defaults to the one-literal URL (non-empty)" \
+  || no "BRIDGE_RELAY_ADVERTISE defaults to the one-literal URL (non-empty)"
 grep -q '^BRIDGE_REPO_DIR=' "$ENV" && ok "env carries BRIDGE_REPO_DIR" || no "env carries BRIDGE_REPO_DIR"
 PLIST="$SBX/Library/LaunchAgents/local.polytoken-discord-bridge.plist"
 [ -f "$PLIST" ] && ok "plist installed" || no "plist installed"
@@ -181,6 +187,8 @@ sc "B6 existing env values preserved; token not overwritten from a stale contain
 SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"
 run_setup "$SBX" "$STUB" >/dev/null 2>&1
 printf 'DISCORD_BOT_TOKEN=manual-bot-token\n' >> "$SBX/.config/polytoken-discord.env"
+printf 'BRIDGE_RELAY_BIND=0.0.0.0:9999\n' >> "$SBX/.config/polytoken-discord.env"
+printf 'BRIDGE_RELAY_ADVERTISE=ws://10.1.2.3:9000\n' >> "$SBX/.config/polytoken-discord.env"
 # container env now has a different token; a re-run must keep the manual one.
 printf 'BRIDGE_RELAY_TOKEN="other-token"\n' >> "$SBX/.config/polytoken-container.env"
 run_setup "$SBX" "$STUB" >/dev/null 2>&1
@@ -188,6 +196,18 @@ grep -q 'DISCORD_BOT_TOKEN=manual-bot-token' "$SBX/.config/polytoken-discord.env
   && ok "existing manual value preserved across re-run" || no "existing manual value preserved across re-run"
 grep -q 'BRIDGE_RELAY_TOKEN=quoted-secret' "$SBX/.config/polytoken-discord.env" \
   && ok "existing relay token preserved (not overwritten)" || no "existing relay token preserved"
+grep -q '^BRIDGE_RELAY_BIND=0.0.0.0:9999$' "$SBX/.config/polytoken-discord.env" \
+  && ok "explicit BRIDGE_RELAY_BIND preserved across re-run" || no "explicit BRIDGE_RELAY_BIND preserved across re-run"
+grep -q '^BRIDGE_RELAY_ADVERTISE=ws://10.1.2.3:9000$' "$SBX/.config/polytoken-discord.env" \
+  && ok "explicit BRIDGE_RELAY_ADVERTISE preserved across re-run" || no "explicit BRIDGE_RELAY_ADVERTISE preserved across re-run"
+# Set-but-empty optional lines: a fresh explicit blank must be backfilled to the
+# documented default (host.py would reject an empty BIND as "must be HOST:PORT").
+run_setup "$SBX" "$STUB" >/dev/null 2>&1
+sed -i.bak 's/^BRIDGE_RELAY_BIND=.*/BRIDGE_RELAY_BIND=/' "$SBX/.config/polytoken-discord.env"
+run_setup "$SBX" "$STUB" >/dev/null 2>&1
+rm -f "$SBX/.config/polytoken-discord.env.bak"
+grep -q '^BRIDGE_RELAY_BIND=127.0.0.1:8765$' "$SBX/.config/polytoken-discord.env" \
+  && ok "set-but-empty BRIDGE_RELAY_BIND backfilled to default" || no "set-but-empty BRIDGE_RELAY_BIND backfilled to default"
 rm -rf "$SBX"
 
 # --- B7: BRIDGE_REPO_DIR override is reflected in the installed plist (BRD-6) ---

@@ -216,12 +216,22 @@ fi
 # ---- 5. LaunchAgent plist ------------------------------------------------------
 say "installing $PLIST_DST (PATH captured from this shell so podman/the venv resolve)"
 render_plist() {
-  local escaped_path="${PATH//&/&amp;}"; escaped_path="${escaped_path//</&lt;}"; escaped_path="${escaped_path//>/&gt;}"
-  # @HOME@ is substituted literally, so a $HOME containing &/</> would corrupt the
-  # plist; escape those too (the XML lint below is the safety net).
+  # Substitute @HOME@/@REPO@/@PATH@ via python3 str.replace (not sed): sed's
+  # replacement string re-interprets '&' as "the matched text", so a path
+  # containing a literal '&' (after XML-escaping it to &amp;) would corrupt the
+  # plist. str.replace is substitution-metacharacter-free. The XML escaping of
+  # &,<,> below keeps the plist well-formed; the python3 ET lint after render is
+  # also required by setup as the final catch.
   local esc_home="${HOME//&/&amp;}"; esc_home="${esc_home//</&lt;}"; esc_home="${esc_home//>/&gt;}"
   local esc_repo="${BRIDGE_REPO_DIR//&/&amp;}"; esc_repo="${esc_repo//</&lt;}"; esc_repo="${esc_repo//>/&gt;}"
-  sed "s|@HOME@|$esc_home|g; s|@REPO@|$esc_repo|g; s|@PATH@|$escaped_path|g" "$PLIST_SRC"
+  local escaped_path="${PATH//&/&amp;}"; escaped_path="${escaped_path//</&lt;}"; escaped_path="${escaped_path//>/&gt;}"
+  PLIST_HOME="$esc_home" PLIST_REPO="$esc_repo" PLIST_PATH="$escaped_path" \
+    python3 -c 'import os, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+out = src.replace("@HOME@", os.environ["PLIST_HOME"]) \
+          .replace("@REPO@", os.environ["PLIST_REPO"]) \
+          .replace("@PATH@", os.environ["PLIST_PATH"])
+sys.stdout.write(out)' "$PLIST_SRC"
 }
 if [ "$DRY_RUN" -eq 1 ]; then
   render_plist | python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.stdin)' \
