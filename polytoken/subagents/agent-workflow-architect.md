@@ -21,13 +21,43 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [verdict, summary, recommendation, findings, evidence, risks, limitations, second_review_required]
+    required: [source_revision, scope_id, verdict, summary, recommendation, findings, evidence, risks, limitations, second_review_required]
     properties:
+      source_revision: {type: string}
+      scope_id: {type: string}
       verdict: {type: string, enum: [approved, needs_fixes, blocked]}
       summary: {type: string}
       recommendation: {type: string}
-      findings: {type: array, items: {type: string}}
-      evidence: {type: array, items: {type: string}}
+      findings:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, severity, category, title, path, line, evidence, impact, required_or_advisory, missing_evidence, suggested_fix]
+          properties:
+            id: {type: string}
+            severity: {type: string, enum: [critical, important, minor]}
+            category: {type: string}
+            title: {type: string}
+            path: {type: string}
+            line: {type: integer}
+            evidence: {type: string}
+            impact: {type: string}
+            required_or_advisory: {type: string, enum: [required, advisory]}
+            missing_evidence: {type: string}
+            suggested_fix: {type: string}
+      evidence:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, path, line, observation, tier]
+          properties:
+            id: {type: string}
+            path: {type: string}
+            line: {type: integer}
+            observation: {type: string}
+            tier: {type: string, enum: [container_local, ratatoskr_host, manual]}
       risks: {type: array, items: {type: string}}
       limitations: {type: array, items: {type: string}}
       second_review_required: {type: boolean}
@@ -82,7 +112,11 @@ Separate observed evidence from inference; cite paths with line numbers or
 URLs for every claim. Classify each finding by severity; state limitations.
 Mark `second_review_required` true when the work touches permissions,
 authority, approval gates, delegation, autonomous behavior, MCP routing,
-or destructive capabilities.
+or destructive capabilities. Echo the dispatch `source_revision` and `scope_id`
+in every result. A plan review is consultation, not approval; for a delta
+rereview, identify the prior review revision and assess only its unresolved
+findings plus changed hunks. Never recommend a third review lane: unresolved or
+unavailable convergence is fail-closed escalation.
 
 Return only through the schema-validated exit tool: verdict, summary,
 recommendation, severity-classified findings, evidence, risks, limitations,

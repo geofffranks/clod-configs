@@ -170,7 +170,28 @@ write-capable `agent-workflow-engineer`, with these gates:
 - pushing and other remote writes always require separate operator action.
 
 Reviewers are routed to one bounded question and named evidence. They identify
-risks and missing evidence rather than prescribing unit tests by default.
+risks and missing evidence rather than prescribing unit tests by default. The
+workflow is diagnosis-first: T0 clarifies requirements and authority, T1 gathers
+only the smallest conditional evidence, T2 uses one planner for one durable plan,
+and T3 delivers only after approval. Broad fan-out, parallel planners, and
+carte-blanche review are not substitutes for diagnosis.
+
+Each material request has a PRD separate from its implementation checklist. The
+single plan/record carries the exact Git target, `scope_id`, `source_revision`,
+monotonic `plan_revision`, exact-byte digest, approval state, job IDs and terminal
+states, review dispositions, validation evidence, and pending friction. Resume
+reconciliation compares the current plan bytes and source revision before any
+dispatch; stale or missing identity blocks, active jobs are not duplicated, and
+unknown jobs are resolved to terminal state before retry. Approval is explicit
+(`draft -> reviewed -> operator_approved -> handed_off`) and is invalidated by
+material scope, authority, permission, delegation, MCP, or acceptance changes.
+
+Review convergence is bounded: one initial broad reviewer, one batched focused
+fix, and at most one focused delta re-review against the resulting revision. A
+stale, unavailable, or still-blocking delta review fails closed and escalates to
+the operator. Rocket-derived decision behaviors mean inspect before acting,
+choose the smallest reversible change, preserve operator control at irreversible
+boundaries, keep evidence beside decisions, and stop/escalate rather than infer.
 
 The second workflow pair is `product-design`, which plans the product approval
 lifecycle and hands off via an approved plan to `project-manager`, which

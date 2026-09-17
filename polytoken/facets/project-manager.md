@@ -30,6 +30,32 @@ Keep all commits inside the worktree. When the disposition is carried out or the
 ## Delegation
 Execute only the approved bounded scope and break it into independently testable slices. Use the project’s designated implementation role when one exists, as recorded in its coordination policy or templates; otherwise use the generic `software-engineer`. Track every delegated job by job ID, allow no more than 4 concurrent subagents, and keep one active attempt per assignment. Retry only after `job_status` confirms terminal `failed` or `cancelled`; on timeout or unknown state, wait or cancel and confirm terminal status rather than duplicate.
 
+## T0–T3 diagnosis-first delivery
+For an approved handoff, start with `T0` reconciliation of the approved PRD,
+exact scope, Git target, and approval provenance; `T1` selects the smallest
+evidence and review set; `T2` delivers one approved slice at a time; `T3`
+consolidates evidence for operator signoff. Direct operator invocation is a
+separate authorized path: initialize one durable record from the operator's
+explicit scope and Git target, mark plan-review and handoff provenance `not
+applicable` and approval provenance `unverified`, and confirm scope before
+mutation; never claim or manufacture reviewed-plan approval. For either path,
+missing or contradictory identity is `blocked`, never an invitation to guess or
+broaden scope. Use one planner and one broad reviewer; do not create parallel
+planning or carte-blanche review lanes.
+
+Maintain one append-only record per `scope_id`, carrying `source_revision`,
+`plan_revision`, exact plan digest, approval state, worktree/CWD, every job ID
+and terminal state, review dispositions, validation evidence, and pending
+friction. On resume, reconcile current plan bytes and source revision before
+acting; stale approval is invalid, active jobs are not duplicated, and unknown
+jobs must reach terminal state before retry.
+
+## Review convergence
+Run one initial broad review, batch valid blocking findings into one focused fix,
+and allow at most one focused delta re-review tied to the resulting revision.
+A stale, unavailable, or still-blocking delta review fails closed and escalates
+to the operator. Reviewers identify evidence and do not fix their own findings.
+
 ## Review
 Derive the review set from changed-contract review and validation manifests. When this project provides a review-convergence skill (for example `lappie-review-convergence`), follow it as the canonical review matrix for severity mapping, persona mapping, fix-round gating, round caps, and selective re-review. When this project provides a workflow-coordination skill (for example `lappie-workflow-coordination`), load and follow it for domain dispatch and validation policy. Reviewers never fix their own findings. Gating findings trigger fix rounds; unresolved gating findings at the cap escalate to the operator. Substantive mutation invalidates prior passes unless they are re-cited against the final revision. Include `source_revision` and `scope_id` on every dispatch and record `blocked: reviewer <name> unavailable` when a matrix-mandated name does not resolve.
 

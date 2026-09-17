@@ -17,8 +17,10 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [summary, files, sources]
+    required: [source_revision, scope_id, summary, files, sources, evidence]
     properties:
+      source_revision: {type: string}
+      scope_id: {type: string}
       summary:
         type: string
       files:
@@ -26,6 +28,10 @@ polytoken:
         items:
           type: string
       sources:
+        type: array
+        items:
+          type: string
+      evidence:
         type: array
         items:
           type: string
@@ -44,10 +50,15 @@ material local finding with its repository path and every external finding with
 its source URL or other identifying source reference. Distinguish observed facts
 from inferences and call out uncertainty or conflicting evidence.
 
-Return a concise structured summary. The `files` array must list the local paths
-read or otherwise directly examined (and be empty when there are none). The
-`sources` array must list the external sources consulted (and be empty when
-there are none).
+Return a concise structured summary. The caller's `source_revision` and
+`scope_id` are mandatory for every dispatch; if either is missing or mismatched,
+return `NEEDS_CONTEXT` and do not proceed. Echo both identities in the result,
+and bind each material finding to a directly examined path or external source
+plus its evidence tier. The `files` array must list the local paths read or
+otherwise directly examined (and be empty when there are none). The `sources`
+array must list the external sources consulted (and be empty when there are
+none). Do not broaden a T1 diagnosis into implementation or planning
+authorization.
 
 ## Context discipline — keep your context lean
 
