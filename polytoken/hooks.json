@@ -44,6 +44,13 @@
     "name": "notify-watcher-keepalive"
   },
   {
+    "event": "session_start",
+    "handler": {
+      "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/bridge-connector-autostart.sh\""
+    },
+    "name": "bridge-connector-autostart"
+  },
+  {
     "event": "pre_tool_use",
     "handler": {
       "bash": "bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" grep-guard/hook.sh grep"

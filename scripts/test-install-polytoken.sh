@@ -312,6 +312,17 @@ ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplic
 pt_valid "$D" && ok "config validate passes" || no "config validate passes"
 rm -rf "$D"
 
+sc "P15b bridge connector autostart hook survives install as a session_start hook"
+D="$(mktemp -d)"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ajq "$D/hooks.json" '[.[]|select(.name=="bridge-connector-autostart" and .event=="session_start")]|length == 1' "bridge-connector-autostart installed as session_start"
+ajq "$D/hooks.json" '[.[]|select(.name=="bridge-connector-autostart")][0].handler.bash | contains("bridge-connector-autostart.sh")' "bridge-connector-autostart handler references the hook script"
+[ -f "$D/hooks/bridge-connector-autostart.sh" ] && ok "bridge-connector-autostart.sh copied into config root" || no "bridge-connector-autostart.sh copied into config root"
+[ -f "$D/hooks/bridge-connector-launcher.sh" ] && ok "bridge-connector-launcher.sh copied into config root" || no "bridge-connector-launcher.sh copied into config root"
+[ -x "$D/hooks/bridge-connector-autostart.sh" ] && ok "bridge-connector-autostart.sh executable" || no "bridge-connector-autostart.sh executable"
+[ -x "$D/hooks/bridge-connector-launcher.sh" ] && ok "bridge-connector-launcher.sh executable" || no "bridge-connector-launcher.sh executable"
+rm -rf "$D"
+
 sc "P16 fresh install omits compatibility skill scripts"
 D="$(mktemp -d)"; run_pt "$D" /nonexistent-xyz 0 >/dev/null
 [ ! -e "$D/compat/skill-once/hook.sh" ] && ok "fresh hook script omitted" || no "fresh hook script omitted"

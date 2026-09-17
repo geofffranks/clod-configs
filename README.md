@@ -407,3 +407,10 @@ These are referenced by or complement this config but are not bundled:
   cavemem's docs.
 - **tk** — minimal local ticket system.
 - **herdle** — cross-project work dashboard built on `tk`.
+- **discord-pt-stream + `discord-bridge/`** — attach-only Discord control
+  surface for Polytoken sessions. The Mac host runs as a launchd agent via
+  `discord-bridge/setup-bridge-host.sh` (dedicated 0600 env, KeepAlive, PATH
+  incl. podman); connectors auto-start in every dev container via the
+  `bridge-connector-autostart` `session_start` hook. See
+  [`discord-bridge/README.md`](discord-bridge/README.md) and the
+  `polytoken-container/.env.example` bridge section.

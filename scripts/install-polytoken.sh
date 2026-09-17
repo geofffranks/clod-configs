@@ -54,6 +54,8 @@ COMPAT_HOOKS=(hooks/no-remote-writes.sh)
 EXEC_SCRIPTS=(
   hooks/adapter.sh
   hooks/container-awareness.sh
+  hooks/bridge-connector-autostart.sh
+  hooks/bridge-connector-launcher.sh
   hooks/agent-notify.sh
   hooks/session-watchdog.sh
   hooks/watchdog-keepalive.sh
@@ -600,6 +602,8 @@ fi
 copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
 copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
 copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/container-awareness.sh"
+copy_managed_file "$ROOT/polytoken/hooks/bridge-connector-autostart.sh" "$DEST/hooks/bridge-connector-autostart.sh"
+copy_managed_file "$ROOT/polytoken/hooks/bridge-connector-launcher.sh" "$DEST/hooks/bridge-connector-launcher.sh"
 # The notify stack (hooks + libs, incl. the SSE watcher) from the one shared array.
 for spec in "${NOTIFY_FILES[@]}"; do
   copy_managed_file "$ROOT/${spec%%:*}" "$DEST/${spec#*:}"

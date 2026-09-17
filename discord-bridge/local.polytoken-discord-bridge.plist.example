@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.polytoken-discord-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@REPO@/scripts/bridge-host.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- KeepAlive + ThrottleInterval keep the bridge alive across Discord/relay
+       crashes without a tight crash loop on bad credentials (ThrottleInterval
+       is the minimum seconds between restarts). -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/discord-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/discord-bridge.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+</dict>
+</plist>
