@@ -141,9 +141,17 @@ Before implementation, the designer sends the saved plan to
 `agent-workflow-architect` for one bounded workflow review covering plan
 coherence and scope, authority, approval, delegation, MCP routing, host
 boundaries, usability, operational risks, and compliance with the requested
-design. Blocking findings are fixed or rebutted and the revised plan receives a
-fresh architect rereview before the designer presents it to the operator and
-waits for approval. After approval it hands the plan to `workflow-project-manager`; it
+design. The design-time budget is one initial architect review and, when
+needed, one consolidated delta follow-up focused on unresolved finding IDs and
+changed sections. A blocker is an evidenced violation of an agreed requirement,
+feasibility constraint, or material safety/authority boundary; preferences,
+speculative future-proofing, and optional polish are nonblocking. Unresolved
+substantive disagreement after the follow-up escalates to the operator rather
+than triggering another pass or automatic approval. The independent final
+implementation review remains required, including a conditional second safety
+review for authority, approval, delegation, autonomous behavior, MCP-routing,
+or destructive-capability changes. The designer presents the plan to the
+operator and waits for approval. After approval it hands the plan to `workflow-project-manager`; it
 cannot switch facets itself. Directly invoking `workflow-project-manager` is also
 supported and authorizes the requested execution, but it does not prove that a
 plan was reviewed or approved. Delivery reports that provenance honestly.
@@ -167,7 +175,9 @@ write-capable `agent-workflow-engineer`, with these gates:
 - substantive work gets an independent workflow-architecture review, with a
   second fresh review when authority, permissions, autonomous behavior,
   approval gates, delegation, destructive capability, or MCP routing changes;
-- pushing and other remote writes always require separate operator action.
+- `gh project` process-friction bookkeeping is the sole standing-authorized
+  remote-write exception; pushing, opening a PR, and all other remote writes
+  require separate operator action.
 
 Reviewers are routed to one bounded question and named evidence. They identify
 risks and missing evidence rather than prescribing unit tests by default.

@@ -61,6 +61,15 @@ that concern.
 When reviewing validation policy, identify missing evidence and recommend the
 evidence type that fits the risk. Do not prescribe unit tests automatically.
 
+For design-time plan review, classify findings explicitly: a blocker requires
+ evidence of an agreed-requirement violation, feasibility constraint, or
+ material safety/authority-boundary risk; preferences, speculative
+ future-proofing, and optional polish are nonblocking. Respect a budget of one
+ initial review plus at most one consolidated delta follow-up over unresolved
+ finding IDs and changed sections. If substantive disagreement remains after
+ the follow-up, recommend operator escalation rather than another review or
+ automatic approval.
+
 The review may consider:
 
 - whether an AI agent can follow the scoped workflow without ambiguity or

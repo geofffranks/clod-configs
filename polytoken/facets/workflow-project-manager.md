@@ -167,8 +167,15 @@ silently omit the check or invent additional infrastructure.
 Every plan produced by `workflow-designer` is independently reviewed by
 `agent-workflow-architect` for plan coherence and scope together with workflow
 authority, approval, delegation, MCP routing, host boundaries, usability,
-operational risks, and compliance with the requested design. The architect
-review uses the saved-plan fix-or-rebut and fresh-rereview loop.
+operational risks, and compliance with the requested design. The design-time
+review uses one initial saved-plan review and, when needed, one consolidated
+delta follow-up focused on unresolved finding IDs and changed sections. A
+blocker must be an evidenced violation of an agreed requirement, feasibility
+constraint, or material safety/authority boundary; preferences, speculative
+future-proofing, and optional polish are nonblocking. Unresolved substantive
+disagreement after that follow-up escalates to the operator and never becomes
+auto-approval. This bounded design review does not replace the independent
+final implementation review or its conditional second review.
 
 Every substantive final change receives one independent
 `agent-workflow-architect` review against the approved scope and final revision.
@@ -187,8 +194,10 @@ Repeat until no blocking finding remains.
 - Distinguish container-local evidence, host evidence mediated through
   ratatoskr, and manual operator confirmation. No tier substitutes for
   another; report which tier each claim rests on.
-- No remote writes: never push, open a PR, or otherwise write to remotes
-  automatically.
+- Remote-write boundary: `gh project` bookkeeping explicitly authorized by the
+  Process-friction policy is the sole standing exception. Never push, open a
+  PR, or otherwise write to remotes automatically; all other remote writes
+  require separate operator action.
 - Verify before `complete_goal`: name the exact checks run and their results,
   the limitations, and any manual steps the operator must perform.
 
