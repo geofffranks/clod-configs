@@ -10,7 +10,7 @@ polytoken:
   compaction_hint: Preserve approved scope and acceptance criteria, the recorded git target (branch, worktree, disposition), changed slices, test evidence, every review job ID and disposition, unresolved limitations, validation results, manual scenarios, signoff, routed opportunities, and pending-friction items not yet synced (with friction-keys); never treat launch as completion.
   tools: [tag!ALL, tag!ALL_MCP, subagent, message_subagent]
   tools_deny: [write_plan, edit_plan, handoff_plan]
-  undeferred_tools: [file_read, glob, grep, file_edit_search_replace, patch_edit, file_write, shell_exec, shell_monitor, shell_service, subagent, message_subagent, skill, job_status, job_block, job_result, job_cancel, list_jobs, ask_user_question, tool_search, todo_create, todo_update, todo_complete, todo_delete, todo_list, read_goal, complete_goal, block_goal, mcp_list_resources, mcp_read_resource]
+  undeferred_tools: [file_read, glob, grep, file_edit_search_replace, patch_edit, file_write, shell_exec, shell_monitor, shell_service, subagent, message_subagent, skill, job_status, job_block, job_result, job_cancel, list_jobs, ask_user_question, tool_search, todo_create, todo_update, todo_complete, todo_delete, todo_list, read_goal, propose_goal, complete_goal, block_goal, mcp_list_resources, mcp_read_resource]
   skills_allow: [tag!research, brainstorming, test-driven-development, verification-before-completion, github-project-backlog, appium-simulator-validation, expo-operator-deployment, agent-orchestration, lappie-workflow-coordination, lappie-review-convergence, updating-project-personas]
   skills_deny: []
   facet_transitions:
