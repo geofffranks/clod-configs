@@ -5,11 +5,15 @@
 # Runs in its own session (setsid/nohup) with stdio redirected into the
 # persistent connector.log by the hook, so it never holds the hook's stdout
 # pipe open for its own lifetime (session_start is blocking, 30s deadline).
-# It owns the per-session flock: opened here as the FIRST action, kept through
-# the readiness poll + venv ensure, and inherited across the exec of
-# connector_main (the kernel lock then dies with the container, so a double
-# session_start that spawns a second launcher fails the flock and exits 0
-# without spawning a second connector).
+# It owns the per-container, per-session flock: opened here as the FIRST
+# action, kept through the readiness poll + venv ensure, and inherited across
+# the exec of connector_main (the kernel lock then dies with the container, so
+# a double session_start that spawns a second launcher fails the flock and
+# exits 0 without spawning a second connector).
+# NOTE: the bridge dir lives on the SHARED sessions volume, so the lock must
+# be keyed by container hostname AND session id; a process-wide lock file
+# there would let one container's running connector block every other
+# container's launcher (and its own later sessions).
 #
 # Order: flock (first) -> truncate/rotate log -> venv ensure -> identity ->
 # readiness poll (1s x <=30s) -> exec connector_main. Every failure is logged
@@ -36,7 +40,7 @@ VENV_DIR="${BRIDGE_VENV_DIR:-$BRIDGE_DIR/venv}"
 REPO_DIR="${BRIDGE_REPO_DIR:-/Users/gfranks/workspace/discord-pt-stream}"
 PYPROJECT="$REPO_DIR/pyproject.toml"
 FPRINT="$BRIDGE_DIR/pyproject.fingerprint"
-LOCK="$BRIDGE_DIR/autostart.lock"
+LOCK="$BRIDGE_DIR/autostart.$(hostname 2>/dev/null || echo unknown).${POLYTOKEN_SESSION_ID:-derive}.lock"
 CONNECTOR_PYTHON="${BRIDGE_CONNECTOR_PYTHON:-}"
 READY_ATTEMPTS="${BRIDGE_CONNECTOR_READY_ATTEMPTS:-30}"
 READY_INTERVAL="${BRIDGE_CONNECTOR_READY_INTERVAL:-1}"
@@ -54,7 +58,7 @@ if command -v flock >/dev/null 2>&1; then
   if ! exec 9>"$LOCK" 2>/dev/null; then
     log "WARN cannot open $LOCK; continuing without dedupe"
   elif ! flock -n 9 2>/dev/null; then
-    log "another connector launcher holds the lock for this container; exiting"
+    log "another connector launcher for this container/session holds the lock; exiting"
     exit 0
   fi
 fi
