@@ -61,26 +61,29 @@ p4_seed() {
 sc "P1 fresh target -> expected files, no Claude-only artifacts"
 D="$(mktemp -d)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
-for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh lib/notify-mac.sh; do
+for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh lib/notify-mac.sh bin/code-review-helper.py; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 cmp -s "$REPO/home/lib/notify-mac.sh" "$D/lib/notify-mac.sh" 2>/dev/null \
   && ok "installed notify-mac.sh matches source" || no "installed notify-mac.sh matches source"
+cmp -s "$REPO/scripts/code-review-helper.py" "$D/bin/code-review-helper.py" 2>/dev/null \
+  && ok "installed trusted code-review helper matches source" || no "installed trusted code-review helper matches source"
+[ -x "$D/bin/code-review-helper.py" ] && ok "trusted code-review helper executable" || no "trusted code-review helper executable"
 for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh \
          compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once \
          compat/grep-guard/hook.sh compat/large-read-guard/hook.sh compat/hooks/no-remote-writes.sh; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-expected_subagents="$(printf '%s\n' abstraction-reviewer.md agent-workflow-architect.md agent-workflow-engineer.md completeness-reviewer.md correctness-reviewer.md general-reviewer.md implementer.md maintainability-reviewer.md mobile-app-expert.md researcher.md reviewer.md software-architect.md software-engineer.md validator.md | sort)"
+expected_subagents="$(printf '%s\n' abstraction-reviewer.md agent-workflow-architect.md agent-workflow-engineer.md code-review-adversarial.md code-review-completeness.md code-review-correctness.md code-review-general.md code-review-maintainability.md completeness-reviewer.md correctness-reviewer.md general-reviewer.md implementer.md maintainability-reviewer.md mobile-app-expert.md researcher.md review-synthesis-verifier.md reviewer.md software-architect.md software-engineer.md validator.md | sort)"
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "installed exactly the 14 shipped subagents" || no "installed exactly the 14 shipped subagents"
-expected_facets="$(printf '%s\n' product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
+  && ok "installed exactly the 20 shipped subagents" || no "installed exactly the 20 shipped subagents"
+expected_facets="$(printf '%s\n' code-review.md product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
-  && ok "installed exactly the 4 shipped facets" || no "installed exactly the 4 shipped facets"
-for facet in product-design project-manager workflow-designer workflow-project-manager; do
+  && ok "installed exactly the 5 shipped facets" || no "installed exactly the 5 shipped facets"
+for facet in code-review product-design project-manager workflow-designer workflow-project-manager; do
   cmp -s "$REPO/polytoken/facets/$facet.md" "$D/facets/$facet.md" 2>/dev/null \
     && ok "installed facet matches source: $facet" || no "installed facet matches source: $facet"
 done
@@ -442,10 +445,10 @@ D="$(mktemp -d)"
 POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 0 >/dev/null
 actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "top-level-only: subagent inventory still exactly 14" || no "top-level-only: subagent inventory still exactly 14"
+  && ok "top-level-only: subagent inventory still exactly 20" || no "top-level-only: subagent inventory still exactly 20"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
-  && ok "top-level-only: facet inventory still exactly 2" || no "top-level-only: facet inventory still exactly 2"
+  && ok "top-level-only: facet inventory still exactly 5" || no "top-level-only: facet inventory still exactly 5"
 [ ! -e "$D/subagents/validator.md.bak-20260101-000000" ] \
   && ok "top-level-only: subagent backup not installed" || no "top-level-only: subagent backup not installed"
 [ ! -e "$D/subagents/generated" ] \

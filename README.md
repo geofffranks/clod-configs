@@ -214,9 +214,28 @@ boundaries, keep evidence beside decisions, and stop/escalate rather than infer.
 
 The second workflow pair is `product-design`, which plans the product approval
 lifecycle and hands off via an approved plan to `project-manager`, which
- delivers it. These four are the global facets claude-config ships.
+ delivers it. These five are the global facets claude-config ships.
 
-All four facets pin `zai/glm-5.3-flash(high)` with fallback
+#### Read-only GitHub code review
+
+The `code-review` facet reviews a pull request or uniquely named branch using
+only the local authenticated `gh` CLI and read operations. It never comments,
+approves, pushes, publishes, mutates the checkout, uses MCP, or executes
+repository code by default. Immutable snapshots, append-only journals, and
+local reports live under
+`~/.local/share/polytoken/code-review/<canonical-host>/<owner>/<repo>/<scope_id>/`.
+
+Five independent read-only lanes — adversarial, correctness, completeness,
+maintainability, and general — inspect the pinned snapshot, followed by a fresh
+`review-synthesis-verifier`. Findings preserve exact evidence, severity,
+confidence, and provenance, with PR-actionable and pre-existing findings in
+separate ranked buckets. Missing, stale, truncated, unverifiable, or failed
+evidence is `blocked`, never clean. Follow-ups capture a new complete snapshot
+and review unresolved findings plus changed hunks only, reporting
+`still_present`, `resolved`, `unknown`, or `no_longer_applicable` rather than
+silently becoming a full review.
+
+All five facets pin `zai/glm-5.3-flash(high)` with fallback
 `codex/gpt-5.6-luna-1m(medium)`. The workflow pair uses Ratatoskr-gateway-only
 MCP (`mcp__ratatoskr`); the product pair uses `tag!ALL_MCP` per configured
 upstream server, with `product-design` also exposing `mcp_list_resources` and

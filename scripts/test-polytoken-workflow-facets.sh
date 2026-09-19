@@ -312,6 +312,7 @@ require_daemon() { # label
 
 DESIGNER="$FACETS_SRC/workflow-designer.md"
 DELIVERY="$FACETS_SRC/workflow-project-manager.md"
+CODE_REVIEW="$FACETS_SRC/code-review.md"
 PRODUCT_DESIGN="$FACETS_SRC/product-design.md"
 PROJECT_MANAGER="$FACETS_SRC/project-manager.md"
 README="$REPO/README.md"
@@ -324,9 +325,12 @@ run_inventory() {
   [ -f "$DESIGNER" ] && [ -f "$DELIVERY" ] || return
   local found
   found="$(find "$FACETS_SRC" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
-  [ "$found" = "$(printf '%s\n' product-design.md project-manager.md workflow-project-manager.md workflow-designer.md | sort)" ] \
-    && ok "source facets are exactly the four managed definitions" \
-    || { no "source facets are exactly the four managed definitions"; printf '%s\n' "$found" | sed 's/^/       /'; }
+  [ "$found" = "$(printf '%s\n' code-review.md product-design.md project-manager.md workflow-project-manager.md workflow-designer.md | sort)" ] \
+    && ok "source facets are exactly the five managed definitions" \
+    || { no "source facets are exactly the five managed definitions"; printf '%s\n' "$found" | sed 's/^/       /'; }
+  [ -f "$CODE_REVIEW" ] && ok "code-review source file present" || no "code-review source file present"
+  [ "$(fm_json "$CODE_REVIEW" '.name')" = '"code-review"' ] \
+    && ok "code-review: frontmatter name matches file stem" || no "code-review: frontmatter name matches file stem"
   [ "$(fm_json "$DESIGNER" '.name')" = '"workflow-designer"' ] \
     && ok "designer: frontmatter name matches file stem" || no "designer: frontmatter name matches file stem"
   [ "$(fm_json "$DELIVERY" '.name')" = '"workflow-project-manager"' ] \
@@ -344,14 +348,16 @@ run_inventory() {
       && ok "$(basename "$f"): body starts with the facet base transclusion" \
       || no "$(basename "$f"): body starts with the facet base transclusion (got: $head)"
   done
-  sc "managed source subagent inventory (14)"
+  sc "managed source subagent inventory (20)"
   local actual expected
   expected="$(printf '%s\n' abstraction-reviewer agent-workflow-architect agent-workflow-engineer \
-    completeness-reviewer correctness-reviewer general-reviewer implementer maintainability-reviewer \
-    mobile-app-expert researcher reviewer software-architect software-engineer validator | sort)"
+    code-review-adversarial code-review-completeness code-review-correctness code-review-general \
+    code-review-maintainability completeness-reviewer correctness-reviewer general-reviewer implementer \
+    maintainability-reviewer mobile-app-expert researcher review-synthesis-verifier reviewer \
+    software-architect software-engineer validator | sort)"
   actual="$(find "$SUBAGENTS_SRC" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sed 's/\.md$//' | sort)"
-  [ "$actual" = "$expected" ] && ok "14 managed subagent definitions present" \
-    || { no "14 managed subagent definitions present"; diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | sed 's/^/       /'; }
+  [ "$actual" = "$expected" ] && ok "20 managed subagent definitions present" \
+    || { no "20 managed subagent definitions present"; diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | sed 's/^/       /'; }
 }
 
 # =====================================================================
@@ -729,6 +735,15 @@ run_lifecycle_fixture() { # --_lifecycle-fixture (used only by --selftest)
   # finishes, so a long sleep would delay the interrupt path needlessly.
   while :; do sleep 1; done
 }
+run_code_review_contracts() {
+  sc "code-review helper behavioral contracts"
+  if PYTHONPYCACHEPREFIX="$(mktemp -d)" bash "$REPO/scripts/test-code-review-contracts.sh"; then
+    ok "code-review helper behavioral contracts"
+  else
+    no "code-review helper behavioral contracts"
+  fi
+}
+
 run_selftest() {
   sc "lifecycle_selftest: bounded failure paths never block"
   local fake_pid failure_start failure_elapsed
@@ -939,6 +954,7 @@ case "${1:-}" in
   --ratatoskr)            run_ratatoskr ;;
   --live-gateway)         run_live_gateway ;;
   --docs)                 run_docs ;;
+  --code-review-contracts) run_code_review_contracts ;;
   --selftest)             run_selftest ;;
   --_lifecycle-fixture)   run_lifecycle_fixture ;;
   ""|full)
@@ -949,10 +965,11 @@ case "${1:-}" in
     run_delivery_policy
     run_ratatoskr
     run_selftest
+    run_code_review_contracts
     run_docs
     ;;
   *)
-    echo "usage: $0 [--inventory|--validate-definitions|--designer-authority|--approval-contract|--delivery-policy|--ratatoskr|--live-gateway|--docs|--selftest]" >&2
+    echo "usage: $0 [--inventory|--validate-definitions|--designer-authority|--approval-contract|--delivery-policy|--ratatoskr|--live-gateway|--docs|--code-review-contracts|--selftest]" >&2
     exit 2
     ;;
 esac

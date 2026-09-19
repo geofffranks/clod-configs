@@ -13,7 +13,8 @@ command -v sha256sum >/dev/null || { echo "sha256sum is required" >&2; exit 1; }
 # fallback_models/tools/undeferred_tools/required keep the exact frontmatter
 # order and are comma-separated; properties is the sorted property set; enums
 # is semicolon-separated field=v1,v2 entries; import_sha256 is set only for
-# byte-preserved imports whose repository copy must never drift.
+# byte-preserved imports whose repository copy must never drift. The optional
+# item_properties field validates closed nested candidate/finding schemas.
 # Heterogeneous schema shapes are validated generically by validate_persona
 # rather than per-role special cases.
 subagent_manifest=(
@@ -31,6 +32,12 @@ subagent_manifest=(
   'software-engineer|codex/gpt-5.6-luna(high)|Implement or debug bounded repository work across Swift, TypeScript, React, and adjacent languages using repository conventions, tests, and explicit evidence.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(low)|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|brainstorming,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,status,summary,changed_files,tests,concerns|changed_files,concerns,follow_up_opportunities,scope_id,source_revision,status,summary,tests|status=done,done_with_concerns,needs_context,blocked|ee0bfa7885e533b1653d203b7801487df8636cf1c744179b8baeadd2886b4f6a'
   'agent-workflow-architect|zai/glm-5.3-flash|Design and independently review Polytoken agent workflows for authority, usability, token efficiency, Docker/macOS boundaries, and ratatoskr routing.|codex/gpt-5.6-luna|file_read,glob,grep,web_search,web_fetch,skill|file_read,glob,grep,web_search,web_fetch,skill|tag!research,brainstorming,agent-orchestration,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,doc-writing,agent-session-retro|verdict,summary,recommendation,findings,evidence,risks,limitations,second_review_required|evidence,findings,limitations,recommendation,risks,second_review_required,summary,verdict|verdict=approved,needs_fixes,blocked|'
   'agent-workflow-engineer|codex/gpt-5.6-luna|Implement bounded Polytoken workflow changes with risk-based testing and explicit container/host evidence.|zai/glm-5.3-flash|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,skill,mcp__ratatoskr|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,skill|tag!research,brainstorming,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,doc-writing,agent-session-retro|status,summary,changed_files,checks,tdd_evidence,concerns,limitations|changed_files,checks,concerns,limitations,status,summary,tdd_evidence|status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT|'
+  'code-review-adversarial|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for security and abuse paths without network, shell, or mutation access.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
+  'code-review-completeness|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for missing wiring, placeholders, unsupported errors, and incomplete end-to-end behavior.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
+  'code-review-correctness|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for correctness, lifecycle, concurrency, and recovery defects.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
+  'code-review-general|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for cross-cutting specification and implementation gaps not owned by another lane.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
+  'code-review-maintainability|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for duplication, needless complexity, leaky boundaries, and inappropriate ownership.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
+  'review-synthesis-verifier|zai/glm-5.3-flash(high)|Fresh-context verifier that validates proposed code-review claims against pinned source and captured metadata.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,code-review-reporting|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,verified_findings,rejected_candidate_ids,evidence,limitations|evidence,head_sha,limitations,rejected_candidate_ids,review_run_id,scope_id,snapshot_digest,source_revision,verdict,verified_findings|verdict=verified,blocked|'
 )
 
 manifest_names() {
@@ -212,6 +219,27 @@ validate_persona() {
       actual=$(yq -r "$schema.properties.$field.enum | join(\",\")" "$frontmatter")
       [[ "$actual" == "$expected_enum" ]] || { echo "$persona: $field enum mismatch" >&2; exit 1; }
     done
+  fi
+  case "$persona" in
+    code-review-adversarial|code-review-correctness|code-review-completeness|code-review-general|code-review-maintainability)
+      nested_field='candidates'
+      nested_expected='anchor candidate_id category confidence evidence_refs head_sha impact lane limitations observations path provenance requirement_ref review_run_id routing_note scenario scope_id severity snapshot_digest suggested_fix summary title'
+      ;;
+    review-synthesis-verifier)
+      nested_field='verified_findings'
+      nested_expected='affected_paths anchors confidence disposition evidence finding_id impact originating_candidate_ids provenance severity summary suggested_fix title'
+      ;;
+    *) nested_field='' ;;
+  esac
+  if [[ -n "$nested_field" ]]; then
+    item_path="$schema.properties.$nested_field.items"
+    [[ "$(yq -r "$item_path.type" "$frontmatter")" == object ]] || { echo "$persona: $nested_field items must be objects" >&2; return 1; }
+    [[ "$(yq -r "$item_path.additionalProperties | tostring" "$frontmatter")" == false ]] || { echo "$persona: $nested_field item schema must be closed" >&2; return 1; }
+    actual_nested=$(yq -r "$item_path.properties | keys | sort | join(\" \" )" "$frontmatter")
+    [[ "$actual_nested" == "$nested_expected" ]] || { echo "$persona: $nested_field item property mismatch: $actual_nested" >&2; return 1; }
+    actual_nested_required=$(yq -r "$item_path.required | sort | join(\" \" )" "$frontmatter")
+    [[ "$actual_nested_required" == "$nested_expected" ]] || { echo "$persona: $nested_field item required mismatch: $actual_nested_required" >&2; return 1; }
+    echo "$persona nested $nested_field schema verified"
   fi
   rm -f "$frontmatter"; trap - EXIT
   echo "$persona contract verified"

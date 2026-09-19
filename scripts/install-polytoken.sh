@@ -642,6 +642,11 @@ if [ -d "$ROOT/polytoken/facets" ]; then
   done < <(find "$ROOT/polytoken/facets" -maxdepth 1 -type f -name '*.md' -print0)
 fi
 
+# Trusted code-review helper: installed outside any target checkout and resolved
+# by code-review facets through the config-root absolute path.
+copy_managed_file "$ROOT/scripts/code-review-helper.py" "$DEST/bin/code-review-helper.py"
+chmod +x "$DEST/bin/code-review-helper.py"
+
 # 2. Mark executable scripts executable.
 for s in "${EXEC_SCRIPTS[@]}"; do
   [ -f "$DEST/$s" ] && chmod +x "$DEST/$s"

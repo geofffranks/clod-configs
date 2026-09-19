@@ -9,3 +9,4 @@ docs/superpowers
 .worktrees/
 .tickets
 .polytoken
+__pycache__/
