@@ -95,3 +95,27 @@ for invalid_path in './src/a' 'src/./a'; do
 done
 test ! -e "$OUT/executed" && ok poison-payload-marker-absent || bad poison-payload-marker
 PYTHONPYCACHEPREFIX="$T/pycache" python3 -m py_compile "$H"; test -e "$T/pycache" && ok pycache-isolated || bad pycache-location; ok syntax
+
+# Review contract assertions: explicit impact context is present in every lane,
+# verifier, and rendered-report guidance; vague placeholders are forbidden.
+for f in polytoken/subagents/code-review-adversarial.md polytoken/subagents/code-review-correctness.md polytoken/subagents/code-review-completeness.md polytoken/subagents/code-review-general.md polytoken/subagents/code-review-maintainability.md polytoken/subagents/review-synthesis-verifier.md; do
+  grep -q 'impact_if_unfixed' "$f" || bad "missing impact_if_unfixed: $f"
+  grep -q 'triggering_use_cases' "$f" || bad "missing triggering_use_cases: $f"
+  grep -q 'affected_scope' "$f" || bad "missing affected_scope: $f"
+  ok "explicit impact fields: $f"
+done
+for f in home/skills/code-review-evidence/SKILL.md home/skills/code-review-reporting/SKILL.md polytoken/facets/code-review.md README.md polytoken-container/docs/superpowers/code-review-workflow/design_spec.md; do
+  grep -q 'impact_if_unfixed' "$f" || bad "missing impact guidance: $f"
+  grep -q 'triggering_use_cases' "$f" || bad "missing trigger guidance: $f"
+  grep -q 'affected_scope' "$f" || bad "missing scope guidance: $f"
+done
+for f in home/skills/code-review-reporting/SKILL.md polytoken/facets/code-review.md README.md polytoken-container/docs/superpowers/code-review-workflow/design_spec.md; do
+  grep -q 'What happens if left unfixed' "$f" || bad "missing rendered consequence heading: $f"
+  grep -q 'Triggering use cases / reproduction conditions' "$f" || bad "missing rendered trigger heading: $f"
+  grep -q 'Affected scope' "$f" || bad "missing rendered scope heading: $f"
+  ok "report headings and concrete guidance: $f"
+done
+for f in home/skills/code-review-evidence/SKILL.md polytoken/subagents/code-review-adversarial.md polytoken/subagents/review-synthesis-verifier.md home/skills/code-review-reporting/SKILL.md; do
+  grep -Eq 'vague|placeholders|speculative|unsupported' "$f" || bad "missing vague/speculative rejection guidance: $f"
+done
+ok review-contract-assertions

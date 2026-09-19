@@ -218,6 +218,8 @@ lifecycle and hands off via an approved plan to `project-manager`, which
 
 #### Read-only GitHub code review
 
+Review reports keep PR-actionable and pre-existing findings in separate severity-ranked buckets. Every finding renders **What happens if left unfixed** (`impact_if_unfixed`), **Triggering use cases / reproduction conditions** (`triggering_use_cases`), and **Affected scope** (`affected_scope`), using concrete evidence rather than vague placeholders.
+
 The `code-review` facet reviews a pull request or uniquely named branch using
 only the local authenticated `gh` CLI and read operations. It never comments,
 approves, pushes, publishes, mutates the checkout, uses MCP, or executes

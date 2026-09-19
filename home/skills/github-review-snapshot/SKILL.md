@@ -1,3 +1,8 @@
+---
+name: github-review-snapshot
+description: Acquire and validate an immutable, read-only GitHub review snapshot through the trusted local helper.
+---
+
 # GitHub Review Snapshot
 
 Use this skill for read-only acquisition. The local `gh` CLI is the only remote adapter: preflight `gh auth status`, then use read commands such as `gh repo view`, `gh pr view`, `gh pr diff`, and paginated comment/review queries. Never use write subcommands, checkout mutation, pushes, comments, approvals, or MCP.

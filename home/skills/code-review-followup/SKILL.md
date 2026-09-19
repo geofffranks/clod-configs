@@ -1,3 +1,8 @@
+---
+name: code-review-followup
+description: Reconcile a bounded code-review follow-up against a new complete snapshot and prior findings.
+---
+
 # Code Review Follow-up
 
 Resolve the trusted installed helper at `$POLYTOKEN_CONFIG_DIR/bin/code-review-helper.py` (or an equivalent installation-derived absolute path), verify it exists and resolves outside the target checkout, and fail closed if missing or shadowed by a same-name checkout file. Invoke that trusted helper's `followup` command to validate fixture/gh-shaped follow-up identity and calculate targets. Maintain one append-only record per stable repository/PR review scope. Each record includes identity, prior snapshot digest and base/head/merge-base, latest reviewed head, stable finding IDs/fingerprints, evidence anchors, dispositions, lane coverage, verifier result, and every job ID/terminal state.

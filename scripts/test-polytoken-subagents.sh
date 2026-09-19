@@ -223,11 +223,11 @@ validate_persona() {
   case "$persona" in
     code-review-adversarial|code-review-correctness|code-review-completeness|code-review-general|code-review-maintainability)
       nested_field='candidates'
-      nested_expected='anchor candidate_id category confidence evidence_refs head_sha impact lane limitations observations path provenance requirement_ref review_run_id routing_note scenario scope_id severity snapshot_digest suggested_fix summary title'
+      nested_expected='affected_scope anchor candidate_id category confidence evidence_refs head_sha impact impact_if_unfixed lane limitations observations path provenance requirement_ref review_run_id routing_note scenario scope_id severity snapshot_digest suggested_fix summary title triggering_use_cases'
       ;;
     review-synthesis-verifier)
       nested_field='verified_findings'
-      nested_expected='affected_paths anchors confidence disposition evidence finding_id impact originating_candidate_ids provenance severity summary suggested_fix title'
+      nested_expected='affected_paths affected_scope anchors confidence disposition evidence finding_id impact impact_if_unfixed originating_candidate_ids provenance severity summary suggested_fix title triggering_use_cases'
       ;;
     *) nested_field='' ;;
   esac

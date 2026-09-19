@@ -143,6 +143,16 @@ for f in home/skills/*/SKILL.md; do
   echo "  - $f: OK"
 done
 
+# Code-review skills must remain individually discoverable and installable.
+for skill in github-review-snapshot code-review-evidence code-review-followup code-review-reporting; do
+  f="home/skills/$skill/SKILL.md"
+  grep -q "^name: $skill$" "$f" || fail "$f must declare discoverable name: $skill"
+  grep -q '^description: .\+' "$f" || fail "$f must declare a non-empty description"
+  [ -f "$TMP/skills/$skill/SKILL.md" ] || fail "installed skill missing: $skill"
+done
+
+echo "  - code-review skills validate, declare names, and install: OK"
+
 # --- semantic portability assertions (Task 6) ---
 #
 # The canonical skills live in one tree shared by both harnesses, so each
