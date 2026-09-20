@@ -20,7 +20,9 @@ supplied snapshot and its bounded supporting context. Echo `scope_id`,
 Identity mismatch or incomplete evidence is `blocked`. Read every snapshot
 artifact your checks depend on; never sample required artifacts. For every
 finding, state a concrete `impact_if_unfixed` (including the severity
-rationale), concrete `triggering_use_cases`, and `affected_scope`; never write
+rationale), concrete `triggering_use_cases`, and `affected_scope`, and classify
+`provenance` (`introduced`, `pre_existing`, `mixed_or_exposed`, or `uncertain`);
+never write
 only "bug", "edge case", or other vague placeholders. Out-of-specialty concerns
 go in one routing note, not in findings.
 

@@ -18,25 +18,20 @@ command -v sha256sum >/dev/null || { echo "sha256sum is required" >&2; exit 1; }
 # Heterogeneous schema shapes are validated generically by validate_persona
 # rather than per-role special cases.
 subagent_manifest=(
-  'implementer|codex/gpt-5.6-luna|Implement a single plan task via TDD — writes code, runs focused then full tests, commits, self-reviews, and reports status. Dispatch one per task with its task-brief file path and report-file path.|zai/glm-5.3-flash|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|brainstorming,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|status,summary|commits,concerns,report_file,status,summary,test_summary|status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT|'
-  'reviewer|zai/glm-5.3-flash|Review a code diff against its requirements and quality standards — returns a spec-compliance verdict and a quality verdict with severity-classified findings. Read-only with no write or shell tools. Handles task-scoped and whole-branch review.|codex/gpt-5.6-luna,minime/google_gemma-4-26b-a4b-it|file_read,glob,grep,skill|file_read,glob,grep,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|verdict,summary|report_file,spec_compliance,summary,verdict|verdict=approved,needs_fixes;spec_compliance=compliant,issues_found|'
-  'validator|zai/glm-5.3-flash|Execute a validation plan end-to-end — runs each validation item, captures command output as evidence, judges pass/fail, and reports an overall verdict. Does not fix issues; reports them.|codex/gpt-5.6-luna,minime/google_gemma-4-26b-a4b-it|file_read,glob,grep,shell_exec,file_write,skill|file_read,glob,grep,shell_exec,file_write,skill|systematic-debugging,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|verdict,summary|report_file,summary,verdict|verdict=pass,fail,partial|'
-  'researcher|minime/google_gemma-4-26b-a4b-it|Investigate a research question against the local codebase, the internet, or both, and return evidence-grounded findings.|codex/gpt-5.6-luna,zai/glm-5.3-flash|file_read,grep,glob,web_search,web_fetch|grep,glob,web_search,web_fetch|tag!research,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|summary,files,sources|files,sources,summary||'
-  'abstraction-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes for leaky abstractions, boundary violations, boilerplate caused by poor interfaces, and low-level concepts leaking toward product or UI surfaces.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|d65dd096d3f6431735753b6d52ebfb5f8441423b28c234f0e872708bca964abe'
-  'completeness-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes for placeholders, deferred layers, mocked production paths, missing wiring, unsupported errors, and partial end-to-end behavior.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|2bafd5009404d3b3bb082bebfdbfa88be0cbd614779ee00126ffe557c0174380'
-  'correctness-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes for crashes, races, deadlocks, corruption, lifecycle and state-machine defects, unsafe cancellation, and recovery failures.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|b430ea4778866ccf8b5785e1188478dfda22ad8aac9268c9309122cdfea3f4d4'
-  'general-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes broadly for specification compliance and engineering quality, returning independent severity-classified findings. Read-only except focused existing checks.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|b00a347c93abdec70381205c726830acd3003475d52f29e1c1903476e3fdf6f4'
-  'maintainability-reviewer|codex/gpt-5.6-luna(high)|Review bounded changes for duplication, competing implementations, needless complexity, high churn, and justified modularization opportunities without unrelated refactoring.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(high)|file_read,glob,grep,shell_exec,skill|file_read,glob,grep,shell_exec,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,summary,findings,limitations|findings,limitations,scope_id,source_revision,summary,verdict|verdict=approved,changes_required,blocked|ad99d0f2aeac7a14c17cb21fb1dde21ac1432e78404a757ba67f88bec4df49a1'
-  'mobile-app-expert|codex/gpt-5.6-luna(high)|Advise on mobile lifecycle, permissions, native bridges, device variance, offline behavior, resource use, accessibility, platform conventions, and evidence limits. Read-only.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(low)|file_read,glob,grep,skill|file_read,glob,grep,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,summary,recommendation,alternatives,risks,assumptions,evidence,limitations|alternatives,assumptions,evidence,follow_up_opportunities,limitations,recommendation,risks,scope_id,source_revision,summary||0d17a6f6fe85cd0d1e2ebce1ed380eefb7a53b299f7a7eb32135e03511fb5e9f'
-  'software-architect|codex/gpt-5.6-sol(high)|Advise on software boundaries, contracts, data flow, lifecycle, migration, recovery, feasibility, alternatives, and plan risks. Read-only.|neuralwatt/deepseek-v4-flash-flex(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|brainstorming,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,summary,recommendation,alternatives,risks,assumptions,evidence,limitations|alternatives,assumptions,evidence,follow_up_opportunities,limitations,recommendation,risks,scope_id,source_revision,summary||11605c1c40df546e4c972b1c913bff9ecde5d09c45244cfff688b687274adf50'
-  'software-engineer|codex/gpt-5.6-luna(high)|Implement or debug bounded repository work across Swift, TypeScript, React, and adjacent languages using repository conventions, tests, and explicit evidence.|neuralwatt/qwen-3.8-27b(medium),zai/glm-5.3-flash(low)|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|brainstorming,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,status,summary,changed_files,tests,concerns|changed_files,concerns,follow_up_opportunities,scope_id,source_revision,status,summary,tests|status=done,done_with_concerns,needs_context,blocked|ee0bfa7885e533b1653d203b7801487df8636cf1c744179b8baeadd2886b4f6a'
-  'agent-workflow-architect|zai/glm-5.3-flash|Design and independently review Polytoken agent workflows for authority, usability, token efficiency, Docker/macOS boundaries, and ratatoskr routing.|codex/gpt-5.6-luna|file_read,glob,grep,web_search,web_fetch,skill|file_read,glob,grep,web_search,web_fetch,skill|tag!research,brainstorming,agent-orchestration,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,doc-writing,agent-session-retro|verdict,summary,recommendation,findings,evidence,risks,limitations,second_review_required|evidence,findings,limitations,recommendation,risks,second_review_required,summary,verdict|verdict=approved,needs_fixes,blocked|'
-  'agent-workflow-engineer|codex/gpt-5.6-luna|Implement bounded Polytoken workflow changes with risk-based testing and explicit container/host evidence.|zai/glm-5.3-flash|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,skill,mcp__ratatoskr|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,skill|tag!research,brainstorming,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,doc-writing,agent-session-retro|status,summary,changed_files,checks,tdd_evidence,concerns,limitations|changed_files,checks,concerns,limitations,status,summary,tdd_evidence|status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT|'
-  'code-review-adversarial|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for security and abuse paths without network, shell, or mutation access.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
-  'code-review-completeness|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for missing wiring, placeholders, unsupported errors, and incomplete end-to-end behavior.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
-  'code-review-correctness|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for correctness, lifecycle, concurrency, and recovery defects.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
-  'code-review-general|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for cross-cutting specification and implementation gaps not owned by another lane.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
-  'code-review-maintainability|zai/glm-5.3-flash(high)|Review a pinned code-review snapshot for duplication, needless complexity, leaky boundaries, and inappropriate ownership.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,candidates,evidence,limitations|candidates,evidence,head_sha,limitations,review_run_id,scope_id,snapshot_digest,source_revision,verdict|verdict=complete,blocked|'
+  'implementer|zai/glm-5.3-flash(low)|Implement a single plan task via TDD — writes code, runs focused then full tests, commits, self-reviews, and reports status. Dispatch one per task with its task-brief file path and report-file path.|codex/gpt-5.6-luna(high)|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|brainstorming,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,status,summary,evidence|commits,concerns,evidence,report_file,scope_id,source_revision,status,summary,test_summary|status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT|'
+  'validator|zai/glm-5.3-flash(high)|Execute a validation plan end-to-end — runs each validation item, captures command output as evidence, judges pass/fail, and reports an overall verdict. Does not fix issues; reports them.|codex/gpt-5.6-luna(high)|file_read,glob,grep,shell_exec,file_write,skill|file_read,glob,grep,shell_exec,file_write,skill|systematic-debugging,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,verdict,summary,evidence|evidence,report_file,scope_id,source_revision,summary,verdict|verdict=pass,fail,partial|'
+  'researcher|zai/glm-5.3-flash(high)|Investigate a research question against the local codebase, the internet, or both, and return evidence-grounded findings.|codex/gpt-5.6-luna(high)|file_read,grep,glob,web_search,web_fetch|grep,glob,web_search,web_fetch|tag!research,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,summary,files,sources,evidence|evidence,files,scope_id,source_revision,sources,summary||'
+  'mobile-app-expert|zai/glm-5.3-flash(low)|Advise on mobile lifecycle, permissions, native bridges, device variance, offline behavior, resource use, accessibility, platform conventions, and evidence limits. Read-only.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,summary,recommendation,alternatives,risks,assumptions,evidence,limitations|alternatives,assumptions,evidence,follow_up_opportunities,limitations,recommendation,risks,scope_id,source_revision,summary||fe3f8a981bb7c319d42fe8a947b19cc57d45216a287c4f15738ecaeb64f43b28'
+  'software-architect|codex/gpt-6-astra(low)|Advise on software boundaries, contracts, data flow, lifecycle, migration, recovery, feasibility, alternatives, and plan risks. Read-only.||file_read,glob,grep,skill|file_read,glob,grep,skill|brainstorming,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,summary,recommendation,evidence|alternatives,assumptions,evidence,follow_up_opportunities,limitations,recommendation,risks,scope_id,source_revision,summary||55db43e2f65b823bbbef315856bada1ac77f264295a93d1cd432e689217d6d59'
+  'software-engineer|zai/glm-5.3-flash(low)|Implement or debug bounded repository work across Swift, TypeScript, React, and adjacent languages using repository conventions, tests, and explicit evidence.|codex/gpt-5.6-luna(high)|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|file_read,file_write,file_edit_search_replace,glob,grep,shell_exec,skill|brainstorming,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,verification-before-completion,polytoken:investigating-a-codebase,polytoken:modifying-polytoken|source_revision,scope_id,status,summary,changed_files,tests,evidence,concerns|changed_files,concerns,evidence,follow_up_opportunities,scope_id,source_revision,status,summary,tests|status=done,done_with_concerns,needs_context,blocked|9bb5dbb9580833aa6f122b073d21e16100de16f5a82c31db84d5927650b13289'
+  'agent-workflow-architect|zai/glm-5.3-flash(high)|Design and independently review Polytoken agent workflows for authority, usability, token efficiency, Docker/macOS boundaries, and ratatoskr routing.|codex/gpt-6-astra(medium)|file_read,glob,grep,web_search,web_fetch,skill|file_read,glob,grep,web_search,web_fetch,skill|tag!research,brainstorming,agent-orchestration,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,doc-writing,agent-session-retro|source_revision,scope_id,verdict,summary,recommendation,findings,evidence,risks,limitations,second_review_required|evidence,findings,limitations,recommendation,risks,scope_id,second_review_required,source_revision,summary,verdict|verdict=approved,needs_fixes,blocked|'
+  'agent-workflow-engineer|zai/glm-5.3-flash(high)|Implement bounded Polytoken workflow changes with risk-based testing and explicit container/host evidence.|codex/gpt-5.6-luna(medium)|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,skill,mcp__ratatoskr|file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,skill|tag!research,brainstorming,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase,doc-writing,agent-session-retro|source_revision,scope_id,status,summary,changed_files,checks,tdd_evidence,concerns,limitations|changed_files,checks,concerns,limitations,scope_id,source_revision,status,summary,tdd_evidence|status=DONE,DONE_WITH_CONCERNS,BLOCKED,NEEDS_CONTEXT|'
+  'review-adversarial|zai/glm-5.3-flash(high)|Review pinned code-review snapshots and bounded changes for security and abuse paths, without network, shell, or mutation access.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,findings,evidence,limitations|evidence,findings,head_sha,limitations,report_file,review_run_id,scope_id,snapshot_digest,source_revision,spec_compliance,summary,verdict|verdict=approved,needs_fixes,blocked;spec_compliance=compliant,issues_found|'
+  'review-completeness|zai/glm-5.3-flash(high)|Review pinned code-review snapshots and bounded changes for missing wiring, placeholders, mocked production paths, unsupported errors, and partial end-to-end behavior.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,findings,evidence,limitations|evidence,findings,head_sha,limitations,report_file,review_run_id,scope_id,snapshot_digest,source_revision,spec_compliance,summary,verdict|verdict=approved,needs_fixes,blocked;spec_compliance=compliant,issues_found|'
+  'review-correctness|zai/glm-5.3-flash(high)|Review pinned code-review snapshots and bounded changes for crashes, races, deadlocks, corruption, lifecycle and state-machine defects, unsafe cancellation, and recovery failures.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,findings,evidence,limitations|evidence,findings,head_sha,limitations,report_file,review_run_id,scope_id,snapshot_digest,source_revision,spec_compliance,summary,verdict|verdict=approved,needs_fixes,blocked;spec_compliance=compliant,issues_found|'
+  'review-general|zai/glm-5.3-flash(high)|Review pinned code-review snapshots and bounded changes for specification compliance and cross-cutting quality; carries the Lappie task-review modes with severity-classified findings.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,findings,evidence,limitations|evidence,findings,head_sha,limitations,report_file,review_run_id,scope_id,snapshot_digest,source_revision,spec_compliance,summary,verdict|verdict=approved,needs_fixes,blocked;spec_compliance=compliant,issues_found|'
+  'review-maintainability|zai/glm-5.3-flash(high)|Review pinned code-review snapshots and bounded changes for duplication, competing implementations, needless complexity, leaky boundaries, and ownership or churn risks.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,findings,evidence,limitations|evidence,findings,head_sha,limitations,report_file,review_run_id,scope_id,snapshot_digest,source_revision,spec_compliance,summary,verdict|verdict=approved,needs_fixes,blocked;spec_compliance=compliant,issues_found|'
+  'review-abstraction|zai/glm-5.3-flash(high)|Review pinned code-review snapshots and bounded changes for leaky abstractions, boundary violations, boilerplate caused by poor interfaces, and low-level concepts leaking toward product or UI surfaces.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,polytoken:investigating-a-codebase,polytoken:modifying-polytoken,receiving-code-review|source_revision,scope_id,verdict,findings,evidence,limitations|evidence,findings,head_sha,limitations,report_file,review_run_id,scope_id,snapshot_digest,source_revision,spec_compliance,summary,verdict|verdict=approved,needs_fixes,blocked;spec_compliance=compliant,issues_found|'
   'review-synthesis-verifier|zai/glm-5.3-flash(high)|Fresh-context verifier that validates proposed code-review claims against pinned source and captured metadata.|codex/gpt-5.6-luna(high)|file_read,glob,grep,skill|file_read,glob,grep,skill|github-review-snapshot,code-review-evidence,code-review-reporting|source_revision,scope_id,review_run_id,snapshot_digest,head_sha,verdict,verified_findings,rejected_candidate_ids,evidence,limitations|evidence,head_sha,limitations,rejected_candidate_ids,review_run_id,scope_id,snapshot_digest,source_revision,verdict,verified_findings|verdict=verified,blocked|'
 )
 
@@ -60,7 +55,7 @@ validate_implementer_model_contract() {
   trap 'rm -f "$frontmatter"' RETURN
   sed -n '2,/^---$/p' polytoken/subagents/implementer.md | sed '$d' > "$frontmatter"
   model=$(yq -r '.polytoken.model' "$frontmatter")
-  [[ "$model" == 'codex/gpt-5.6-luna' ]] || { echo "focused_canonical_implementer_model_representation: expected raw provider/model source representation, got $model" >&2; return 1; }
+  [[ "$model" == 'zai/glm-5.3-flash(low)' ]] || { echo "focused_canonical_implementer_model_representation: expected raw provider/model source representation, got $model" >&2; return 1; }
   echo focused_canonical_implementer_model_representation
 }
 
@@ -221,13 +216,17 @@ validate_persona() {
     done
   fi
   case "$persona" in
-    code-review-adversarial|code-review-correctness|code-review-completeness|code-review-general|code-review-maintainability)
-      nested_field='candidates'
-      nested_expected='affected_scope anchor candidate_id category confidence evidence_refs head_sha impact impact_if_unfixed lane limitations observations path provenance requirement_ref review_run_id routing_note scenario scope_id severity snapshot_digest suggested_fix summary title triggering_use_cases'
+    review-adversarial|review-correctness|review-completeness|review-maintainability|review-general|review-abstraction)
+      nested_field='findings'
+      nested_props='affected_files affected_scope anchor candidate_id category confidence evidence evidence_refs id impact impact_if_unfixed lane limitations observations path provenance requirement_ref routing_note scenario severity suggested_fix title triggering_use_cases'
+      # Unified findings schema: snapshot-rich fields are optional; the bounded
+      # core is required, so required is a strict subset of props.
+      nested_required='affected_files category evidence id impact severity suggested_fix title'
       ;;
     review-synthesis-verifier)
       nested_field='verified_findings'
-      nested_expected='affected_paths affected_scope anchors confidence disposition evidence finding_id impact impact_if_unfixed originating_candidate_ids provenance severity summary suggested_fix title triggering_use_cases'
+      nested_props='affected_paths affected_scope anchors confidence disposition evidence finding_id impact impact_if_unfixed originating_candidate_ids provenance severity suggested_fix summary title triggering_use_cases'
+      nested_required="$nested_props"
       ;;
     *) nested_field='' ;;
   esac
@@ -236,9 +235,9 @@ validate_persona() {
     [[ "$(yq -r "$item_path.type" "$frontmatter")" == object ]] || { echo "$persona: $nested_field items must be objects" >&2; return 1; }
     [[ "$(yq -r "$item_path.additionalProperties | tostring" "$frontmatter")" == false ]] || { echo "$persona: $nested_field item schema must be closed" >&2; return 1; }
     actual_nested=$(yq -r "$item_path.properties | keys | sort | join(\" \" )" "$frontmatter")
-    [[ "$actual_nested" == "$nested_expected" ]] || { echo "$persona: $nested_field item property mismatch: $actual_nested" >&2; return 1; }
+    [[ "$actual_nested" == "$nested_props" ]] || { echo "$persona: $nested_field item property mismatch: $actual_nested" >&2; return 1; }
     actual_nested_required=$(yq -r "$item_path.required | sort | join(\" \" )" "$frontmatter")
-    [[ "$actual_nested_required" == "$nested_expected" ]] || { echo "$persona: $nested_field item required mismatch: $actual_nested_required" >&2; return 1; }
+    [[ "$actual_nested_required" == "$nested_required" ]] || { echo "$persona: $nested_field item required mismatch: $actual_nested_required" >&2; return 1; }
     echo "$persona nested $nested_field schema verified"
   fi
   rm -f "$frontmatter"; trap - EXIT
@@ -450,18 +449,18 @@ if [[ "${1:-}" == --frontmatter-mutations ]]; then
   #     rm -rf.
   backup=$(mktemp -d)
   architect=polytoken/subagents/agent-workflow-architect.md
-  reviewer=polytoken/subagents/reviewer.md
+  lane=polytoken/subagents/review-correctness.md
 
   # Preserve the untouched originals; these are the sole recovery bytes.
   cp "$architect" "$backup/architect.orig"
-  cp "$reviewer"   "$backup/reviewer.orig"
+  cp "$lane"   "$backup/lane.orig"
 
   # Over-written EXIT trap: self-heals any mid-mutation failure via
   # frontmatter_exit_restore, which restores BOTH files independently
   # (records both statuses — a first-restore failure must never prevent the
   # second from running), deletes the backup dir ONLY if both restores verify
   # byte-identical, otherwise preserves it and exits 1 loudly.
-  trap 'frontmatter_exit_restore "$architect" "$backup/architect.orig" "$reviewer" "$backup/reviewer.orig" "$backup"' EXIT
+  trap 'frontmatter_exit_restore "$architect" "$backup/architect.orig" "$lane" "$backup/lane.orig" "$backup"' EXIT
 
   mutation_rejected() {
     persona="$1"
@@ -487,42 +486,37 @@ if [[ "${1:-}" == --frontmatter-mutations ]]; then
   checked_restore "$architect" "$backup/architect.orig"
   echo "frontmatter mutation 1 restored: agent-workflow-architect"
 
-  # --- Mutation 2: drop one of two fallback_models (reviewer) ------------
-  awk '{ if (done || $0 != "  - codex/gpt-5.6-luna") print; else done = 1 }' \
-      "$reviewer" > "$backup/m2.md"
-  if cmp -s "$reviewer" "$backup/m2.md"; then
+  # --- Mutation 2: drop the fallback_models entry (review-correctness) ----
+  awk '{ if (done || $0 != "    - codex/gpt-5.6-luna(high)") print; else done = 1 }' \
+      "$lane" > "$backup/m2.md"
+  if cmp -s "$lane" "$backup/m2.md"; then
     echo "frontmatter mutation 2 had no effect" >&2
     exit 1
   fi
-  mv "$backup/m2.md" "$reviewer"
-  mutation_rejected reviewer
-  checked_restore "$reviewer" "$backup/reviewer.orig"
-  echo "frontmatter mutation 2 restored: reviewer"
+  mv "$backup/m2.md" "$lane"
+  mutation_rejected review-correctness
+  checked_restore "$lane" "$backup/lane.orig"
+  echo "frontmatter mutation 2 restored: review-correctness"
 
-  # --- Mutation 3: same-membership reorder of fallback_models (reviewer) --
-  # Reviewer has two fallbacks; swapping them (same membership, different
-  # order) must be rejected by the order-sensitive fallback comparison.
-  awk '
-    $0 == "  - codex/gpt-5.6-luna" { swap = 1; next }
-    $0 == "  - minime/google_gemma-4-26b-a4b-it" && swap {
-      print "  - minime/google_gemma-4-26b-a4b-it"
-      print "  - codex/gpt-5.6-luna"
-      swap = 0; next
-    }
-    { print }
-  ' "$reviewer" > "$backup/m3.md"
-  if cmp -s "$reviewer" "$backup/m3.md"; then
+  # --- Mutation 3: same-membership reorder of tools (review-correctness) --
+  # The unified lanes pin a single fallback, so fallback_models has no order
+  # to reorder; the same order-sensitive comparison contract is exercised on
+  # the tools array instead (same membership, different order must still be
+  # rejected by the exact-order tools check).
+  awk '{ if ($0 == "  tools: [file_read, glob, grep, skill]") print "  tools: [glob, file_read, grep, skill]"; else print }' \
+      "$lane" > "$backup/m3.md"
+  if cmp -s "$lane" "$backup/m3.md"; then
     echo "frontmatter mutation 3 had no effect" >&2
     exit 1
   fi
-  mv "$backup/m3.md" "$reviewer"
-  mutation_rejected reviewer
-  checked_restore "$reviewer" "$backup/reviewer.orig"
-  echo "frontmatter mutation 3 restored: reviewer"
+  mv "$backup/m3.md" "$lane"
+  mutation_rejected review-correctness
+  checked_restore "$lane" "$backup/lane.orig"
+  echo "frontmatter mutation 3 restored: review-correctness"
 
   # Final belt-and-suspenders verification before EXIT trap cleanup.
   cmp -s "$architect" "$backup/architect.orig" || { echo "final verify failed: agent-workflow-architect" >&2; exit 1; }
-  cmp -s "$reviewer"   "$backup/reviewer.orig"   || { echo "final verify failed: reviewer" >&2; exit 1; }
+  cmp -s "$lane"      "$backup/lane.orig"      || { echo "final verify failed: review-correctness" >&2; exit 1; }
   echo "frontmatter mutation files restored byte-identically"
   exit 0
 fi

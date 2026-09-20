@@ -164,6 +164,35 @@ copy_managed_file() {
   fi
 }
 
+# ---- subagent reconcile: retire installed definitions the repo dropped ----
+# Candidates are installed .md files (any depth) with no repository
+# counterpart — which can include subagents from other sources, so retirement
+# is prompted per file (conflict kind, decline by default), never silent and
+# never under force: force refreshes recommended files but must not delete
+# unmanaged content. Each retired file is moved aside to <name>.bak-$TS with
+# the same backup convention as overwrites, never deleted outright.
+prune_subagents() {
+  [ -d "$DEST/subagents" ] || return 0
+  local candidates=() dst rel
+  while IFS= read -r -d '' dst; do
+    rel="${dst#"$DEST/subagents/"}"
+    [ -f "$ROOT/polytoken/subagents/$rel" ] || candidates+=("$dst")
+  done < <(find "$DEST/subagents" -type f -name '*.md' -print0 2>/dev/null)
+  [ "${#candidates[@]}" -gt 0 ] || return 0
+  if [ "$mode" = force ]; then
+    echo "  note:      ${#candidates[@]} installed subagent definition(s) not in the repository preserved (force mode does not prune)" >&2
+    return 0
+  fi
+  for dst in "${candidates[@]}"; do
+    if prompt_yn "${dst#"$DEST"/} no longer exists in the repository; retire (saved as <name>.bak-$TS)?" conflict; then
+      mv "$dst" "$dst.bak-$TS"
+      echo "  retired:   ${dst#"$DEST"/} (saved to ${dst#"$DEST"/}.bak-$TS)"
+    else
+      echo "  preserved: ${dst#"$DEST"/} (not in repository; kept yours)"
+    fi
+  done
+}
+
 # ---- validated atomic write for structured files ----
 # validate_staged KIND DST STAGED: parse + structural + contextual polytoken
 # validation. Returns nonzero (without touching DST) if STAGED is invalid.
@@ -626,13 +655,16 @@ if [ -d "$ROOT/home/skills" ]; then
     copy_managed_file "$src" "$DEST/skills/$rel"
   done < <(find "$ROOT/home/skills" -type f -print0)
 fi
-# Native Polytoken subagent definitions (top-level managed Markdown only:
-# backups and generated artifacts are never installed).
+# Native Polytoken subagent definitions (recursive reconcile: ships all managed
+# definition Markdown including partials/, then retires installed definitions
+# that no longer exist in the repository — see prune_subagents; backups and
+# non-Markdown artifacts are never installed).
 if [ -d "$ROOT/polytoken/subagents" ]; then
   while IFS= read -r -d '' src; do
     rel="${src#"$ROOT/polytoken/subagents/"}"
     copy_managed_file "$src" "$DEST/subagents/$rel"
-  done < <(find "$ROOT/polytoken/subagents" -maxdepth 1 -type f -name '*.md' -print0)
+  done < <(find "$ROOT/polytoken/subagents" -type f -name '*.md' -print0)
+  prune_subagents
 fi
 # Native Polytoken facet definitions (same top-level *.md discipline).
 if [ -d "$ROOT/polytoken/facets" ]; then

@@ -75,10 +75,12 @@ for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/h
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-expected_subagents="$(printf '%s\n' abstraction-reviewer.md agent-workflow-architect.md agent-workflow-engineer.md code-review-adversarial.md code-review-completeness.md code-review-correctness.md code-review-general.md code-review-maintainability.md completeness-reviewer.md correctness-reviewer.md general-reviewer.md implementer.md maintainability-reviewer.md mobile-app-expert.md researcher.md review-synthesis-verifier.md reviewer.md software-architect.md software-engineer.md validator.md | sort)"
-actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
+expected_subagents="$(printf '%s\n' agent-workflow-architect.md agent-workflow-engineer.md implementer.md mobile-app-expert.md partials/review-contract.md researcher.md review-abstraction.md review-adversarial.md review-completeness.md review-correctness.md review-general.md review-maintainability.md review-synthesis-verifier.md software-architect.md software-engineer.md validator.md | sort)"
+actual_subagents="$(find "$D/subagents" -type f -name '*.md' -printf '%P\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "installed exactly the 20 shipped subagents" || no "installed exactly the 20 shipped subagents"
+  && ok "installed exactly the 15 shipped subagents + shared partial" || no "installed exactly the 15 shipped subagents + shared partial"
+cmp -s "$REPO/polytoken/subagents/partials/review-contract.md" "$D/subagents/partials/review-contract.md" 2>/dev/null \
+  && ok "installed review-contract partial matches source" || no "installed review-contract partial matches source"
 expected_facets="$(printf '%s\n' code-review.md product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
@@ -426,33 +428,34 @@ else
 fi
 rm -rf "$D" "$FAKEHOME"
 
-# --- P23: only top-level *.md definitions install; backups/generated/nested excluded ---
-sc "P23 top-level *.md only -> backups, generated files, and subdirs excluded"
+# --- P23: only *.md definitions install; backups/nested non-definitions excluded, partials ship ---
+sc "P23 *.md reconcile -> backups, swapfiles, and nested non-definitions excluded; partials ship"
 # Scratch install root: real subagent/facet sources plus planted non-definition
-# artifacts that a top-level-only selection must skip.
+# artifacts that the *.md selection must skip.
 S="$(mktemp -d)"
 mkdir -p "$S/scripts"
 cp "$INSTALL_PT" "$S/scripts/install-polytoken.sh"
+cp "$REPO/scripts/code-review-helper.py" "$S/scripts/"
 ln -s "$REPO/home" "$S/home"
 cp -R "$REPO/polytoken" "$S/polytoken"
 printf 'backup junk\n' > "$S/polytoken/subagents/validator.md.bak-20260101-000000"
 mkdir -p "$S/polytoken/subagents/generated"
-printf 'nested junk\n' > "$S/polytoken/subagents/generated/nested.md"
+printf 'nested junk\n' > "$S/polytoken/subagents/generated/nested.txt"
 printf 'swp junk\n' > "$S/polytoken/facets/workflow-designer.md.swp"
 mkdir -p "$S/polytoken/facets/backups"
 printf 'backup junk\n' > "$S/polytoken/facets/backups/workflow-project-manager.md.bak-20260101-000000"
 D="$(mktemp -d)"
 POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 0 >/dev/null
-actual_subagents="$(find "$D/subagents" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
+actual_subagents="$(find "$D/subagents" -type f -name '*.md' -printf '%P\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "top-level-only: subagent inventory still exactly 20" || no "top-level-only: subagent inventory still exactly 20"
+  && ok "reconcile: subagent inventory still exactly 15 + partial" || no "reconcile: subagent inventory still exactly 15 + partial"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
   && ok "top-level-only: facet inventory still exactly 5" || no "top-level-only: facet inventory still exactly 5"
 [ ! -e "$D/subagents/validator.md.bak-20260101-000000" ] \
-  && ok "top-level-only: subagent backup not installed" || no "top-level-only: subagent backup not installed"
+  && ok "reconcile: subagent backup not installed" || no "reconcile: subagent backup not installed"
 [ ! -e "$D/subagents/generated" ] \
-  && ok "top-level-only: subagent subdirectory not installed" || no "top-level-only: subagent subdirectory not installed"
+  && ok "reconcile: nested non-definition directory not installed" || no "reconcile: nested non-definition directory not installed"
 [ ! -e "$D/facets/workflow-designer.md.swp" ] \
   && ok "top-level-only: facet swapfile not installed" || no "top-level-only: facet swapfile not installed"
 [ ! -e "$D/facets/backups" ] \
@@ -540,6 +543,57 @@ has "$out" "unchanged: subagents/implementer.md" "second run reports subagent un
 has "$out" "unchanged: facets/workflow-designer.md" "second run reports first facet unchanged"
 has "$out" "unchanged: facets/workflow-project-manager.md" "second run reports workflow-project-manager unchanged"
 rm -rf "$D"
+
+# --- P27: recursive reconcile ships partials and retires planted orphans ---
+sc "P27 reconcile -> partial ships on upgrade; orphan retired on confirm, preserved on decline"
+# Scratch install root: real polytoken tree (the repo itself must not grow the
+# planted orphans the prune scenarios need).
+S="$(mktemp -d)"
+mkdir -p "$S/scripts"
+cp "$INSTALL_PT" "$S/scripts/install-polytoken.sh"
+cp "$REPO/scripts/code-review-helper.py" "$S/scripts/"
+ln -s "$REPO/home" "$S/home"
+cp -R "$REPO/polytoken" "$S/polytoken"
+D="$(mktemp -d)"
+# Run 1 (notty): fresh install ships the full pool including the partial.
+POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 0 >/dev/null
+[ -f "$D/subagents/partials/review-contract.md" ] \
+  && ok "reconcile: shared partial installed" || no "reconcile: shared partial installed"
+cmp -s "$S/polytoken/subagents/partials/review-contract.md" "$D/subagents/partials/review-contract.md" \
+  && ok "reconcile: installed partial matches source bytes" || no "reconcile: installed partial matches source bytes"
+# Simulate an upgrade from the retired pool: plant two orphans that look like
+# previously-managed definitions (arbitrary non-repo names — the prune is
+# name-agnostic; retired-name realism is covered by the T3 migration
+# rehearsal, not by fixtures in this repo).
+printf 'old lane definition bytes\n' > "$D/subagents/retired-lane-a.md"
+printf 'old lane definition bytes\n' > "$D/subagents/retired-lane-b.md"
+# Run 2 (interactive, two 'y' lines): retirement is prompted per orphan (both
+# managed files are unchanged and the fresh structured merges prompted
+# nothing), so two TTY lines confirm both retirements deterministically.
+TTY="$(mktemp)"; printf 'y\ny\n' > "$TTY"
+out2="$(POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY="$TTY" bash "$S/scripts/install-polytoken.sh" 0 2>&1)"
+[ ! -e "$D/subagents/retired-lane-a.md" ] \
+  && ok "reconcile: confirmed orphan retired (retired-lane-a.md removed)" || no "reconcile: confirmed orphan retired (retired-lane-a.md removed)"
+ls "$D"/subagents/retired-lane-a.md.bak-* >/dev/null 2>&1 \
+  && ok "reconcile: retired orphan backed up as .bak" || no "reconcile: retired orphan backed up as .bak"
+has "$out2" "retired:   subagents/retired-lane-a.md" "reconcile: retirement reported loudly"
+ls "$D"/subagents/retired-lane-b.md.bak-* >/dev/null 2>&1 \
+  && ok "reconcile: per-file prompt retired the second orphan with backup" || no "reconcile: per-file prompt retired the second orphan with backup"
+[ -f "$D/subagents/review-correctness.md" ] \
+  && ok "reconcile: managed definitions untouched by prune" || no "reconcile: managed definitions untouched by prune"
+# Run 3 (notty): non-interactive installs decline the conflict prompt, so a
+# newly planted orphan is preserved and reported, never silently deleted.
+printf 'old lane bytes\n' > "$D/subagents/retired-lane-c.md"
+out3="$(POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 0 2>&1)"
+[ -f "$D/subagents/retired-lane-c.md" ] \
+  && ok "reconcile: non-interactive run preserves orphan" || no "reconcile: non-interactive run preserves orphan"
+has "$out3" "preserved: subagents/retired-lane-c.md" "reconcile: preservation reported loudly"
+# Run 4 (force): force refreshes recommended files but must not prune.
+out4="$(POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 1 2>&1)"
+[ -f "$D/subagents/retired-lane-c.md" ] \
+  && ok "reconcile: force mode preserves orphan" || no "reconcile: force mode preserves orphan"
+has "$out4" "force mode does not prune" "reconcile: force-mode skip reported"
+rm -rf "$D" "$S" "$TTY"
 
 # --- PN: notify-only install modes ($2: empty | notify | notify-container) ---
 # Hard-coded expected name sets (NOT derived from source): a rename in

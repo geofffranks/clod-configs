@@ -348,16 +348,15 @@ run_inventory() {
       && ok "$(basename "$f"): body starts with the facet base transclusion" \
       || no "$(basename "$f"): body starts with the facet base transclusion (got: $head)"
   done
-  sc "managed source subagent inventory (20)"
+  sc "managed source subagent inventory (15)"
   local actual expected
-  expected="$(printf '%s\n' abstraction-reviewer agent-workflow-architect agent-workflow-engineer \
-    code-review-adversarial code-review-completeness code-review-correctness code-review-general \
-    code-review-maintainability completeness-reviewer correctness-reviewer general-reviewer implementer \
-    maintainability-reviewer mobile-app-expert researcher review-synthesis-verifier reviewer \
+  expected="$(printf '%s\n' agent-workflow-architect agent-workflow-engineer implementer \
+    mobile-app-expert researcher review-abstraction review-adversarial review-completeness \
+    review-correctness review-general review-maintainability review-synthesis-verifier \
     software-architect software-engineer validator | sort)"
   actual="$(find "$SUBAGENTS_SRC" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sed 's/\.md$//' | sort)"
-  [ "$actual" = "$expected" ] && ok "20 managed subagent definitions present" \
-    || { no "20 managed subagent definitions present"; diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | sed 's/^/       /'; }
+  [ "$actual" = "$expected" ] && ok "15 managed subagent definitions present" \
+    || { no "15 managed subagent definitions present"; diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | sed 's/^/       /'; }
 }
 
 # =====================================================================
@@ -671,7 +670,7 @@ run_docs() {
     grep -Fq "$t" "$README" && ok "README: workflow contract mentions $t" \
       || no "README: workflow contract mentions $t"
   done
-  for f in "$SUBAGENTS_SRC/validator.md" "$SUBAGENTS_SRC/reviewer.md" "$SUBAGENTS_SRC/agent-workflow-architect.md"; do
+  for f in "$SUBAGENTS_SRC/validator.md" "$SUBAGENTS_SRC/review-general.md" "$SUBAGENTS_SRC/agent-workflow-architect.md"; do
     grep -Fq 'source_revision' "$f" && grep -Fq 'scope_id' "$f" && grep -Fq 'evidence' "$f" \
       && ok "$(basename "$f"): revision-bound evidence contract" \
       || no "$(basename "$f"): revision-bound evidence contract"

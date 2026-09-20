@@ -98,7 +98,7 @@ PYTHONPYCACHEPREFIX="$T/pycache" python3 -m py_compile "$H"; test -e "$T/pycache
 
 # Review contract assertions: explicit impact context is present in every lane,
 # verifier, and rendered-report guidance; vague placeholders are forbidden.
-for f in polytoken/subagents/code-review-adversarial.md polytoken/subagents/code-review-correctness.md polytoken/subagents/code-review-completeness.md polytoken/subagents/code-review-general.md polytoken/subagents/code-review-maintainability.md polytoken/subagents/review-synthesis-verifier.md; do
+for f in polytoken/subagents/partials/review-contract.md polytoken/subagents/review-synthesis-verifier.md; do
   grep -q 'impact_if_unfixed' "$f" || bad "missing impact_if_unfixed: $f"
   grep -q 'triggering_use_cases' "$f" || bad "missing triggering_use_cases: $f"
   grep -q 'affected_scope' "$f" || bad "missing affected_scope: $f"
@@ -115,7 +115,20 @@ for f in home/skills/code-review-reporting/SKILL.md polytoken/facets/code-review
   grep -q 'Affected scope' "$f" || bad "missing rendered scope heading: $f"
   ok "report headings and concrete guidance: $f"
 done
-for f in home/skills/code-review-evidence/SKILL.md polytoken/subagents/code-review-adversarial.md polytoken/subagents/review-synthesis-verifier.md home/skills/code-review-reporting/SKILL.md; do
+for f in home/skills/code-review-evidence/SKILL.md polytoken/subagents/partials/review-contract.md polytoken/subagents/review-synthesis-verifier.md home/skills/code-review-reporting/SKILL.md; do
   grep -Eq 'vague|placeholders|speculative|unsupported' "$f" || bad "missing vague/speculative rejection guidance: $f"
 done
+# Unified-exit backstop: the shared partial transcluded by every review lane
+# must carry the identity-echo requirements, the rich per-finding mandate, and
+# the unified verdict vocabulary. The exit_tool validator accepts schema
+# conditionals (if/then) but runtime enforcement is not separately exercised,
+# so these assertion-level checks are the named machine backstop.
+P=polytoken/subagents/partials/review-contract.md
+for s in 'scope_id' 'source_revision' 'review_run_id' 'snapshot_digest' 'head_sha' 'approved' 'needs_fixes' 'blocked'; do
+  grep -q "$s" "$P" || bad "missing identity/verdict echo '$s' in $P"
+done
+for s in 'impact_if_unfixed' 'triggering_use_cases' 'affected_scope' 'provenance'; do
+  grep -q "$s" "$P" || bad "missing rich-field mandate '$s' in $P"
+done
+ok unified-exit-backstop
 ok review-contract-assertions
