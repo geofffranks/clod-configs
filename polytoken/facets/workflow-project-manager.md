@@ -131,8 +131,10 @@ List each required reviewer, its one primary question or requested result,
 named evidence, and explicit exclusions. Do not dispatch a reviewer outside the
 manifest. Every workflow plan is reviewed by `agent-workflow-architect`. Any
 change involving shell scripts, hooks, harness lifecycle, installer behavior,
-or workflow wiring also requires `correctness-reviewer` and
-`completeness-reviewer`. Additional reviewers require a distinct unresolved
+or workflow wiring also requires `review-correctness` and
+`review-completeness`. Review lanes return `approved`, `needs_fixes`, or
+`blocked`; `blocked` is reserved for snapshot-mode identity and evidence
+failures, so bounded dispatches keep the `approved`/`needs_fixes` vocabulary. Additional reviewers require a distinct unresolved
 question and a written reason their result could change the implementation or
 validation decision.
 

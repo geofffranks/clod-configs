@@ -14,7 +14,7 @@ Workers receive the pinned manifest and captured artifacts, never remote access.
 
 ## Review lanes and evidence
 
-Five independent read-only lanes cover adversarial/security, correctness, completeness, maintainability/boundaries, and general/specification gaps. A fresh synthesis verifier checks every proposed claim against pinned base/head source and captured metadata. Candidate records carry stable IDs, lane and run identity, exact anchors or explicit non-line anchors, observations, distinct `impact_if_unfixed` (what happens if left unfixed), `triggering_use_cases` (concrete reproduction conditions), `affected_scope`, compatibility `impact`/`scenario` summaries, suggested fix, requirement reference, limitations, and provenance. Vague placeholders such as “bug” or “edge case” are insufficient. Provenance is `introduced`, `pre_existing`, `mixed_or_exposed`, or `uncertain`; severity (`critical`, `high`, `medium`, `low`) is separate from confidence.
+Six independent read-only lanes cover adversarial/security, correctness, completeness, maintainability/boundaries, general/specification gaps, and abstraction/ownership. A fresh synthesis verifier checks every proposed claim against pinned base/head source and captured metadata. Candidate records carry stable IDs, lane and run identity, exact anchors or explicit non-line anchors, observations, distinct `impact_if_unfixed` (what happens if left unfixed), `triggering_use_cases` (concrete reproduction conditions), `affected_scope`, compatibility `impact`/`scenario` summaries, suggested fix, requirement reference, limitations, and provenance. Vague placeholders such as “bug” or “edge case” are insufficient. Provenance is `introduced`, `pre_existing`, `mixed_or_exposed`, or `uncertain`; severity (`critical`, `high`, `medium`, `low`) is separate from confidence.
 
 Likely duplicate grouping is only a proposal. Verification retains originating candidate IDs, coalesces equivalent root causes, distinguishes separate occurrences, and rejects unsupported claims. Consensus is not proof.
 
@@ -26,7 +26,7 @@ One append-only record per review scope stores prior identity, latest reviewed h
 
 ## Deterministic bounds and digest
 
-The helper allows at most 3 acquisition attempts, 2 base/head rechecks, 100 pages, and 10 MiB of materialized snapshot bytes. If the live concurrency limit is unknown, dispatch bounded waves of at most five lanes, or sequentially, and record that limitation. The snapshot digest is SHA-256 over compact UTF-8 canonical JSON manifest bytes (sorted keys, excluding `snapshot_digest`) followed by lexicographically ordered artifact path bytes and exact artifact bytes. Each run is isolated at `snapshot/<review_run_id>/`; base and head text artifacts are materialized there, while excluded/binary/LFS/submodule/generated/oversized files remain explicitly marked in the inventory.
+The helper allows at most 3 acquisition attempts, 2 base/head rechecks, 100 pages, and 10 MiB of materialized snapshot bytes. If the live concurrency limit is unknown, dispatch bounded waves of at most six lanes, or sequentially, and record that limitation. The snapshot digest is SHA-256 over compact UTF-8 canonical JSON manifest bytes (sorted keys, excluding `snapshot_digest`) followed by lexicographically ordered artifact path bytes and exact artifact bytes. Each run is isolated at `snapshot/<review_run_id>/`; base and head text artifacts are materialized there, while excluded/binary/LFS/submodule/generated/oversized files remain explicitly marked in the inventory.
 
 The journal is JSONL: one canonical JSON event per line, one atomic append/write, trailing newline required, and every event references its review run. A valid prefix may be read, but truncated tails and corrupt records block reconciliation; no repair or truncation is implicit.
 
@@ -37,7 +37,7 @@ The journal is JSONL: one canonical JSON event per line, one atomic append/write
 | AC.1 | Definitions, inventories, and schemas validate | facet/subagent harness |
 | AC.2 | Effective tools expose coordinator/worker boundaries | isolated daemon when available |
 | AC.3 | Complete immutable snapshot and stable identity | helper behavioral fixtures; live gh optional |
-| AC.4 | Five lanes plus verifier and ranked report | workflow walkthrough/fixture |
+| AC.4 | Six lanes plus verifier and ranked report | workflow walkthrough/fixture |
 | AC.5 | Verification, provenance, and coalescing | candidate/finding fixtures |
 | AC.6 | Follow-up guards and changed-hunk targeting | helper follow-up fixtures |
 | AC.7 | Missing/stale/corrupt evidence blocks | negative helper fixtures |

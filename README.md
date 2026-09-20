@@ -227,8 +227,8 @@ repository code by default. Immutable snapshots, append-only journals, and
 local reports live under
 `~/.local/share/polytoken/code-review/<canonical-host>/<owner>/<repo>/<scope_id>/`.
 
-Five independent read-only lanes — adversarial, correctness, completeness,
-maintainability, and general — inspect the pinned snapshot, followed by a fresh
+Six independent read-only lanes — adversarial, correctness, completeness,
+maintainability, general, and abstraction — inspect the pinned snapshot, followed by a fresh
 `review-synthesis-verifier`. Findings preserve exact evidence, severity,
 confidence, and provenance, with PR-actionable and pre-existing findings in
 separate ranked buckets. Missing, stale, truncated, unverifiable, or failed
@@ -373,9 +373,9 @@ files.
   tool remains available for structured searches (multiple roots, `include`,
   `context_lines`).
 - **Subagent hook probes are unavailable in this environment.** The installed
-  controller rejected both implementer and reviewer probes before session
+  controller rejected both implementer and review-lane probes before session
   creation because those facets were unregistered, so ordinary subagent hook
-  execution could not be tested. The implementer/reviewer prompt contracts
+  execution could not be tested. The implementer/review-lane prompt contracts
   retain the bounded-search and ranged-read protections as the supported guard.
 
 ## Merge behavior

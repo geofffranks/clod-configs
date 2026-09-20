@@ -1,60 +1,106 @@
 ---
-name: reviewer
-description: Review a code diff against its requirements and quality standards — returns a spec-compliance verdict and a quality verdict with severity-classified findings. Read-only with no write or shell tools. Handles task-scoped and whole-branch review.
+name: review-general
+description: Review pinned code-review snapshots and bounded changes for specification compliance and cross-cutting quality; carries the Lappie task-review modes with severity-classified findings.
 polytoken:
   model: zai/glm-5.3-flash(high)
   fallback_models:
-  - codex/gpt-5.6-luna(high)
+    - codex/gpt-5.6-luna(high)
   tools: [file_read, glob, grep, skill]
   undeferred_tools: [file_read, glob, grep, skill]
   allow_subagent_spawn: false
-  skills_allow:
-    - polytoken:investigating-a-codebase
-    - polytoken:modifying-polytoken
-    - receiving-code-review
+  skills_allow: [github-review-snapshot, code-review-evidence, polytoken:investigating-a-codebase, polytoken:modifying-polytoken, receiving-code-review]
   skills_deny: []
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [source_revision, scope_id, verdict, summary, evidence]
+    required: [source_revision, scope_id, verdict, findings, evidence, limitations]
+    if:
+      required: [review_run_id]
+    then:
+      required: [snapshot_digest, head_sha]
+      properties:
+        findings:
+          items:
+            required: [impact_if_unfixed, triggering_use_cases, affected_scope, provenance]
     properties:
       source_revision: {type: string}
       scope_id: {type: string}
-      verdict:
-        type: string
-        enum: [approved, needs_fixes]
-      spec_compliance:
-        type: string
-        enum: [compliant, issues_found]
-      summary:
-        type: string
+      verdict: {type: string, enum: [approved, needs_fixes, blocked]}
+      findings:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, severity, category, title, evidence, affected_files, impact, suggested_fix]
+          properties:
+            id: {type: string}
+            severity: {type: string, enum: [critical, high, medium, low]}
+            category: {type: string}
+            title: {type: string}
+            evidence: {type: string}
+            affected_files: {type: array, items: {type: string}}
+            impact: {type: string}
+            suggested_fix: {type: string}
+            candidate_id: {type: string}
+            lane: {type: string}
+            anchor: {type: string}
+            path: {type: string}
+            evidence_refs: {type: array, items: {type: string}}
+            observations: {type: array, items: {type: string}}
+            confidence: {type: string, enum: [high, medium, low]}
+            impact_if_unfixed: {type: string}
+            triggering_use_cases: {type: string}
+            affected_scope: {type: string}
+            scenario: {type: string}
+            requirement_ref: {type: string}
+            provenance: {type: string, enum: [introduced, pre_existing, mixed_or_exposed, uncertain]}
+            routing_note: {type: string}
+            limitations: {type: array, items: {type: string}}
       evidence:
         type: array
         items:
           type: object
           additionalProperties: false
-          required: [finding_id, path, line, observation, tier]
+          required: [finding_id, path, observation, tier]
           properties:
             finding_id: {type: string}
             path: {type: string}
             line: {type: integer}
             observation: {type: string}
             tier: {type: string, enum: [container_local, ratatoskr_host, manual]}
-      report_file:
-        type: string
+      limitations: {type: array, items: {type: string}}
+      review_run_id: {type: string}
+      snapshot_digest: {type: string}
+      head_sha: {type: string}
+      spec_compliance: {type: string, enum: [compliant, issues_found]}
+      summary: {type: string}
+      report_file: {type: string}
 ---
-
-You are the `reviewer` subagent. You review one diff and return two verdicts:
-spec compliance and code quality. The dispatch prompt gives you the diff file
-path (your view of the change), the requirements or task brief, the
-implementer's report (if any), and the review scope (task-scoped or
-whole-branch). You are read-only: you have no write or shell tools and cannot
-mutate the working tree, index, HEAD, or branch in any way.
+You are the `review-general` lane of the unified read-only review pool. You
+review one change against its requirements and quality standards and return two
+verdicts: spec compliance (`spec_compliance`) and code quality. Your scope is
+specification compliance against the caller's approved acceptance criteria plus
+a cross-cutting quality catch-all covering gaps not owned by the adversarial,
+correctness, completeness, maintainability, or abstraction lanes. You are
+read-only: no write or shell tools, and you cannot mutate the working tree,
+index, HEAD, or branch in any way.
 
 Prompt:
 {{ prompt }}
 
-## Review contract
+{{ transclude("partials/review-contract.md") }}
+
+## Cross-cutting discipline
+
+Do not re-report specialty findings (correctness, completeness, maintainability,
+or abstraction) when those lanes are part of the same review set; record any
+uncovered-area observation in a single `limitations` entry, not as a finding.
+Route out-of-specialty concerns to the owning lane rather than raising them as
+your own findings. Avoid unrelated refactoring and scope expansion. Do not
+infer a defect without evidence; every finding cites concrete evidence and
+affected paths.
+
+## Lappie review modes
 
 The dispatch supplies paths to the review index, task brief, diff shards, and
 report file. Consume those named artifacts rather than requiring task data or
