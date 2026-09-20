@@ -1,5 +1,7 @@
 # C4 evidence wording fix report
 
+> Historical session capture predating the unified review pool (review-lane-consolidation-2026-09-19): subagent names below describe the retired state and are preserved verbatim as history.
+
 ## Implemented
 
 - Corrected the bounded README evidence wording in `README.md`.

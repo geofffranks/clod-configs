@@ -1,5 +1,7 @@
 # C4 final-review fix batch report
 
+> Historical session capture predating the unified review pool (review-lane-consolidation-2026-09-19): subagent names and shipped-definition counts below describe the retired state and are preserved verbatim as history.
+
 ## Implemented
 
 - Tightened `home/grep-guard/hook.sh` canonical validation so `max_results` must be an integer from 1 through 20. Adapter malformed-input handling remains unchanged, and canonical denials do not rewrite input.

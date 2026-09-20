@@ -131,4 +131,15 @@ for s in 'impact_if_unfixed' 'triggering_use_cases' 'affected_scope' 'provenance
   grep -q "$s" "$P" || bad "missing rich-field mandate '$s' in $P"
 done
 ok unified-exit-backstop
+# Render-resolution guard: every unified lane must transclude the shared
+# partial via a path that exists inside polytoken/subagents/ (validate does
+# not render bodies, so a missing/renamed partial would otherwise pass every
+# suite and only surface as an unrendered contract at dispatch).
+for lane in polytoken/subagents/review-adversarial.md polytoken/subagents/review-correctness.md polytoken/subagents/review-completeness.md polytoken/subagents/review-maintainability.md polytoken/subagents/review-general.md polytoken/subagents/review-abstraction.md; do
+  line=$(grep -o 'transclude("[^"]*")' "$lane" | head -1)
+  [ -n "$line" ] || bad "no transclude directive: $lane"
+  rel=$(sed 's/^transclude("//; s/")$//' <<<"$line")
+  [ -f "polytoken/subagents/$rel" ] || bad "transclude target missing: $lane -> $rel"
+done
+ok transclude-resolution-guard
 ok review-contract-assertions

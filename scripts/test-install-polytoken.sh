@@ -563,8 +563,11 @@ cmp -s "$S/polytoken/subagents/partials/review-contract.md" "$D/subagents/partia
   && ok "reconcile: installed partial matches source bytes" || no "reconcile: installed partial matches source bytes"
 # Simulate an upgrade from the retired pool: plant two orphans that look like
 # previously-managed definitions (arbitrary non-repo names — the prune is
-# name-agnostic; retired-name realism is covered by the T3 migration
-# rehearsal, not by fixtures in this repo).
+# name-agnostic, so these fixtures prove the retire/preserve/force mechanics
+# only; retirement of the real retired filenames was exercised in the
+# implementer's live-config migration and is recorded in the execution
+# journal, not re-enacted here because AC.7 keeps retired names out of this
+# repo's tracked files).
 printf 'old lane definition bytes\n' > "$D/subagents/retired-lane-a.md"
 printf 'old lane definition bytes\n' > "$D/subagents/retired-lane-b.md"
 # Run 2 (interactive, two 'y' lines): retirement is prompted per orphan (both

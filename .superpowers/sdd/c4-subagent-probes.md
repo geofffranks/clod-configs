@@ -1,5 +1,7 @@
 # C4 subagent hook probes
 
+> Historical session capture predating the unified review pool (review-lane-consolidation-2026-09-19): subagent names and installer counts below describe the retired state and are preserved verbatim as history.
+
 Date: 2026-07-18
 Worktree: `/home/dev/workspace/.worktrees/cc-7zn9-polytoken-context-guards-c2`
 
