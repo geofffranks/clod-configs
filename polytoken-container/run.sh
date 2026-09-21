@@ -232,6 +232,13 @@ set -u
 # container this launch created; never any other running container).
 NAME_FLAGS=()
 [[ -n "${POLY_CONTAINER_NAME:-}" ]] && NAME_FLAGS=(--name "$POLY_CONTAINER_NAME")
+# Bridge spawns set POLY_SPAWN_HEADLESS=1: run the session headless
+# (`new --no-attach`). The bridge pty is a drain, not a terminal emulator —
+# it cannot answer TUI terminal queries, and the cursor-position query
+# timeout kills the container (observed live). Manual runs keep the TUI;
+# re-attach later with `polytoken attach`.
+HEADLESS_FLAGS=()
+[[ -n "${POLY_SPAWN_HEADLESS:-}" ]] && HEADLESS_FLAGS=(new --no-attach)
 podman run --rm -it --init \
   ${NAME_FLAGS[@]+"${NAME_FLAGS[@]}"} \
   -e TERM="${TERM:-xterm-256color}" \
@@ -240,4 +247,4 @@ podman run --rm -it --init \
   "${MOUNTS[@]}" \
   -w "$CWD" \
   "$IMAGE:$TAG" \
-  ${cmd} "$@"
+  ${cmd} ${HEADLESS_FLAGS[@]+"${HEADLESS_FLAGS[@]}"} "$@"
