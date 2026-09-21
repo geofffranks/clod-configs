@@ -3,11 +3,25 @@ name: review-synthesis-verifier
 description: Fresh-context verifier that validates proposed code-review claims against pinned source and captured metadata.
 polytoken:
   model: zai/glm-5.3-flash(high)
-  fallback_models: [codex/gpt-5.6-luna(high)]
-  tools: [file_read, glob, grep, skill]
-  undeferred_tools: [file_read, glob, grep, skill]
+  fallback_models: 
+  - codex/gpt-5.6-luna(high)
+  tools: 
+  - file_read
+  - glob
+  - grep
+  - skill
+  undeferred_tools: 
+  - file_read
+  - glob
+  - grep
+  - skill
   allow_subagent_spawn: false
-  skills_allow: [github-review-snapshot, code-review-evidence, code-review-reporting]
+  skills_allow: 
+  - github-review-snapshot
+  - code-review-evidence
+  - polytoken:investigating-a-codebase
+  - polytoken:modifying-polytoken
+  - receiving-code-review
   skills_deny: []
   exit_tool_schema:
     type: object

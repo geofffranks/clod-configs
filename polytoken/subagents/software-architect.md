@@ -3,7 +3,8 @@ name: software-architect
 description: Advise on software boundaries, contracts, data flow, lifecycle, migration, recovery, feasibility, alternatives, and plan risks. Read-only.
 polytoken:
   model: codex/gpt-6-astra(low)
-  fallback_models: []
+  fallback_models:
+  - zai/glm-5.3-flash
   tools: [file_read, glob, grep, skill]
   undeferred_tools: [file_read, glob, grep, skill]
   allow_subagent_spawn: false
