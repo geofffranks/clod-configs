@@ -232,13 +232,26 @@ set -u
 # container this launch created; never any other running container).
 NAME_FLAGS=()
 [[ -n "${POLY_CONTAINER_NAME:-}" ]] && NAME_FLAGS=(--name "$POLY_CONTAINER_NAME")
-# Bridge spawns set POLY_SPAWN_HEADLESS=1: run the session headless
-# (`new --no-attach`). The bridge pty is a drain, not a terminal emulator —
-# it cannot answer TUI terminal queries, and the cursor-position query
-# timeout kills the container (observed live). Manual runs keep the TUI;
+# Bridge spawns set POLY_SPAWN_HEADLESS=1: run the session headless — the
+# bridge pty is a drain, not a terminal emulator, and cannot answer TUI
+# terminal queries (a cursor-position query timeout killed the container).
+# `new --no-attach` forks the daemon and exits, and as the container's PID 1
+# that tears everything down seconds after start (observed live: session id
+# printed, container gone, connector never registered). So start the
+# session, then hold PID 1 on the daemon's port: while the daemon lives the
+# container lives; when it dies the container exits non-zero and the bridge
+# reports the failure instead of pending forever. Manual runs keep the TUI;
 # re-attach later with `polytoken attach`.
 HEADLESS_FLAGS=()
-[[ -n "${POLY_SPAWN_HEADLESS:-}" ]] && HEADLESS_FLAGS=(new --no-attach)
+if [[ -n "${POLY_SPAWN_HEADLESS:-}" ]]; then
+  HEADLESS_FLAGS=(bash -c 'out=$(/usr/local/bin/polytoken-rt new --no-attach) || exit 1
+printf "%s\n" "$out"
+port=$(printf "%s" "$out" | grep -oE "port=[0-9]+" | head -1 | cut -d= -f2)
+[[ -n "$port" ]] || { echo "run.sh: polytoken printed no port; cannot supervise" >&2; exit 1; }
+while curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$port"; do sleep 2; done
+echo "run.sh: headless daemon on port $port died" >&2
+exit 1')
+fi
 podman run --rm -it --init \
   ${NAME_FLAGS[@]+"${NAME_FLAGS[@]}"} \
   -e TERM="${TERM:-xterm-256color}" \
