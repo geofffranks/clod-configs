@@ -244,7 +244,11 @@ NAME_FLAGS=()
 # re-attach later with `polytoken attach`.
 HEADLESS_FLAGS=()
 if [[ -n "${POLY_SPAWN_HEADLESS:-}" ]]; then
-  HEADLESS_FLAGS=(bash -c 'out=$(/usr/local/bin/polytoken-rt new --no-attach) || exit 1
+  # The wrapper REPLACES the container command: leaving cmd=polytoken-rt
+  # would hand 'bash' to polytoken as a subcommand (observed: "unrecognized
+  # subcommand 'bash'"). Manual runs keep cmd=polytoken-rt.
+  cmd=bash
+  HEADLESS_FLAGS=(-c 'out=$(/usr/local/bin/polytoken-rt new --no-attach) || exit 1
 printf "%s\n" "$out"
 port=$(printf "%s" "$out" | grep -oE "port=[0-9]+" | head -1 | cut -d= -f2)
 [[ -n "$port" ]] || { echo "run.sh: polytoken printed no port; cannot supervise" >&2; exit 1; }
