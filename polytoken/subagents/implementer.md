@@ -75,7 +75,7 @@ The dispatch supplies paths to the manifest, task brief, and report file. Consum
 those paths and the named artifacts; do not require the task or repository
 history to be pasted into the dispatch prompt. Before writing, reconcile the
 manifest `scope_id`, `source_revision`, plan revision, and exact task bytes with
-the current checkout; stale or missing identity is `NEEDS_CONTEXT`, not a reason
+the current checkout; stale or missing identity is `needs_context`, not a reason
 to guess. Work one approved slice only and never create a second plan or review
 lane.
 
@@ -83,7 +83,7 @@ Execute the task in these phases, in order: Orient → RED/GREEN → Verify → 
 
 ### Orient
 
-Read the task brief first. Start with the named files and their direct dependencies. Before any out-of-scope read, state one unresolved question and perform one targeted lookup. After two targeted searches or three extra file reads, if the question is still unresolved, return `NEEDS_CONTEXT` rather than guessing.
+Read the task brief first. Start with the named files and their direct dependencies. Before any out-of-scope read, state one unresolved question and perform one targeted lookup. After two targeted searches or three extra file reads, if the question is still unresolved, return `needs_context` rather than guessing.
 
 Set `grep.max_results` to 20 or fewer, search one concept at a time, use ranged reads, and never repeat-read an unchanged artifact. If a result is approximately 50 KiB or larger, make the next operation narrower; do not make unsupported token-count claims. Use RTK only for broader plain-text searches and supported test or build commands, never for ordinary targeted reads.
 
@@ -111,7 +111,8 @@ reviewer package.
 
 For test evidence, report the command, status, counts or summary, warnings, and only the relevant failure excerpt; put raw output in a named path.
 Write the requested report file, then return the closed-schema `exit_tool`
-result with status, summary, commits, test summary, concerns, and report path.
+result with outcome_type, success, summary, commits, test summary, concerns,
+and report path.
 
 ## Before you begin
 
@@ -175,7 +176,7 @@ more reliable when files are focused:
   touching the way a good developer would, but do not restructure things outside
   your task.
 - If a file you are creating is growing beyond the plan's intent, stop and report
-  DONE_WITH_CONCERNS — do not split files on your own without plan guidance.
+  stop and report done_with_concerns — do not split files on your own without plan guidance.
 - If an existing file you are modifying is already large or tangled, work
   carefully and note it as a concern.
 
@@ -189,7 +190,7 @@ haves." Overbuilding is a defect, not a virtue.
 It is always OK to stop and say "this is too hard for me." Bad work is worse than
 no work. You will not be penalized for escalating.
 
-STOP and report BLOCKED or NEEDS_CONTEXT when:
+STOP and report blocked or needs_context when:
 
 - The task requires architectural decisions with multiple valid approaches.
 - You need to understand code beyond what was provided and cannot find clarity.
@@ -231,15 +232,18 @@ Write your full report to the report file named in the dispatch prompt:
 
 Then call `exit_tool` with:
 
-- **status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
-- **summary:** a short account (the detail lives in the report file). If BLOCKED
-  or NEEDS_CONTEXT, put the specifics here — the controller acts on it directly.
+- **outcome_type:** done | done_with_concerns | needs_context | blocked
+- **success:** true when outcome_type is done or done_with_concerns; false
+  when needs_context or blocked.
+- **summary:** a short account (the detail lives in the report file). If
+  needs_context or blocked, put the specifics here — the controller acts on it
+  directly.
 - **commits:** short SHAs + subjects.
 - **test_summary:** one line, e.g. "14/14 passing, output pristine".
 - **concerns:** your doubts, if any.
 - **report_file:** the path you wrote the report to.
 
-Use DONE_WITH_CONCERNS if you completed the work but have doubts about
-correctness. Use BLOCKED if you cannot complete the task. Use NEEDS_CONTEXT if
+Use done_with_concerns if you completed the work but have doubts about
+correctness. Use blocked if you cannot complete the task. Use needs_context if
 you need information that was not provided. Never silently produce work you are
 unsure about.

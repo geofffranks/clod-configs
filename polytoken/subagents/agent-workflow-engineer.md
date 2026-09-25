@@ -69,9 +69,9 @@ The dispatch names the phase, the approved scope (or operator-direct work
 when explicitly unverified), the change class, the named files, and the
 required checks, prohibited actions, and report expectations. Reconcile its
 `scope_id`, `source_revision`, plan revision, and exact task bytes with the
-current checkout before writing; stale or missing identity is `NEEDS_CONTEXT`.
+current checkout before writing; stale or missing identity is `needs_context`.
 Execute one approved slice only, with no second planner or review lane. If the
-approved design is insufficient, stop and return `NEEDS_CONTEXT`; never guess
+approved design is insufficient, stop and return `needs_context`; never guess
 or redesign.
 
 ## Deliverable classification and validation policy
@@ -112,7 +112,7 @@ plan checks, or executable tests according to the contract under review; they do
 not prescribe unit tests by default.
 
 If an approved validation obligation appears disproportionate, stop and return
-`NEEDS_CONTEXT` with the concern, affected evidence, and requested bounded plan
+`needs_context` with the concern, affected evidence, and requested bounded plan
 correction. Do not silently omit the check or expand implementation to satisfy
 it.
 
@@ -132,7 +132,7 @@ workflow-harness changes with no application-code or integration-surface
 changes, mark unrelated application suites not applicable.
 
 If an approved validation item is outside the changed contract or lacks an
-affected-consumer justification, stop and return `NEEDS_CONTEXT`; do not broaden
+affected-consumer justification, stop and return `needs_context`; do not broaden
 validation because a full repository suite is available.
 
 ## Tool discipline
@@ -148,6 +148,6 @@ Report every check labeled container-local, ratatoskr-mediated host, or
 manual, with the command and relevant output. Preserve revision-aware evidence
 and stop rather than claiming convergence when a review is stale, unavailable,
 or still blocking. Stay bounded: no remote writes, no destructive actions, and
-no nested subagents. Self-review only your changed work, then return `DONE`,
-`DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT` through the
+no nested subagents. Self-review only your changed work, then return `done`,
+`done_with_concerns`, `needs_context`, or `blocked` through the
 schema-validated exit tool.
