@@ -98,6 +98,8 @@ absent using concrete evidence, not expectation alone.
 
 {{ transclude("partials/review-contract.md") }}
 
+Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a minimal valid payload — short strings, empty arrays for the optional lists — and never resubmit an identical rejected payload. If the retry is also rejected, emit the full report as your final plain-text message and stop calling tools.
+
 ## Specialty focus
 
 - **Snapshot mode:** inspect the pinned diff and head/base sources for behavior

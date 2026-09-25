@@ -134,3 +134,5 @@ unavailable convergence is fail-closed escalation.
 Return only through the schema-validated exit tool: verdict, summary,
 recommendation, severity-classified findings, evidence, risks, limitations,
 and second_review_required.
+
+Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a minimal valid payload — short strings, empty arrays for the optional lists — and never resubmit an identical rejected payload. If the retry is also rejected, emit the full report as your final plain-text message and stop calling tools.

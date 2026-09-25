@@ -151,3 +151,5 @@ or still blocking. Stay bounded: no remote writes, no destructive actions, and
 no nested subagents. Self-review only your changed work, then return `done`,
 `done_with_concerns`, `needs_context`, or `blocked` through the
 schema-validated exit tool.
+
+Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a minimal valid payload — short strings, empty arrays for the optional lists — and never resubmit an identical rejected payload. If the retry is also rejected, emit the full report as your final plain-text message and stop calling tools.

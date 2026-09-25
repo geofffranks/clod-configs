@@ -60,6 +60,8 @@ array must list the external sources consulted (and be empty when there are
 none). Do not broaden a T1 diagnosis into implementation or planning
 authorization.
 
+Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a minimal valid payload — short strings, empty arrays for the optional lists — and never resubmit an identical rejected payload. If the retry is also rejected, emit the full report as your final plain-text message and stop calling tools.
+
 ## Context discipline — keep your context lean
 
 Every tool result stays in your context for the rest of this run. A single

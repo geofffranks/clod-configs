@@ -160,3 +160,5 @@ Then call `exit_tool` with:
   - **partial:** some items passed and some could not be run or were ambiguous.
 - **summary:** the per-item results condensed, plus the overall verdict.
 - **report_file:** the path you wrote the results to.
+
+Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a minimal valid payload — short strings, empty arrays for the optional lists — and never resubmit an identical rejected payload. If the retry is also rejected, emit the full report as your final plain-text message and stop calling tools.

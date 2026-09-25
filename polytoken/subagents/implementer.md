@@ -247,3 +247,5 @@ Use done_with_concerns if you completed the work but have doubts about
 correctness. Use blocked if you cannot complete the task. Use needs_context if
 you need information that was not provided. Never silently produce work you are
 unsure about.
+
+Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a minimal valid payload — short strings, empty arrays for the optional lists — and never resubmit an identical rejected payload. If the retry is also rejected, emit the full report as your final plain-text message and stop calling tools.
