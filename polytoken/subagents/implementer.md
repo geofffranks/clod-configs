@@ -21,7 +21,7 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [source_revision, scope_id, status, summary, evidence]
+    required: [source_revision, scope_id, outcome_type, success, summary, evidence]
     properties:
       source_revision:
         type: string
@@ -39,9 +39,13 @@ polytoken:
             command: {type: string}
             output: {type: string}
             tier: {type: string, enum: [static, unit, integration, e2e, host-mediated, manual]}
-      status:
+      outcome_type:
         type: string
-        enum: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]
+        enum: [done, done_with_concerns, needs_context, blocked]
+      # outcome→success mapping: success is true when outcome_type is done or
+      # done_with_concerns; false when needs_context or blocked.
+      success:
+        type: boolean
       summary:
         type: string
       commits:

@@ -29,11 +29,14 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [source_revision, scope_id, status, summary, changed_files, checks, tdd_evidence, concerns, limitations]
+    required: [source_revision, scope_id, outcome_type, success, summary, changed_files, checks, tdd_evidence, concerns, limitations]
     properties:
       source_revision: {type: string}
       scope_id: {type: string}
-      status: {type: string, enum: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]}
+      outcome_type: {type: string, enum: [done, done_with_concerns, needs_context, blocked]}
+      # outcome→success mapping: success is true when outcome_type is done or
+      # done_with_concerns; false when needs_context or blocked.
+      success: {type: boolean}
       summary: {type: string}
       changed_files: {type: array, items: {type: string}}
       checks:
