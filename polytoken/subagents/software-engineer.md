@@ -21,7 +21,7 @@ polytoken:
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [source_revision, scope_id, status, summary, changed_files, tests, evidence, concerns]
+    required: [source_revision, scope_id, outcome_type, success, summary, changed_files, tests, evidence, concerns]
     properties:
       source_revision: {type: string}
       scope_id: {type: string}
@@ -37,7 +37,10 @@ polytoken:
             command: {type: string}
             output: {type: string}
             tier: {type: string, enum: [static, unit, integration, e2e, host-mediated, manual]}
-      status: {type: string, enum: [done, done_with_concerns, needs_context, blocked]}
+      outcome_type: {type: string, enum: [done, done_with_concerns, needs_context, blocked]}
+      # outcome→success mapping: success is true when outcome_type is done or
+      # done_with_concerns; false when needs_context or blocked.
+      success: {type: boolean}
       summary: {type: string}
       changed_files: {type: array, items: {type: string}}
       tests: {type: array, items: {type: string}}
@@ -61,3 +64,5 @@ You are the `software-engineer` subagent. Implement or debug exactly the bounded
 Read the brief and named artifacts first. Reconcile `scope_id`, `source_revision`, plan revision, and exact task bytes before writing; stale or missing identity is `needs_context`. Follow repository conventions. Use test-driven development when requested: write a focused failing test, confirm the expected failure, implement the minimum change, then rerun focused checks and required broader checks. Work one approved slice only; do not invent requirements, alter dependencies, or expand architecture. Record command/output/evidence tier for each check, separate observed evidence from inference, report changed files and test evidence, state limitations and concerns, and perform a fresh self-review before returning.
 
 Return only through the schema-validated exit tool. Use `needs_context` or `blocked` instead of guessing when requirements or evidence are insufficient. `follow_up_opportunities` is optional, generic, and must be grounded in observed friction rather than project authorization concepts or speculative enhancements.
+
+Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a minimal valid payload — short strings, empty arrays for the optional lists — and never resubmit an identical rejected payload. If the retry is also rejected, emit the full report as your final plain-text message and stop calling tools.
