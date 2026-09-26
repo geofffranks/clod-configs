@@ -553,6 +553,16 @@ run_ratatoskr() {
   for facet in workflow-designer workflow-project-manager product-design project-manager process-friction-triage; do
     out="$DAEMON_WORK/$facet-effective.json"
     if effective_plan "$facet" "$out"; then
+      if [ "$facet" = process-friction-triage ]; then
+        local denied
+        for denied in shell_exec tool_flow; do
+          if jq -e --arg tool "$denied" '.plan.full_schema | any(.name == $tool)' "$out" >/dev/null; then
+            no "runtime $facet: $denied must be absent"
+          else
+            ok "runtime $facet: $denied absent"
+          fi
+        done
+      fi
       bad_mcp="$(jq -r '.plan.full_schema[].name' "$out" | grep '^mcp__' | grep -v '^mcp__ratatoskr__' || true)"
       [ -z "$bad_mcp" ] && ok "runtime $facet: effective MCP tools stay in ratatoskr namespace" \
         || no "runtime $facet: non-ratatoskr MCP tools present ($bad_mcp)"

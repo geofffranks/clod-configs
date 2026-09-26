@@ -65,7 +65,48 @@ Review the rendered roles and skill, not a Python imitation of policy:
    after safe committed state, preserves branch, and reports cleanup failures.
    PM returns to designer without a material-change confirmation.
 
-## Implementation evidence
+## Review-fix round 1 manifest and evidence
+
+Base: `3644b9dc56e3127b3195fcf2fd17f3a7d9fd0738`; scope unchanged.
+Changed consumers: four facet bodies (inline fallback), triage frontmatter
+(shell/tool-flow deny), Jira skill (uncertain creation), inactive compatibility
+partials, and the existing runtime harness. No installer algorithm changes.
+
+- Container-local discovery: `polytoken --help`, `polytoken print --help`,
+  `polytoken exec --help`, `polytoken validate --help`, and
+  `polytoken print openapi` expose no direct rendered-prompt capture. `validate`
+  documents parsing/loading, not rendering; `/history` is transcript projection,
+  `/prompt` submits model work. Shipped `polytoken://facets/plan.md` was inspected.
+  No model restatement or source expansion is claimed as rendered evidence.
+- Approved fallback: four roles carry compact instructions directly in their
+  installed Markdown bodies. Local partial transclusions are no longer used;
+  three comment-only compatibility files retain installer compatibility without
+  stale instructions. The standard shipped facet-base transclusion remains.
+  Direct model-rendered prompt capture is still unproven, but workflow rules no
+  longer depend on unverified local-fragment expansion.
+- Focused checks: official definition loading, installer copy checks, source lint,
+  shell syntax, designer/PM effective tools, unconditional PM return, and gateway
+  effective plans including triage shell/tool-flow absence. The new assertions
+  test actual runtime exposure, not prompt adherence. No new harness is introduced.
+- Manual safety scenarios: lost create response/no key plus empty lagged search
+  stays pending, never retries creation; successive small PM changes are compared
+  cumulatively with the approved product baseline; triage cannot access shell or
+  tool-flow while designers retain these for prompt-restricted read-only research
+  and plan comments. MCP grants still do not constitute an operation sandbox.
+- No Jira production writes or fresh upstream schema checks are needed: payloads
+  and API contracts did not change. Unrelated application suites are not applicable.
+  Independent review of this final delta remains required; self-review is not it.
+
+Round-1 container-local results: shell syntax and source lint passed; definition
+validation passed; installer 254/254; designer runtime 10/10; approval/return 7/7;
+delivery runtime 12/12; gateway/triage effective exposure 16/16. Modes were invoked
+separately after discovering that the harness reads only its first argument.
+Isolated daemon cleanup printed `Killed`; checks exited zero. Referenced disabled
+models were enabled only in temporary configs. Source lint's unrelated TDC inventory
+was explicitly NOT RUN. Manual self-review covered the six scenarios above plus
+lost-response indexing lag and cumulative PM drift; no model-adherence claim.
+
+## Prior implementation evidence (before review fixes)
 
 Container-local checks passed: official definition loader 21/21; designer effective
 contract 10/10; unconditional workflow PM return 7/7; PM effective contract 12/12;

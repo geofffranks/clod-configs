@@ -151,7 +151,11 @@ progress. For Story/Bug/AI Workflow apply the approval/start/completion checkpoi
 above, not another type's assumed transition ID. Fetch affected fields/comments
 or status after EVERY write. An edit response is not custom-field readback.
 After timeout/uncertain success, reconcile by direct key/comment before retrying.
-Retain a created key even when search indexing lags. API errors never mean success.
+Retain a created key even when search indexing lags. If a create response is lost
+and no key is known, keep creation pending: an empty search may reflect indexing
+lag, not failure. Do not create again until authoritative reconciliation proves
+the first attempt did not create an issue. Continue unrelated work and report the
+uncertainty. API errors never mean success.
 
 ## Actual session attribution on every worked ticket
 
