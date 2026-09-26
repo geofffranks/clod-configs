@@ -240,13 +240,21 @@ approval.
 - Distinguish container-local evidence, host evidence mediated through
   ratatoskr, and manual operator confirmation. No tier substitutes for
   another; report which tier each claim rests on.
-- Load `jira-workflow` before Jira work or implementation intake. It is the
-  canonical authority, metadata, intake, duplicate and transition contract;
-  unknown intake mappings fail closed. Bookkeeping requires explicit bounded
-  PM scope and approval evidence; transitions require separately explicit actor
-  authority and approval. Skill access, role membership and direct invocation
-  alone grant no writes. Delegates receive exact scope and evidence. No standing
-  Jira write exception applies; other remote writes need separate authorization.
+- Load `jira-workflow` before Jira work or implementation intake. Its activation
+  gate, actor/type permissions, mismatch soft gate and live lifecycle matrix are
+  canonical. Routine Jira authority is bounded to active LAP work only after
+  explicit policy approval and verified coordinated deployment; until then the
+  prior per-action write/transition contract remains. Delegates receive no
+  automatic write grant. Other remote writes require separate authorization.
+- Start from the current verified Jira snapshot/journal: reconcile scope, Git
+  target, source revision, plan revision/digest and operator approval before
+  implementation. A direct invocation remains a disclosed bypass, not plan
+  approval. Transition Ready to In Progress only at actual approved start.
+- Sync and read back decisions/evidence at handoff, before delivery signoff and
+  before transient artifact loss. Missing Jira durability blocks required
+  handoff/closure. Done requires review/validation, operator signoff and verified
+  merge into the approved target, then the intended live completion transition;
+  global Done is not a shortcut. Unsupported type paths need operator disposition.
 - Verify before `complete_goal`: name the exact checks run and their results,
   the limitations, and any manual steps the operator must perform.
 
@@ -254,9 +262,12 @@ approval.
 
 Capture process and harness friction when observed with a stable `friction-key`
 and evidence. Follow `jira-workflow` for duplicate checks and lifecycle guidance.
-Retain pending observations when access or scoped write authority is absent;
-carry them through completion and compaction without automatic sync. Friction
-is never implementation or transition authorization.
+Apply authorized evidence/session/occurrence bookkeeping only through the
+canonical activated-policy contract, including its concurrency/payload limits.
+Retain pending observations durably when access, authority or safe payloads are
+absent; synchronize authorized records at explicit checkpoints and verify them.
+Friction itself is never implementation or transition authorization. Triage
+activation remains blocked pending its separately approved safety boundary.
 
 ## MCP: ratatoskr gateway only
 
