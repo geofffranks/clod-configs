@@ -295,7 +295,7 @@ SEND_LOG="$TMP/send.log"
 nw_send(){ # <kind> <key> <body> — runs the default sender with a notify_send capture
   NOTIFY_WATCHER_SESSIONS_DIR="$FIXSD" NOTIFY_SEND_CAP="$SEND_LOG" bash -c '
     source "$1" || exit 9
-    notify_send(){ printf "%s\n" "title=$notify_title body=$notify_body" >> "$NOTIFY_SEND_CAP"; }
+    notify_send_mac_only(){ printf "%s\n" "title=$notify_title body=$notify_body" >> "$NOTIFY_SEND_CAP"; }
     notify_watcher_default_send "$2" "$3" "$4" "$5"
   ' _ "$NW_LIB" "$@" >/dev/null 2>&1
 }

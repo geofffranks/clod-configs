@@ -615,14 +615,14 @@ hasnt "$(cat "$D/hooks.json")" '__POLYTOKEN_CONFIG_DIR__' "literal token rendere
 ajq "$D/hooks.json" '[.[]|select(.name=="session-watchdog-keepalive")]|length == 1' "watchdog keepalive entry present (container mode)"
 ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive" and .event=="session_start")]|length == 1' "watcher keepalive session_start entry present"
 for f in hooks/agent-notify.sh hooks/session-watchdog.sh hooks/watchdog-keepalive.sh hooks/notify-watcher-keepalive.sh \
-         lib/notify-event-watcher.sh lib/notify-identity.sh lib/notify-send.sh lib/notify-claim.sh lib/notify-mac.sh; do
+         lib/notify-event-watcher.sh lib/notify-watcher-signals.sh lib/notify-identity.sh lib/notify-send.sh lib/notify-claim.sh lib/notify-mac.sh; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 [ -x "$D/hooks/notify-watcher-keepalive.sh" ] && ok "watcher keepalive hook executable" || no "watcher keepalive hook executable"
 for f in config.yaml permissions.yaml AGENTS.md hooks/adapter.sh hooks/container-awareness.sh compat skills subagents facets; do
   [ ! -e "$D/$f" ] && ok "omitted: $f" || no "omitted: $f"
 done
-[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "10" ] && ok "exactly the 10 notify files on disk (9 + hooks.json)" || no "exactly 10 files (got $(find "$D" -type f | wc -l | tr -d ' '))"
+[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "11" ] && ok "exactly the 11 notify files on disk (10 + hooks.json)" || no "exactly 11 files (got $(find "$D" -type f | wc -l | tr -d ' '))"
 rm -rf "$D"
 
 sc "PN2 fresh notify (LaunchAgent mode) -> 5 names, keepalive entries dropped"
@@ -631,7 +631,7 @@ out="$(run_pt_mode "$D" /nonexistent-xyz 0 notify)"
 [ "$(pt_hook_names "$D/hooks.json")" = "$EXPECTED_NOTIFY5_SORTED" ] && ok "hooks.json == expected 5 notify names" || no "hooks.json == expected 5 notify names (got: $(pt_hook_names "$D/hooks.json"))"
 ajq "$D/hooks.json" '[.[]|select(.name=="session-watchdog-keepalive")]|length == 0' "watchdog keepalive entry dropped (LaunchAgent owns the scan)"
 ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive")]|length == 0' "watcher keepalive entry dropped"
-[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "10" ] && ok "same 10 notify files on disk" || no "same 10 notify files on disk (got $(find "$D" -type f | wc -l | tr -d ' '))"
+[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "11" ] && ok "same 11 notify files on disk" || no "same 11 notify files on disk (got $(find "$D" -type f | wc -l | tr -d ' '))"
 rm -rf "$D"
 
 sc "PN3 notify-container re-run -> idempotent, no new backup"
@@ -672,7 +672,7 @@ rm -rf "$D"
 sc "PN6 full install (mode empty) gains the SSE watcher stack"
 D="$(mktemp -d)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
-for f in lib/notify-event-watcher.sh lib/notify-identity.sh lib/notify-send.sh lib/notify-claim.sh hooks/notify-watcher-keepalive.sh; do
+for f in lib/notify-event-watcher.sh lib/notify-watcher-signals.sh lib/notify-identity.sh lib/notify-send.sh lib/notify-claim.sh hooks/notify-watcher-keepalive.sh; do
   [ -f "$D/$f" ] && ok "full install now ships: $f" || no "full install now ships: $f"
 done
 ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive" and .event=="session_start")]|length == 1' "full install wires the watcher keepalive entry"
@@ -759,7 +759,7 @@ out="$(env LA_LOG="$LALOG" POLYTOKEN_INSTALL_LA_SCRIPT="$LASTUB/la-stub.sh" POLY
       "$REPO/install.sh" --target all --notify-hook-only 2>&1)"
 [ "$(la_count "$LALOG")" = "1" ] && ok "LaunchAgent exactly once across both targets" || no "LaunchAgent exactly once (got $(la_count "$LALOG"))"
 [ "$(pt_hook_names "$D/hooks.json")" = "$EXPECTED_NOTIFY5_SORTED" ] && ok "polytoken side got the 5-name set" || no "polytoken side got the 5-name set"
-ajq "$C/settings.json" '([.hooks | to_entries[] | .value[].hooks[].command] | map(select(test("agent-notify"))) | length) == 3' "claude side got the 3 notify entries"
+ajq "$C/settings.json" '([.hooks | to_entries[] | .value[].hooks[].command] | map(select(test("agent-notify"))) | length) == 2' "claude side retained its 2 notify entries"
 rm -rf "$C" "$D"
 
 sc "PG6 notty on macOS default still auto-runs the LaunchAgent (default-on)"

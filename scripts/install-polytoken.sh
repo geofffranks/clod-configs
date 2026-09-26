@@ -80,6 +80,7 @@ NOTIFY_FILES=(
   "home/lib/notify-identity.sh:lib/notify-identity.sh"
   "home/lib/notify-send.sh:lib/notify-send.sh"
   "home/lib/notify-claim.sh:lib/notify-claim.sh"
+  "home/lib/notify-watcher-signals.sh:lib/notify-watcher-signals.sh"
 )
 
 # Managed notify hook names expected in polytoken/hooks.json (rendered names).

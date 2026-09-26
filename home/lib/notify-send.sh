@@ -35,6 +35,21 @@ notify_diag() {
   printf '%s\n' "$line" >> "$LOG_FILE" 2>/dev/null || true
   chmod 600 "$LOG_FILE" 2>/dev/null || true
 }
+notify_send_mac_only() {
+  notify_mac_send "${notify_title:-}" "${notify_body:-}" 2>/dev/null || true
+}
+notify_send_pushover_only() {
+  [ -n "${PUSHOVER_APP_TOKEN:-}" ] && [ -n "${PUSHOVER_USER_KEY:-}" ] || return 0
+  local url="${AGENT_NOTIFY_PUSHOVER_URL:-https://api.pushover.net/1/messages.json}"
+  (
+    local status_file="${TMPDIR:-/tmp}/notify-status.$$.tmp"
+    curl -sS --fail --max-time 10 -o /dev/null -w '%{http_code}' -X POST "$url" \
+      --data-urlencode "token=$PUSHOVER_APP_TOKEN" --data-urlencode "user=$PUSHOVER_USER_KEY" \
+      --data-urlencode "title=${notify_title:-}" --data-urlencode "message=${notify_body:-}" >"$status_file" 2>/dev/null
+    local rc=$? status="$(cat "$status_file" 2>/dev/null || true)"; rm -f "$status_file"
+    [ "$rc" -eq 0 ] && notify_diag sent "$status" || notify_diag rejected "${status:-unknown}"
+  ) </dev/null >/dev/null 2>&1 &
+}
 notify_send() {
   local pushover_ok=0
   [ -n "${PUSHOVER_APP_TOKEN:-}" ] && [ -n "${PUSHOVER_USER_KEY:-}" ] && pushover_ok=1

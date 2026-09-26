@@ -61,11 +61,11 @@ AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Notification","session
 wait_until wait_count 1 && [ "$(grep -Fc first "$LOG" || true)" = 0 ] && grep -Fq -- '--data-urlencode title=(same) ' "$LOG" && ok "same-session consolidation delivers latest category" || no "same-session consolidation delivers latest category"
 # Cross-harness namespace isolation and payload identity/title.
 : > "$LOG"; run claude '{"hook_event_name":"Stop","session_id":"cross","message":"claude"}' & p1=$!; run polytoken '{"event":"stop","session_id":"cross","message":"poly"}' & p2=$!; wait $p1 $p2
-wait_until wait_count 2 && grep -Fq -- '--data-urlencode title=(cross) ' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation and identity" || no "cross-harness isolation and identity"
+wait_until wait_count 1 && grep -Fq -- '--data-urlencode title=(cross) ' "$LOG" && grep -q 'session=cross' "$LOG" && ok "cross-harness isolation; Claude Pushover retained" || no "cross-harness isolation; Claude Pushover retained"
 # Prompt cancellation is synchronous and prevents the delayed worker from sending.
 # Cancellation is synchronous and wins the race by design: the worker sleeps
 # 2s before its gen re-check, so even a loaded host finishes the cancel first.
-: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
+: > "$LOG"; : > "$OSA"; AGENT_NOTIFY_DELAY_TEST=2 run claude '{"hook_event_name":"Stop","session_id":"cancel","message":"wait"}'
 out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"cancel"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" OSA_LOG="$OSA" AGENT_NOTIFY_STATE_DIR="$TMP/state" PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" claude)"; [ -z "$out" ] || no "cancellation prevents delivery"
 ! wait_until wait_text cancel && [ "$(osacount)" = 0 ] && ok "cancellation prevents delivery (and mac send)" || no "cancellation prevents delivery (and mac send)"
 # A newer generation invalidates the old worker before send.
@@ -117,11 +117,11 @@ reader_s=$((SECONDS - start))
 PSDIR="$TMP/psessions"; mkdir -p "$PSDIR/enr1"
 printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user_message_preview":"fix the stop hook timeout"}' > "$PSDIR/enr1/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr1"}'
-wait_until wait_text 'fix the stop hook timeout' && grep -q -- '--data-urlencode title=claude-config/' "$LOG" && grep -Fq -- '--data-urlencode message=[hook:needs_input] fix the stop hook timeout' "$LOG" && ! grep -q 'session=enr1' "$LOG" && ok "polytoken notification carries project and preview" || no "polytoken notification carries project and preview"
+sleep 0.1; [ "$(count)" = 0 ] && grep -q 'enr1' "$OSA" && ok "polytoken stop keeps preview local-only" || no "polytoken stop keeps preview local-only"
 # record.json title is the fallback when session.json has no preview.
 mkdir -p "$PSDIR/enr2"; printf '%s' '{"session_title":"enr-two-title"}' > "$PSDIR/enr2/record.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr2"}'
-wait_until wait_text 'enr-two-title' && grep -Fq -- '--data-urlencode title=(enr2) - enr-two-title ' "$LOG" && ok "record.json title fallback" || no "record.json title fallback"
+sleep 0.1; [ "$(count)" = 0 ] && ok "record.json preview no longer triggers Polytoken Pushover" || no "record.json preview no longer triggers Polytoken Pushover"
 # Slash-bearing session ids cannot escape the sessions dir when reading metadata.
 mkdir -p "$TMP/enr3"; printf '%s' '{"last_user_message_preview":"pwned"}' > "$TMP/enr3/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"../enr3"}'
@@ -131,22 +131,26 @@ mkdir -p "$PSDIR/enr4"
 printf '%s\n' '{"type":"assistant","blocks":[{"type":"thinking","thinking":"internal"}]}' '{"type":"assistant","blocks":[{"type":"text","text":"rewrote the notifier summary"}]}' > "$PSDIR/enr4/log.jsonl"
 printf '%s' '{"project_path":"/Users/gfranks/workspace/claude-config","last_user_message_preview":"stale preview"}' > "$PSDIR/enr4/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr4"}'
-wait_until wait_text 'rewrote the notifier summary' && grep -Fq -- '(enr4) - stale preview ' "$LOG" && ok "polytoken stop summarizes transcript over preview" || no "polytoken stop summarizes transcript over preview"
+sleep 0.1; [ "$(count)" = 0 ] && grep -q 'enr4' "$OSA" && ok "polytoken transcript stop remains local-only" || no "polytoken transcript stop remains local-only"
 # POLYTOKEN_PROJECT_PATH (exported by the daemon env) names the project directly.
 : > "$LOG"; printf '%s' '{"event":"stop","session_id":"envproj"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_PATH="/tmp/envproj" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
-wait_until wait_text 'session=envproj' && grep -Fq -- '--data-urlencode title=envproj (envproj)' "$LOG" && ok "project env override" || no "project env override"
+sleep 0.1; [ "$(count)" = 0 ] && grep -q 'envproj' "$OSA" && ok "Polytoken project env hook stays local-only" || no "Polytoken project env hook stays local-only"
 # Title prefers the session's own naming: record.json title for polytoken,
 # transcript summary for claude.
 mkdir -p "$PSDIR/enr5"
 printf '%s' '{"session_title":"billing refactor"}' > "$PSDIR/enr5/record.json"
 printf '%s' '{"last_user_message_preview":"stale preview"}' > "$PSDIR/enr5/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr5"}'
-wait_until wait_text 'billing refactor' && grep -Fq -- '--data-urlencode title=(enr5) - billing refactor ' "$LOG" && ok "polytoken title from session_title" || no "polytoken title from session_title"
+sleep 0.1; [ "$(count)" = 0 ] && ok "session title no longer triggers Polytoken Pushover" || no "session title no longer triggers Polytoken Pushover"
 # Polytoken notification events are ambient (background job / subagent
 # completions), never "needs input": nothing is scheduled, nothing is sent.
 : > "$LOG"; run polytoken '{"event":"notification","session_id":"ambient","message":"job done"}'
 K="$(key polytoken ambient)"; sleep 0.3
 [ ! -e "$TMP/state/$K.gen" ] && [ "$(count)" = 0 ] && ok "polytoken ambient notification never schedules" || no "polytoken ambient notification never schedules"
+# Polytoken hook attention remains local-only; the parity watcher owns Pushover.
+: > "$LOG"; run polytoken '{"event":"stop","session_id":"poly-local","message":"still local"}'
+sleep 0.2
+[ "$(count)" = 0 ] && grep -q 'poly-local' "$OSA" && ok "polytoken stop preserves Notification Center and suppresses hook Pushover" || no "polytoken stop preserves Notification Center and suppresses hook Pushover"
 # A stop-scheduled send is cancelled by a later ambient notification: the
 # subagent/background completion resumes the session without the user, so a
 # "Needs Input" push would fire while the agent is working again.
@@ -154,9 +158,10 @@ K="$(key polytoken ambient)"; sleep 0.3
 K="$(key polytoken ambcancel)"; wait_until test -s "$TMP/state/$K.gen"
 run polytoken '{"event":"notification","session_id":"ambcancel","message":"job done"}'
 ! wait_until wait_text ambcancel && ok "ambient notification cancels pending stop send" || no "ambient notification cancels pending stop send"
-# A goal-less polytoken stop still schedules...
+# Generic Polytoken stop no longer schedules a Pushover attention alert.
 : > "$LOG"; POLYTOKEN_GOAL_ACTIVE=false run polytoken '{"event":"stop","session_id":"goalfalse"}'
-K="$(key polytoken goalfalse)"; wait_until test -s "$TMP/state/$K.gen" && wait_until wait_count 1 && ok "polytoken goal-inactive stop schedules" || no "polytoken goal-inactive stop schedules"
+K="$(key polytoken goalfalse)"; sleep 0.2
+[ ! -e "$TMP/state/$K.gen" ] && [ "$(count)" = 0 ] && ok "polytoken goal-inactive stop does not schedule Pushover" || no "polytoken goal-inactive stop does not schedule Pushover"
 # ...but with a saved-session goal active the driver re-prompts itself after
 # stop, so a "Needs Input" notice would be a false positive.
 : > "$LOG"; POLYTOKEN_GOAL_ACTIVE=true run polytoken '{"event":"stop","session_id":"goalon"}'
@@ -166,21 +171,21 @@ sleep 0.3; [ ! -e "$TMP/state/$(key polytoken goalon).gen" ] && [ "$(count)" = 0
 WR="$TMP/wtrepo"; git init -q -b main "$WR" 2>/dev/null; git -C "$WR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init; git -C "$WR" worktree add -q -b probe-branch "$WR/.worktrees/probe" main
 mkdir -p "$PSDIR/wtenr"; printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"check the probe\"}" > "$PSDIR/wtenr/session.json"
 : > "$LOG"; printf '%s' '{"event":"stop","session_id":"wtenr"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_DIR="$WR/.worktrees/probe" POLYTOKEN_PROJECT_PATH="$WR" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
-wait_until wait_text 'check the probe' && grep -Fq -- '--data-urlencode title=wtrepo/probe-branch (wtenr)' "$LOG" && ok "polytoken worktree branch and repo name" || no "polytoken worktree branch and repo name"
+sleep 0.1; [ "$(count)" = 0 ] && ok "polytoken worktree hook does not send Pushover" || no "polytoken worktree hook does not send Pushover"
 # Claude sessions carry cwd in the payload; a worktree cwd reports its own branch.
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"clwt\",\"transcript_path\":\"$LEAK\",\"cwd\":\"$WR/.worktrees/probe\"}"
 wait_until wait_text 'wtrepo/probe-branch (clwt)' && ok "claude worktree branch from payload cwd" || no "claude worktree branch from payload cwd"
 # A main-repo session still reports repo/branch as before.
 mkdir -p "$PSDIR/mrenr"; printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"main line\"}" > "$PSDIR/mrenr/session.json"
 : > "$LOG"; printf '%s' '{"event":"stop","session_id":"mrenr"}' | PATH="$TMP:$PATH" MOCK_LOG="$LOG" POLYTOKEN_PROJECT_DIR="$WR" POLYTOKEN_PROJECT_PATH="$WR" POLYTOKEN_SESSIONS_DIR="$PSDIR" AGENT_NOTIFY_STATE_DIR="$TMP/state" AGENT_NOTIFY_DELAY=0.05 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash "$HOOK" polytoken
-wait_until wait_text 'main line' && grep -Fq -- '--data-urlencode title=wtrepo/main (mrenr)' "$LOG" && ok "main-repo session branch unchanged" || no "main-repo session branch unchanged"
+sleep 0.1; [ "$(count)" = 0 ] && ok "Polytoken main-repo stop remains Pushover-silent" || no "Polytoken main-repo stop remains Pushover-silent"
 # A polytoken session that moved into a worktree after start reports the branch
 # of its most recent working directory, taken from the session log's cwd trail.
 mkdir -p "$PSDIR/mvenr"
 printf '%s' "{\"project_path\":\"$WR\",\"last_user_message_preview\":\"moved mid-session\"}" > "$PSDIR/mvenr/session.json"
 printf '%s\n' '{"type":"tool_use","cwd":"'"$WR"'"}' '{"type":"tool_use","cwd":"'"$WR/.worktrees/probe"'"}' > "$PSDIR/mvenr/log.jsonl"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"mvenr"}'
-wait_until wait_text 'moved mid-session' && grep -Fq -- '--data-urlencode title=wtrepo/probe-branch (mvenr)' "$LOG" && ok "moved session branch from session log cwd" || no "moved session branch from session log cwd"
+sleep 0.1; [ "$(count)" = 0 ] && ok "moved Polytoken session stop remains Pushover-silent" || no "moved Polytoken session stop remains Pushover-silent"
 LEAK2="$TMP/leak2.jsonl"; printf '%s\n' '{"type":"summary","summary":"Fixing the notifier"}' '{"type":"assistant","message":{"content":[{"type":"text","text":"all done"}]}}' > "$LEAK2"
 : > "$LOG"; run claude "{\"hook_event_name\":\"Stop\",\"session_id\":\"cltitle\",\"transcript_path\":\"$LEAK2\",\"cwd\":\"/tmp/claudeproj\"}"
 wait_until wait_text 'Fixing the notifier' && grep -Fq -- '--data-urlencode message=[hook:needs_input] all done' "$LOG" && ok "claude title from transcript summary" || no "claude title from transcript summary"
@@ -197,9 +202,9 @@ CLAUDE_CONFIG_DIR="$TMP/both-claude" POLYTOKEN_CONFIG_DIR="$TMP/both-polytoken" 
 CLAUDE_CONFIG_DIR="$TMP/both-claude" POLYTOKEN_CONFIG_DIR="$TMP/both-polytoken" AGENT_NOTIFY_DELAY=2 PUSHOVER_APP_TOKEN=app PUSHOVER_USER_KEY=user bash -c "printf '%s' '{\"hook_event_name\":\"Stop\",\"session_id\":\"both\"}' | bash '$HOOK' polytoken"
 [ -d "$TMP/both-claude/.agent-notify" ] && [ -d "$TMP/both-polytoken/.agent-notify" ] && ok "simultaneous harness-specific roots" || no "simultaneous harness-specific roots"
 # Wiring: Notification and Stop async, no standalone SubagentStop notifier.
-jq -e '([.hooks.Notification[], .hooks.Stop[]] | map(.hooks[] | select(.command | contains("agent-notify.sh"))) | length == 2 and all(.[]; .async == true))' "$REPO/home/settings.recommended.json" >/dev/null && jq -e '([.hooks.SubagentStop[].hooks[]?.command // ""] | all(.[]; contains("agent-notify.sh") | not))' "$REPO/home/settings.recommended.json" >/dev/null && ok "Claude wiring" || no "Claude wiring"
+jq -e '([.hooks.Notification[]?.hooks[]?, .hooks.Stop[]?.hooks[]?] | map(select(.command? | strings | contains("agent-notify.sh"))) | length == 1 and all(.[]; .async == true))' "$REPO/home/settings.recommended.json" >/dev/null && jq -e '([.hooks.SubagentStop[]?.hooks[]?.command? // ""] | all(.[]; contains("agent-notify.sh") | not))' "$REPO/home/settings.recommended.json" >/dev/null && ok "Claude wiring" || no "Claude wiring"
 jq -e '([.[] | select(.name == "agent-notify" and .event == "notification")] | length == 1) and ([.[] | select(.name | startswith("agent-notify")) | .handler.bash | contains(" polytoken")] | all)' "$REPO/polytoken/hooks.json" >/dev/null && ok "Polytoken wiring" || no "Polytoken wiring"
-grep -q 'DELAY="${AGENT_NOTIFY_DELAY:-180}"' "$HOOK" && ok "production delay default" || no "production delay default"
+grep -q 'DELAY="${AGENT_NOTIFY_DELAY:-60}"' "$HOOK" && ok "production delay default" || no "production delay default"
 # notify-send.sh is never used by the hook (the push is inline curl): any
 # source or call reference to it (outside comments) is a regression the
 # notify-only install manifest would not cover. notify-identity.sh IS used
@@ -245,11 +250,9 @@ else
   echo "SKIP: actual Polytoken installer requires mikefarah/yq v4" >&2
   no "actual Polytoken installer (yq v4 unavailable)"
 fi
-# ask_user_question: the question itself is a wait-for-user that fires no
-# stop, so pre_tool_use schedules a push carrying the question and the
-# answer (post_tool_use, same tool) cancels it like a prompt does.
-: > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.15 run polytoken '{"event":"pre_tool_use","tool_name":"ask_user_question","session_id":"askq","input":{"questions":[{"question":"which approach do you want?"}]}}'
-wait_until wait_text 'which approach do you want' && grep -Fq -- '--data-urlencode title=(askq) ' "$LOG" && ok "ask_user_question schedules a push with the question" || no "ask_user_question schedules a push with the question"
+# Hook-side ask events retain local presentation only; Pushover reminders are owned by the watcher.
+: > "$LOG"; run polytoken '{"event":"pre_tool_use","tool_name":"ask_user_question","session_id":"askq","input":{"questions":[{"question":"which approach do you want?"}]}}'
+sleep 0.1; [ "$(count)" = 0 ] && ok "ask_user_question hook does not send Pushover" || no "ask_user_question hook does not send Pushover"
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=2 run polytoken '{"event":"pre_tool_use","tool_name":"ask_user_question","session_id":"answait","input":{"questions":[{"question":"pick one"}]}}'
 K="$(key polytoken answait)"; wait_until test -s "$TMP/state/$K.gen" && ok "ask_user_question schedules pending state" || no "ask_user_question schedules pending state"
 POLYTOKEN_HOOK_MATCHER_SUBJECT=ask_user_question run polytoken '{"event":"post_tool_use","tool_name":"ask_user_question","session_id":"answait"}'
@@ -257,7 +260,7 @@ POLYTOKEN_HOOK_MATCHER_SUBJECT=ask_user_question run polytoken '{"event":"post_t
 : > "$LOG"; AGENT_NOTIFY_DELAY_TEST=0.5 run polytoken '{"event":"stop","session_id":"no-cancel"}'
 K="$(key polytoken no-cancel)"; wait_until test -s "$TMP/state/$K.gen"
 POLYTOKEN_HOOK_MATCHER_SUBJECT=shell_exec run polytoken '{"event":"post_tool_use","tool_name":"shell_exec","session_id":"no-cancel"}'
-wait_until wait_text no-cancel && ok "post_tool_use for other tools never cancels" || no "post_tool_use for other tools never cancels"
+sleep 0.1; [ "$(count)" = 0 ] && ok "other-tool activity cannot produce generic Polytoken Pushover" || no "other-tool activity cannot produce generic Polytoken Pushover"
 # Overlength contract (fail-open): the hook retries once with a shortened
 # title component, then falls back to "(<sid>)"; the alert is never suppressed
 # by formatting and an old-format title never appears.
@@ -279,5 +282,5 @@ wait_until wait_text 'evidence shows the opposite' && ! wait_text 'honest caveat
 # Polytoken titles prefer the session's inferred_title over the raw prompt preview.
 mkdir -p "$PSDIR/enr6"; printf '%s' '{"inferred_title":"my real title","last_user_message_preview":"quoted snippet"}' > "$PSDIR/enr6/session.json"
 : > "$LOG"; POLYTOKEN_SESSIONS_DIR="$PSDIR" run polytoken '{"event":"stop","session_id":"enr6"}'
-wait_until wait_text 'title=(enr6) - my real title ' && ok "inferred_title is preferred for the title" || no "inferred_title is preferred for the title"
+sleep 0.1; [ "$(count)" = 0 ] && ok "inferred title does not trigger Polytoken Pushover" || no "inferred title does not trigger Polytoken Pushover"
 [ "$fail" -eq 0 ] && echo "PASS: $pass" || echo "FAILURES: $fail/$((pass+fail))"; exit "$fail"

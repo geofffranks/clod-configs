@@ -255,6 +255,14 @@ unlock
   [ "$CURRENT" = "$GEN" ] || { unlock; exit 0; }
   # Keep ownership lock through send, so cancellation/new generations cannot race it.
   # Send to the local Notification Center first (bounded, credential-free).
+  if [ "$HARNESS" = polytoken ]; then
+    # Polytoken Pushover attention is emitted by the SSE watcher only for the
+    # three parity signals. Preserve the legacy local macOS presentation.
+    notify_mac_send "$TITLE" "$MESSAGE" 2>/dev/null || true
+    [ "$(cat "$STATE.gen" 2>/dev/null || true)" = "$GEN" ] && rm -f "$STATE.gen" "$STATE.cancel"
+    unlock
+    exit 0
+  fi
   notify_mac_send "$TITLE" "$MESSAGE" 2>/dev/null || true
   if [ "$pushover_ok" = 1 ]; then
     curl -sS --fail --max-time 10 -X POST https://api.pushover.net/1/messages.json \
