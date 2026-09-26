@@ -2,7 +2,8 @@
 name: process-friction-triage
 polytoken:
   model: zai/glm-5.3-flash(high)
-  fallback_models: [codex/gpt-5.6-luna-1m(medium)]
+  fallback_models: 
+  - codex/gpt-5.6-luna-1m(medium)
   tools: [tag!ALL, mcp__ratatoskr]
   tools_deny: [file_write, file_edit_search_replace, patch_edit, shell_exec, tool_flow, shell_monitor, shell_service, lsp, subagent, write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, glob, grep, skill, tool_search]

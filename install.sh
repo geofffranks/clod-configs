@@ -439,7 +439,7 @@ case "$target" in
     ;;
   polytoken)
     install_polytoken_target
-    polytoken-quota reconcile
+    polytoken-quota reconcile --verbose
     ;;
   all)
     # Run both targets independently; report each result and exit nonzero if

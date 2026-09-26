@@ -2,7 +2,8 @@
 name: project-manager
 polytoken:
   model: zai/glm-5.3-flash(high)
-  fallback_models: [codex/gpt-5.6-luna-1m(medium)]
+  fallback_models: 
+  - codex/gpt-5.6-luna-1m(medium)
   color: "#16a34a"
   color_light: "#dcfce7"
   color_dark: "#14532d"
