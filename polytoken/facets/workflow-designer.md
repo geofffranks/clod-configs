@@ -152,8 +152,14 @@ bookkeeping only as permitted by that skill; unproven payload or concurrency
 safety leaves updates pending. Before activation, preserve prior write gates.
 Sync and verify authorized records at handoff and before loss of transient
 artifacts; retain unsynced keys durably and report blockers. Friction itself is
-never implementation or transition authorization; triage activation remains
-blocked pending its separately approved safety boundary.
+never implementation or transition authorization. Triage activation requires
+`jira-workflow`'s explicit policy approval, coordinated installation/reload of
+the canonical skill, eligible facets and active consumers, verified effective
+tool/skill exposure and retained activation evidence, plus a safe fake-gateway
+unconfirmed-create/close refusal check with no production write probe. Triage
+has policy-scoped write capability, not an upstream operation sandbox; its
+per-create/close confirmation rule does not change the four design/PM actors'
+routine authority or implementation gates.
 
 ## Reporting
 

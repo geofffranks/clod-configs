@@ -267,7 +267,13 @@ canonical activated-policy contract, including its concurrency/payload limits.
 Retain pending observations durably when access, authority or safe payloads are
 absent; synchronize authorized records at explicit checkpoints and verify them.
 Friction itself is never implementation or transition authorization. Triage
-activation remains blocked pending its separately approved safety boundary.
+activation requires `jira-workflow`'s explicit policy approval, coordinated
+installation/reload of the canonical skill, eligible facets and active consumers,
+verified effective tool/skill exposure and retained activation evidence, plus a
+safe fake-gateway unconfirmed-create/close refusal check with no production write
+probe. Triage has policy-scoped write capability, not an upstream operation
+sandbox; its per-create/close confirmation rule does not change the four
+design/PM actors' routine authority or implementation gates.
 
 ## MCP: ratatoskr gateway only
 
