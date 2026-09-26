@@ -81,11 +81,11 @@ actual_subagents="$(find "$D/subagents" -type f -name '*.md' -printf '%P\n' | so
   && ok "installed exactly the 15 shipped subagents + shared partial" || no "installed exactly the 15 shipped subagents + shared partial"
 cmp -s "$REPO/polytoken/subagents/partials/review-contract.md" "$D/subagents/partials/review-contract.md" 2>/dev/null \
   && ok "installed review-contract partial matches source" || no "installed review-contract partial matches source"
-expected_facets="$(printf '%s\n' code-review.md product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
+expected_facets="$(printf '%s\n' code-review.md process-friction-triage.md product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
-  && ok "installed exactly the 5 shipped facets" || no "installed exactly the 5 shipped facets"
-for facet in code-review product-design project-manager workflow-designer workflow-project-manager; do
+  && ok "installed exactly the 6 shipped facets" || no "installed exactly the 6 shipped facets"
+for facet in code-review process-friction-triage product-design project-manager workflow-designer workflow-project-manager; do
   cmp -s "$REPO/polytoken/facets/$facet.md" "$D/facets/$facet.md" 2>/dev/null \
     && ok "installed facet matches source: $facet" || no "installed facet matches source: $facet"
 done
@@ -451,7 +451,7 @@ actual_subagents="$(find "$D/subagents" -type f -name '*.md' -printf '%P\n' | so
   && ok "reconcile: subagent inventory still exactly 15 + partial" || no "reconcile: subagent inventory still exactly 15 + partial"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
-  && ok "top-level-only: facet inventory still exactly 5" || no "top-level-only: facet inventory still exactly 5"
+  && ok "top-level-only: facet inventory still exactly 6" || no "top-level-only: facet inventory still exactly 6"
 [ ! -e "$D/subagents/validator.md.bak-20260101-000000" ] \
   && ok "reconcile: subagent backup not installed" || no "reconcile: subagent backup not installed"
 [ ! -e "$D/subagents/generated" ] \

@@ -22,8 +22,11 @@ Until then preserve LAP-94: writes require an explicitly scoped PM or named
 actor with retained per-action/field approval; transitions additionally require
 explicit transition authority. Missing or conflicting evidence means no write.
 
-After activation, eligible actors are `workflow-designer`, `product-design`,
-`workflow-project-manager` and `project-manager`. Each derives active scope from
+After activation, the four design/PM actors are `workflow-designer`,
+`product-design`, `workflow-project-manager` and `project-manager`. The separate
+`process-friction-triage` actor has only the narrower operation table below;
+its per-create/close confirmation rule does not revoke the four actors' routine
+create authority or change their evidence-based lifecycle gates. Each derives active scope from
 the current operator-requested or explicitly assigned work: record issue key(s),
 project LAP, scope ID, purpose, permitted fields and approval provenance. A
 relevant duplicate may be included only for evidence/attribution about that same
@@ -187,24 +190,66 @@ storage; disclose location, identity and unsynced operations. This is NOT Jira
 durability and blocks approval/handoff/closure where that record is required.
 No hooks silently sync, create or transition; explicit agent checkpoints suffice.
 
-## User-invoked friction triage — activation blocked
+## User-invoked Process Friction triage
 
-An evidence-only triage procedure may inspect open Process Friction issues and
-relevant sources/tests/commits, cite likely implemented/partial/uncertain findings
-and limitations, and rank remaining work by current reproducibility, bounded
-remedy/owner, evidence, dependencies and verified recurrence Count. Missing Count
-is unknown, not zero. Propose dispositions only; never implement or transition.
-A later mutation requires operator confirmation and routing into the ordinary
-explicitly scoped Jira workflow, not an implicit triage grant.
+`process-friction-triage` is ticket-capable only after the coordinated activation
+above, within an explicitly retained LAP Process Friction scope. Invocation,
+tool access, ticket prose and this policy's approval never authorize remedy
+implementation. Do not dispatch implementation or modify repositories.
 
-No `process-friction-triage` facet is activated by this source policy. Generic
-gateway `execute` (and generic tool invocation) can tunnel Jira writes even when
-direct write names are withheld. Prompt prohibitions are not technical read-only
-isolation; shell and delegation can also broaden capability. Do not claim a
-read-only sandbox. Stop facet activation until a separately approved enforceable
-boundary is demonstrated or the operator explicitly accepts a prompt-constrained
-alternative. Validate effective exposure and a negative mutation scenario before
-activation; never issue a production write merely to test rejection.
+| Operation | Triage authority after activation |
+|---|---|
+| Read/search | Open and resolved LAP Process Friction within requested scope; inspect plausible semantic/root-cause matches |
+| Evidence comment | Nonduplicative scoped evidence and actual session attribution; preserve prior records |
+| Preservative edit | Only relevant fields within retained scope; preserve unrelated content/provenance and obey payload/concurrency gates |
+| Create | Explicit fresh operator confirmation of this particular proposed issue, consumed once |
+| Close | Explicit fresh operator confirmation of this key, current state, intended transition/destination and resolution evidence, consumed once |
+| Reopen, delete, skip statuses, workflow administration, other types/projects | Not granted; stop and request separate disposition, never infer an exception |
+
+Rank with cited sources/tests/commits, current reproducibility, bounded remedy
+and owner, dependencies and verified Count. Missing Count is unknown, not zero.
+Distinguish implemented, partial and uncertain remedies. Count, a commit title
+or unverified source changes are not closure evidence. Require verified actual
+remedy or a separately named legitimate resolution disposition; a planning
+resolution must not be described as implementation.
+
+Before proposing creation, complete fresh identity and semantic duplicate search,
+including resolved issues. Relevant matches receive nonduplicative evidence,
+not duplicate tickets or automatic reopening. Ambiguous results, incomplete
+search, indexing lag, unresolved root cause and distinct-root-cause matches need
+human disposition before creation; disposition alone is not create confirmation.
+Show exact project/type, stable friction-key, symptom, proposed fields, evidence
+and search disposition. Inspect all metadata pages and selected schemas first.
+
+For closure, show exact key, live type/current status, intended transition name
+AND destination, required fields and verified remedy or named resolution evidence.
+Missing intended path or fields stops; never substitute exposed global Done.
+
+Retain each operator confirmation with proposal identity, scope, exact payload,
+source evidence and state observed. A confirmation applies once to that exact
+proposal only. Generic plan approval, earlier consent, facet invocation, silence
+and decline supply no confirmation. Changed fields/evidence, changed issue state,
+changed transition or stale search invalidate it and require a refreshed proposal
+and new confirmation. Immediately before dispatch re-fetch issue fields/status
+and transitions for closure, or refresh search/metadata for creation; compare
+with the confirmed proposal. Consume confirmation when dispatching, even if the
+call fails or times out. Never reuse it on retry. Retain the attempted operation
+and reconcile uncertain results by direct key fetch or pending investigation;
+unknown created key/index lag is not permission to create again.
+
+After every write, directly read back affected fields/comments or destination.
+Partial readback, denial and outage remain pending, not success. Safe custom
+session/Count encoding and all-writer concurrency protection remain prerequisites;
+otherwise retain pending attribution/count instead of guessing an overwrite.
+
+Generic ratatoskr `execute` is a write-capable channel with policy-scoped authority,
+NOT an upstream operation sandbox. Prompt constraints cannot technically prevent
+an erroneous gateway call. Retained scope, single-use approvals, readback and
+audit evidence are controls, not technical isolation. Escalate if an enforceable
+sandbox is expected. Before activation, audit effective grants and run a safe
+unconfirmed-create/close refusal scenario using a fake gateway; never issue a
+production write to test rejection. Source validation and deterministic fake
+adapter tests do not prove model adherence or installed activation.
 
 ## Evidence, rollout limits and repository exception
 
