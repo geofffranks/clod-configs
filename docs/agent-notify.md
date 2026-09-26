@@ -2,9 +2,11 @@
 
 The notify stack pings you when an agent run needs you or has died. It is
 dual-channel on a native macOS host — the local **Notification Center**
-(credential-free, on by default) plus the optional **Pushover** push; both fire
-for the same event, and you can mute Notification Center per-app if you only
-want Pushover. Everywhere the mac lane is unavailable (non-macOS, the Linux
+(credential-free, on by default) plus optional **Pushover**. Under Polytoken,
+attention events follow different policies by channel: Notification Center
+keeps its existing notices while Pushover sends only the three verified signals
+below. Claude Code and lifecycle/death alerts retain their prior routing.
+Everywhere the mac lane is unavailable (non-macOS, the Linux
 container, or `AGENT_NOTIFY_MAC=0`) the stack is fully fail-open: hooks still
 succeed, nothing is sent, nothing blocks. Pushover credentials are read from
 the environment only — never from files this repo manages — and must never be
@@ -92,12 +94,12 @@ noted where it applies).
 
 | Event | Alert | Notes |
 |---|---|---|
-| End of turn awaiting you | same consolidation + cancel as Claude | suppressed while a saved-session goal is active (the goal driver continues without you) |
-| `ask_user_question` pending | push with the first question's text (`agent-notify-ask`) | your answer cancels it (`agent-notify-answer`); an ambient notification (background job / subagent completion) cancels rather than adds |
+| End of turn awaiting you | Notification Center retains the existing consolidation + cancel behavior | Polytoken Pushover does not send generic stop/needs-input alerts; idle attention is decided by the verified idle predicate below |
+| `ask_user_question` pending | Notification Center retains its current hook/watcher presentation | Pushover waits 300s and sends one reminder only while the watcher’s in-memory interrogative remains armed; answer, fresh activity, cancellation, or generation replacement invalidates it |
 | TUI or container killed (SIGKILL) | "abnormal exit" alert | at most one per 15s window with the affected-session count; normal quits, Ctrl-C/TERM/HUP exits, and TUI launch failures stay silent |
-| Plan-handoff approval pending, goal-acceptance pending, goal completed | one alert each | sent by the SSE event watcher (below) — everything else on the stream stays silent |
-| A turn is cancelled (any reason, including self-initiated) | immediate "turn cancelled — reason" push, one per cancelled prompt | sent by the SSE event watcher (below); no rate cap — N distinct cancels mean N pushes; cancels older than 120s stay silent (envelope staleness) |
-| A command is held at the permission gate | "permission needed: <tool>" push, one per gate episode | sent by the SSE event watcher (below); body names the tool only, never the command arguments |
+| Goal transitions to `completed` or `blocked` | Pushover alert on observed transition | The watcher polls authenticated `/goal`; cold-start seeds silently, and invalid/unknown probe responses suppress alerts |
+| Verified idle turn | Pushover alert after 10s debounce | Only `message_complete` with a nonempty prompt id can start a candidate; authenticated `/goal`, `/jobs`, and `/sync` must all satisfy the bridge predicates |
+| Plan-handoff/goal-acceptance approvals, cancellations, permission holds | existing Notification Center behavior | These immediate attention events are not sent to Polytoken Pushover |
 
 ### Unified notification format
 
@@ -111,17 +113,23 @@ Hook wiring (from `polytoken/hooks.json`): `agent-notify` (notification),
 `POLYTOKEN_SESSION_ID`, and repo/branch resolution follows the session log's
 most recent working directory, so worktree sessions still name their repo.
 
-**About double question alerts:** the ask hook and the watcher do not share
-dedup state, so an unanswered question can alert twice — immediately from the
-watcher, and once more from the hook's ~3-minute consolidation if it is still
-pending (answering cancels the hook's send). If you prefer single-alert
-questions, remove the `agent-notify-ask` entry from your `hooks.json`; a
-watcher-side knob is a tracked backlog opportunity, not a shipped option.
-
-The watcher and hook lanes are likewise independent for cancellations: a
-cancelled turn can produce both the watcher's immediate cancel push and, if the
-hook lane's stop timer had already armed, its delayed "needs input" notice — no
-cross-lane suppression, by design.
+**Pushover attention parity:** Polytoken Pushover sends only a delayed still-pending
+interrogative reminder (300s default), an observed `completed`/`blocked` goal
+transition, or a verified idle turn (10s debounce). The hook and watcher keep
+their prior Notification Center behavior; Claude Code is unchanged. The goal
+probe silently seeds its first valid state. Idle probes fail closed on network,
+HTTP, size, JSON, or schema errors; requests use the local daemon Bearer
+credential, a 5s timeout, and a 64 KiB response cap. Tokens and payloads are not
+logged. Reminders are process-local: a watcher restart drops armed reminders and
+does not reconstruct them from `/sync`; observed answer/resolution/cancellation,
+fresh activity, epoch replacement, and shutdown invalidate them. Once a Pushover
+request is accepted/in flight it cannot be retracted. Claims are acquired before
+send, so a failed delivery may consume that episode (bounded at-most-once).
+The signal-state lock automatically reclaims a dead owner. By explicit operator
+choice this is best-effort recovery: two simultaneous stale-lock reclaimers can
+rarely remove a newly published lock and suppress a newly armed reminder/idle
+ticket during an overlapping restart. Normal shutdown and arming are serialized;
+the exceptional stale-reclaim race is not claimed to be strictly race-free.
 
 ## Credentials
 
@@ -259,20 +267,19 @@ launchctl load -w   ~/Library/LaunchAgents/dev.gf.polytoken-session-watchdog.pli
 
 `lib/notify-event-watcher.sh` adds what hooks cannot see: daemon-level session
 events. It discovers live session daemons (`sessions/*/startup.json`), follows
-each daemon's `/events` stream with the Bearer scheme, and pushes on exactly
-six mappings — questions (`question_pending`), plan-handoff approvals and
-goal-acceptance approvals (`approval_pending`), goal completion
-(`goal_completed`), turn cancellations (`turn_cancelled`), and permission-gate
-holds (`approval_pending`). Agent-raised permission-gate holds arrive without a
-sequence number; the watcher processes them cursorless with freshness checks and
-permanent per-episode claims, so reconnect re-renders do not double-push. The
-daemon never announces operator-facing approval popups, so those cannot push.
-Everything else on the stream — provider errors, ambient events, heartbeats —
-stays silent. This is not cruft: no hook fires for these daemon transitions.
+each daemon's `/events` stream with the Bearer scheme. Its original six
+mappings remain **Notification Center-only**: questions, plan-handoff and goal
+approvals, goal completion, turn cancellations, and permission-gate holds.
+Agent-raised permission holds can be cursorless; freshness and per-episode
+claims still prevent duplicate local notices. Independently, the watcher
+observes interrogative lifecycle and `message_complete`, polls authenticated
+`/goal`, `/jobs`, and `/sync`, and sends the three Pushover attention signals
+described above. Operator-facing TUI approval popups are not emitted by the
+daemon and therefore cannot be observed by this watcher.
 
 **Event coverage**
 
-| Event on the stream | Push | Once per |
+| Event on the stream | Notification Center notice (not Pushover) | Once per |
 |---|---|---|
 | `ask_user_question` | "N questions need your answer" (+ first question) | question episode |
 | plan-handoff approval (interrogative) | "approve plan handoff" | handoff episode |
@@ -281,7 +288,7 @@ stays silent. This is not cruft: no hook fires for these daemon transitions.
 | `goal_driver_update` completed | "goal completed: ..." | goal |
 | `turn_cancelled` (any reason) | "turn cancelled — <reason>" | cancelled prompt |
 
-Everything else on the stream stays silent (heartbeats, `hook_fired`, `session_idle`, `stream_discontinuity`, provider noise); operator-facing TUI approval popups are not announced on the stream, so they cannot push.
+Other stream families do not produce these local notices (heartbeats, `hook_fired`, `session_idle`, `stream_discontinuity`, provider noise). `message_complete` is only an idle *candidate*; Pushover waits for strict probe results before notifying.
 
 **Under Polytoken the watcher is ensured-running by default**: the
 `notify-watcher-keepalive` session-start hook spawns one detached supervision

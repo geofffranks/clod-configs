@@ -55,6 +55,7 @@ _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$_LIB_DIR/notify-identity.sh" ] && . "$_LIB_DIR/notify-identity.sh"
 [ -f "$_LIB_DIR/notify-send.sh" ] && . "$_LIB_DIR/notify-send.sh"
 [ -f "$_LIB_DIR/notify-claim.sh" ] && . "$_LIB_DIR/notify-claim.sh"
+[ -f "$_LIB_DIR/notify-watcher-signals.sh" ] && . "$_LIB_DIR/notify-watcher-signals.sh"
 unset _LIB_DIR
 
 : "${NOTIFY_WATCHER_SESSIONS_DIR:=${POLYTOKEN_SESSIONS_DIR:-${AGENT_NOTIFY_SESSIONS_DIR:-$HOME/.local/share/polytoken/sessions}}}"
@@ -285,7 +286,34 @@ notify_watcher_default_send(){
   title="$(notify_identity_resolve "$sid" "$project" "$stitle" 2>/dev/null)" || title=""
   [ -n "$title" ] || title="($sid)"
   notify_source=event-watcher notify_event="$kind" notify_session="$sid" \
-  notify_title="$title" notify_body="$(notify_alert_tag sse "$kind")$body" notify_send
+  notify_title="$title" notify_body="$(notify_alert_tag sse "$kind")$body" notify_send_mac_only
+  return 0
+}
+
+# Signal lifecycle frames must pass the same envelope/replay boundary as local
+# notifications before the cursor advances. Invalid/stale/replayed frames never
+# arm a timer or cancel a newer pending question.
+_nw_signal_eligible(){
+  local dir="$1" frame="$2" now="$3" sid expected seq emitted ts cursor last
+  sid="$(jq -r '.session_id // empty' <<<"$frame" 2>/dev/null)"
+  expected="$(jq -r '.session_id // empty' "$dir/startup.json" 2>/dev/null)"
+  [ -n "$sid" ] && [ "$sid" = "$expected" ] || return 1
+  emitted="$(jq -r '.emitted_at // empty' <<<"$frame" 2>/dev/null)"
+  ts="$(notify_watcher_epoch "$emitted" 2>/dev/null)" || return 1
+  [ "$((now-ts))" -le "$NOTIFY_WATCHER_FRESH_SECONDS" ] && [ "$((ts-now))" -le "$NOTIFY_WATCHER_FUTURE_TOLERANCE" ] || return 1
+  seq="$(jq -r '.seq // empty' <<<"$frame" 2>/dev/null)"
+  case "$seq" in
+    ''|*[!0-9]*|0)
+      [ "$(jq -r '.event.type // empty' <<<"$frame" 2>/dev/null)" = interrogative ] || return 1
+      jq -e '(.event.interrogative_id|type)=="string" and (.event.interrogative_id|length)>0' <<<"$frame" >/dev/null 2>&1 || return 1
+      ;;
+    *)
+      cursor="$NOTIFY_WATCHER_STATE_ROOT/watch/$(_nw_safe "$sid")/cursor"
+      last="$(awk '$1=="seq"{print $2}' "$cursor" 2>/dev/null)"
+      case "$last" in ''|*[!0-9]*) last=0;; esac
+      [ "$last" -eq 0 ] || [ "$seq" -gt "$last" ] || return 1
+      ;;
+  esac
   return 0
 }
 
@@ -302,7 +330,41 @@ notify_watcher_stream(){
       data:*)
         frame="${line#data: }"
         [ "$frame" = "$line" ] && frame="${line#data:}"
-        notify_watcher_process_frame "$frame" "$(date +%s 2>/dev/null || printf 0)" >/dev/null 2>&1 || true
+        local frame_now signal_ok=0 sid etype
+        frame_now="$(date +%s 2>/dev/null || printf 0)"
+        _nw_signal_eligible "$dir" "$frame" "$frame_now" && signal_ok=1
+        notify_watcher_process_frame "$frame" "$frame_now" >/dev/null 2>&1 || true
+        [ "$signal_ok" -eq 1 ] || continue
+        sid="$(jq -r 'if (.session_id|type)=="string" and (.session_id|length)<=128 then .session_id else empty end' <<<"$frame" 2>/dev/null)"
+        etype="$(jq -r '.event.type // empty' <<<"$frame" 2>/dev/null)"
+        if [ -n "$sid" ]; then
+          case "$etype" in
+            message_complete)
+              if jq -e '(.event.prompt_id|type)=="string" and (.event.prompt_id|length)>0' <<<"$frame" >/dev/null 2>&1; then
+                notify_watcher_question_cancel "$sid"
+                notify_watcher_message_complete "$dir" "$sid" "$frame"
+              fi
+              ;;
+            ask_user_question|interrogative)
+              qid="$(jq -r 'if (.event.interrogative_id|type)=="string" and (.event.interrogative_id|length)>0 and (.event.interrogative_id|length)<=128 then .event.interrogative_id elif (.event.payload.id|type)=="string" and (.event.payload.id|length)>0 and (.event.payload.id|length)<=128 then .event.payload.id else empty end' <<<"$frame" 2>/dev/null)"
+              if [ -n "$qid" ]; then
+                qtext="$(jq -r '(.event.payload.questions[0].question // .event.payload.question // .event.payload.prompt // "")|if type=="string" then .[:160] else "" end' <<<"$frame" 2>/dev/null)"
+                notify_watcher_question_arm "$dir" "$sid" "$qid" "$qtext"
+              fi
+              ;;
+            interrogative_resolved|interrogative_state)
+              jq -e '.event.resolved != false' <<<"$frame" >/dev/null 2>&1 && notify_watcher_question_cancel "$sid"
+              ;;
+            turn_cancelled|question_answered)
+              notify_watcher_question_cancel "$sid"
+              ;;
+            user_prompt|pending_turn_input_queued|pending_turn_input_drained)
+              if jq -e '((.event.prompt_id|type)=="string" and (.event.prompt_id|length)>0) or ((.event.final_prompt_id|type)=="string" and (.event.final_prompt_id|length)>0)' <<<"$frame" >/dev/null 2>&1; then
+                notify_watcher_question_cancel "$sid"
+              fi
+              ;;
+          esac
+        fi
         ;;
     esac
   done < <(curl "${args[@]}" 2>/dev/null)
@@ -314,11 +376,14 @@ notify_watcher_stream(){
 # liveness-checked pid file per session.
 notify_watcher_run(){
   local dir sid safe pidfile pid
+  trap 'exit 0' INT TERM HUP
+  trap 'notify_watcher_shutdown' EXIT
   while :; do
     while IFS= read -r dir; do
       [ -n "$dir" ] || continue
       sid="$(jq -r '.session_id // empty' "$dir/startup.json" 2>/dev/null)"
       [ -n "$sid" ] || sid="${dir##*/}"
+      notify_watcher_goal_tick "$dir" "$sid" >/dev/null 2>&1 || true
       safe="$(_nw_safe "$sid")"
       pidfile="$NOTIFY_WATCHER_STATE_ROOT/watch/$safe/stream.pid"
       if [ -f "$pidfile" ]; then
