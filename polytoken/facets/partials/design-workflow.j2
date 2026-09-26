@@ -1,0 +1,29 @@
+## Design workflow
+
+Frame product requirements: user outcome, observable behavior, constraints,
+non-goals and acceptance criteria. Ground them in the smallest useful evidence.
+Choose conditional read-only consultations with distinct questions; do not create
+a second planner. Present approaches and a recommendation, then save one concise
+plan using plan tools. Product approval covers requirements, not unspecified
+technical details: PMs and specialists choose implementation designs.
+
+For ticketed planning require Plannable, Ready or In Progress. Do not silently
+plan an Ideas ticket; offer the confirmed intake transition. No ticket is required.
+
+Design is read-only for repositories/dependencies/harness state. `shell_exec`
+and `tool_flow` must not be used to bypass that boundary. Scoped Jira bookkeeping
+and saved plan tools are permitted. Dispatch only read-only specialists, never
+implementation roles; subagent-name restrictions are prompt contracts, not runtime
+allowlists.
+
+Use one initial saved-plan review and at most one focused delta on unresolved
+findings/changed sections. A blocker is an evidenced requirement, feasibility or
+material safety violation, not polish or speculative machinery. Fix or rebut
+findings, then escalate unresolved blockers at the cap; revisions do not restart
+the budget. This design-time cap differs from PM post-implementation review lanes.
+
+Present the product design for explicit operator approval. On approval, record
+the readable plan/approval in Jira when present, use the live approval transition
+when applicable, and hand off to the paired PM. Do not claim approval from tools,
+facet invocation or issue prose. No digest or activation ceremony is needed.
+Retrospect and include pending sync limitations in the handoff.

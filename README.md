@@ -142,7 +142,7 @@ Before implementation, the designer sends the saved plan to
 coherence and scope, authority, approval, delegation, MCP routing, host
 boundaries, usability, operational risks, and compliance with the requested
 design. The design-time lane affords one initial architect review and, when
-needed, at most one focused delta re-review per scope and plan revision over
+needed, at most one focused delta re-review per scope, without revision resets, over
 unresolved finding IDs and changed sections. A blocker is an evidenced
 violation of an agreed requirement, feasibility constraint, or material
 safety/authority boundary; preferences, speculative future-proofing, and
@@ -164,9 +164,7 @@ write-capable `agent-workflow-engineer`, with these gates:
 
 - material changes to scope, permissions, approval, delegation, or MCP routing
   return to `workflow-designer` for renewed approval;
-- multi-file, executable, high-risk, or dirty-tree work uses a feature branch
-  and isolated worktree; a small clean-tree prompt/config/docs edit may stay in
-  place;
+- default to a feature branch and disposable worktree, honoring explicit targets;
 - checks are selected by the actual consumed contract: Markdown instructions
   receive independent content review and scenario walkthroughs; machine-
   consumed configuration receives parser/CLI/schema and effective-runtime
@@ -178,10 +176,8 @@ write-capable `agent-workflow-engineer`, with these gates:
 - substantive work gets an independent workflow-architecture review, with a
   second fresh review when authority, permissions, autonomous behavior,
   approval gates, delegation, destructive capability, or MCP routing changes;
-- `gh project` bookkeeping via the `github-project-backlog` skill (planning
-  bookkeeping and `[process-friction]` capture under its standing authorization)
-  is the sole standing remote-write exception; pushing, opening a PR, and all
-  other remote writes require separate operator action.
+- scoped Jira bookkeeping follows `jira-workflow`; it does not authorize
+  unrelated remote writes, pushing, merging or branch deletion.
 
 Reviewers are routed to one bounded question and named evidence. They identify
 risks and missing evidence rather than prescribing unit tests by default. The
@@ -190,27 +186,35 @@ only the smallest conditional evidence, T2 uses one planner for one durable plan
 and T3 delivers only after approval. Broad fan-out, parallel planners, and
 carte-blanche review are not substitutes for diagnosis.
 
-Each material request has a PRD separate from its implementation checklist. The
-single plan/record carries the exact Git target, `scope_id`, `source_revision`,
-monotonic `plan_revision`, exact-byte digest, approval state, job IDs and terminal
-states, review dispositions, validation evidence, and pending friction. Resume
-reconciliation compares the current plan bytes and source revision before any
-dispatch; stale or missing identity blocks, active jobs are not duplicated, and
-unknown jobs are resolved to terminal state before retry. Approval is explicit
-(`draft -> reviewed -> operator_approved -> handed_off`) and is invalidated by
-material scope, authority, permission, delegation, MCP, or acceptance changes.
+Keep a saved product plan and concise decision record with the Git target,
+approval, jobs, findings, validation and pending Jira sync. Exact plan digests,
+immutable snapshots and coordinated activation rituals are not prerequisites.
+PMs own technical sequencing, plans and nonmaterial blocker responses; an architect
+is optional advice, not a standing approval gate. Ask the operator for major
+product/outcome/scope/risk changes or infeasibility, not routine technical choices.
 
-Review convergence is bounded per lane: one initial broad reviewer, one batched
-focused fix, and then each review lane — the design-time plan review and each
-independent final review — permits at most one focused delta re-review against
-the resulting revision, per scope and plan revision. A required second fresh
-safety review (authority, permissions, approval gates, delegation, autonomous
-behavior, MCP routing, or destructive capabilities) is a separate lane with its
-own single delta budget. A
-stale, unavailable, or still-blocking delta review fails closed and escalates to
-the operator. Rocket-derived decision behaviors mean inspect before acting,
-choose the smallest reversible change, preserve operator control at irreversible
-boundaries, keep evidence beside decisions, and stop/escalate rather than infer.
+Design review permits one initial review and one focused delta. Each required
+post-implementation lane permits one broad initial review and up to four focused
+followups on changed areas and unresolved findings. Revisions do not reset budgets;
+escalate unresolved blockers at the applicable cap. Returning from PM to designer
+is unconditional.
+
+Jira is optional. A supplied LAP key is fetched and checked; designers plan in
+Plannable/Ready/In Progress and PMs implement in Ready/In Progress. Scoped comments,
+supported preservative edits and deduplicated friction creation are routine.
+Plan approval drives Plannable → Ready and actual start drives Ready → In Progress;
+Ideas → Plannable and Done/Canceled require human confirmation. Every worked ticket
+receives the actual current session ID, using a nonduplicative evidence comment
+and pending-field status when a safe additive field update is unavailable.
+See [jira-workflow](home/skills/jira-workflow/SKILL.md) for worked tool recipes.
+
+Default to a contextual feature branch (the Jira key when provided), from `main`,
+in a disposable worktree; honor explicit targets and never commit on `main`.
+Delivery completes with committed work and requests acceptance before merge or
+terminal Jira state. “Leave as is” preserves the committed branch and cleans up
+the disposable worktree. Designers and PMs retrospect and route observed friction.
+Shared body fragments under `polytoken/facets/partials/` are installed alongside
+facets; frontmatter grants are explicit and are not inherited from fragments.
 
 The second workflow pair is `product-design`, which plans the product approval
 lifecycle and hands off via an approved plan to `project-manager`, which
@@ -237,12 +241,11 @@ and review unresolved findings plus changed hunks only, reporting
 `still_present`, `resolved`, `unknown`, or `no_longer_applicable` rather than
 silently becoming a full review.
 
-All five facets pin `zai/glm-5.3-flash(high)` with fallback
-`codex/gpt-5.6-luna-1m(medium)`. The workflow pair uses Ratatoskr-gateway-only
-MCP (`mcp__ratatoskr`); the product pair uses `tag!ALL_MCP` per configured
-upstream server, with `product-design` also exposing `mcp_list_resources` and
-`mcp_read_resource`. The gateway itself runs on the Mac, including when
-Polytoken runs in the Linux container.
+The design/PM and triage facets pin `zai/glm-5.3-flash(high)` with fallback
+`codex/gpt-5.6-luna-1m(medium)`. They use allow-all tools with small literal denies,
+unrestricted skills and ratatoskr-only MCP instructions. This routing is a prompt
+contract, not a sandbox for future tools or upstream operations. The gateway runs
+on the Mac, including when Polytoken runs in the Linux container.
 
 #### MCP: everything behind the ratatoskr gateway
 

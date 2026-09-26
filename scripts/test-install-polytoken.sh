@@ -81,6 +81,11 @@ actual_subagents="$(find "$D/subagents" -type f -name '*.md' -printf '%P\n' | so
   && ok "installed exactly the 15 shipped subagents + shared partial" || no "installed exactly the 15 shipped subagents + shared partial"
 cmp -s "$REPO/polytoken/subagents/partials/review-contract.md" "$D/subagents/partials/review-contract.md" 2>/dev/null \
   && ok "installed review-contract partial matches source" || no "installed review-contract partial matches source"
+for fragment in workflow-common design-workflow delivery-workflow; do
+  cmp -s "$REPO/polytoken/facets/partials/$fragment.j2" "$D/facets/partials/$fragment.j2" \
+    && ok "installed facet fragment matches source: $fragment" \
+    || no "installed facet fragment matches source: $fragment"
+done
 expected_facets="$(printf '%s\n' code-review.md process-friction-triage.md product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \

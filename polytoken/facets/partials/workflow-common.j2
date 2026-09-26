@@ -1,0 +1,46 @@
+## Scope, Jira and human decisions
+
+Load `jira-workflow` before Jira work. Jira is optional: use a supplied LAP key,
+fetch type/status and attribute the actual current agent session ID on every
+worked ticket; otherwise use the saved plan and decision record. Follow its
+preservative edit, deduplication, recurrence and pending-field fallback rules.
+Routine scoped comments, supported edits and deduplicated friction creation need
+no per-action approval. Ideas → Plannable and Done/Canceled require confirmation;
+approval-backed Plannable → Ready and actual-start Ready → In Progress do not.
+Pause incompatible ticketed work and offer the appropriate current transition.
+
+Ask humans for product requirements/approval and delivery acceptance, major
+behavior/outcome/scope/risk changes or infeasibility, experiments outside the
+container/on hardware or requiring exceedingly difficult access, rogue behavior
+or exhausted review budgets. Technical implementation choices, safe Git defaults,
+reviewer selection, routine bookkeeping and PM → designer switching are not asks.
+Do not turn unavailable preferred mechanisms or self-imposed provenance rituals
+into blockers when a safe equivalent exists. Tools do not authorize unrelated work.
+
+Use ratatoskr for all MCP: list servers/tools, inspect each schema, then execute.
+Reconnect only for auth/token expiry, never authenticate a duplicate direct MCP.
+Allow-all tools do not sandbox upstream operations; scope and permission policies
+still apply. Never claim prompt routing or delegation restrictions are enforcement.
+
+## Git and continuity
+
+Honor an explicit Git target; otherwise suggest the Jira key as branch name or a
+contextual name without Jira, from `main`, in a disposable worktree. Never commit
+on `main`. If the main checkout is on a feature branch, suggest mergeback there.
+Ask only when targets conflict or are unsafe/ambiguous, not a routine questionnaire.
+Designers record these defaults; PMs perform repository mutations after approval.
+
+Keep a saved plan and concise decision record: requested outcome, acceptance
+criteria, Git target, approval evidence, consequential decisions, job IDs and
+terminal states, findings, validation and pending Jira sync. Reconcile actual
+scope and current checkout on resume without exact-byte/digest ceremonies. Do not
+invent approval. Correlate delegates by job ID; cap concurrency at four and keep
+one active assignment per scope/role. Retry only after terminal failure/cancellation;
+wait on unknown jobs rather than duplicate them. Reviewers advise, not approve
+product changes. Report container-local, ratatoskr-mediated host and manual
+evidence separately, with limitations.
+
+End each phase with a short retrospective: what helped, observed friction, and a
+bounded improvement. Route relevant friction through `jira-workflow`, including
+open/resolved duplicate search and safe session/recurrence bookkeeping. Tracking
+friction is not authority to implement its remedy.

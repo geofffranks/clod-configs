@@ -244,6 +244,7 @@ start_daemon() {
   referenced_disabled_note "$cfg/config.yaml"
   enable_referenced_models "$cfg/config.yaml"
   cp "$FACETS_SRC/"*.md "$cfg/facets/"
+  cp -R "$FACETS_SRC/partials" "$cfg/facets/partials"
   cp "$SUBAGENTS_SRC/"*.md "$cfg/subagents/"
   DAEMON_WORK="$work"
   DAEMON_URL=""; DAEMON_TKN=""; DAEMON_PID=""
@@ -393,19 +394,10 @@ run_designer_authority() {
   sc "designer frontmatter contract"
   expect_fm "designer: model pin" "$DESIGNER" '.polytoken.model' '"zai/glm-5.3-flash(high)"'
   expect_list "designer: fallback_models" "$DESIGNER" '.polytoken.fallback_models' "codex/gpt-5.6-luna-1m(medium)"
-  expect_list "designer: tools" "$DESIGNER" '.polytoken.tools' \
-    "file_read,glob,grep,shell_exec,web_search,web_fetch,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,write_plan,edit_plan,handoff_plan,read_goal,block_goal,mcp__ratatoskr"
+  expect_list "designer: tools" "$DESIGNER" '.polytoken.tools' "tag!ALL,mcp__ratatoskr"
   expect_list "designer: tools_deny" "$DESIGNER" '.polytoken.tools_deny' \
-    "file_write,file_edit_search_replace,shell_monitor,shell_service,lsp,switch_facet,complete_goal"
-  expect_list "designer: undeferred_tools" "$DESIGNER" '.polytoken.undeferred_tools' \
-    "file_read,glob,grep,shell_exec,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,write_plan,edit_plan,handoff_plan"
-  expect_list "designer: skills_allow" "$DESIGNER" '.polytoken.skills_allow' \
-    "tag!research,brainstorming,github-project-backlog,agent-orchestration,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
-  expect_fm "designer: skills_deny empty" "$DESIGNER" '.polytoken.skills_deny' '[]'
-  expect_fm "designer: autonomous_hint" "$DESIGNER" '.polytoken.autonomous_hint' \
-    '"Allow read-only investigation, read-only specialist consultation, plan editing, approval handoff, and `gh project` planning bookkeeping via the `github-project-backlog` skill (including `[process-friction]` capture under its standing authorization); deny all other direct or delegated project mutation during design."'
-  expect_fm "designer: compaction_hint" "$DESIGNER" '.polytoken.compaction_hint' \
-    '"Preserve goals, constraints, evidence, alternatives, specialist job IDs/results, review dispositions, plan revision, approval state, and pending-friction items not yet synced to Project #1 (with friction-keys)."'
+    "file_write,file_edit_search_replace,patch_edit,shell_monitor,shell_service,lsp,switch_facet,complete_goal"
+  expect_fm "designer: unrestricted skills" "$DESIGNER" '.polytoken.skills_allow' 'null'
   [ "$(fm_json "$DESIGNER" '.polytoken.facet_transitions')" = "null" ] \
     && ok "designer: no facet_transitions block" || no "designer: no facet_transitions block"
 
@@ -418,7 +410,7 @@ run_designer_authority() {
         && ok "runtime: designer model pin resolves" || no "runtime: designer model pin resolves (got $(jq -r .model "$out"))"
       local names n missing=""
       names="$(plan_names "$out")"
-      local required="ask_user_question block_goal edit_plan file_read glob grep handoff_plan job_block job_cancel job_result job_status list_jobs message_subagent read_goal skill subagent tool_search web_fetch web_search write_plan"
+      local required="ask_user_question block_goal edit_plan file_read glob grep handoff_plan job_block job_cancel job_result job_status list_jobs message_subagent read_goal skill subagent tool_search tool_flow web_fetch web_search write_plan"
       for n in $required; do
         grep -qx "$n" <<<"$names" || missing="$missing $n"
       done
@@ -460,61 +452,12 @@ run_approval_contract() {
     && ok "runtime: active facet is workflow-project-manager after handoff" \
     || no "runtime: active facet is workflow-project-manager after handoff"
 
-  sc "conditional return to designer gates on confirmation (runtime)"
-  local logfile known newid i
-  # Baseline of pending interrogative IDs, captured before triggering.
-  known="$(daemon_state | jq -r '.pending_interrogatives[].interrogative_id' 2>/dev/null | head -n 1)"
-  local curlout="$DAEMON_WORK/condswitch.log"
-  curl -sS --max-time 60 -o "$DAEMON_WORK/condswitch-body.json" -w '%{http_code}' -X POST \
-    -H "Authorization: Bearer $DAEMON_TKN" -H 'Content-Type: application/json' \
-    -d '{"facet":"workflow-designer"}' "$DAEMON_URL/facet" > "$curlout" 2>&1 &
-  local curlpid=$!
-  track_child "$curlpid" 1
-  newid=""
-  for i in $(seq 1 40); do
-    local pending; pending="$(daemon_state | jq -r '.pending_interrogatives[].interrogative_id' 2>/dev/null)"
-    if [ -n "$known" ]; then
-      newid="$(grep -v -x -F -- "$known" <<<"$pending" | head -1)"
-    else
-      newid="$(head -1 <<<"$pending")"
-    fi
-    [ -n "$newid" ] && break
-    sleep 0.5
-  done
-  [ -n "$newid" ] && ok "runtime: conditional transition raised a confirmation interrogative" \
-    || no "runtime: conditional transition raised a confirmation interrogative"
-  if [ -n "$newid" ]; then
-    local q
-    q="$(daemon_state | jq -r ".pending_interrogatives[] | select(.interrogative_id==\"$newid\") | .question" 2>/dev/null)"
-    [ -n "$q" ] \
-      && ok "runtime: conditional transition raised a non-empty confirmation question" \
-      || no "runtime: conditional transition raised a non-empty confirmation question"
-    code="$(dapi POST "/interrogative/$newid/respond" '{"kind":"confirmation_answer","confirmed":true}' "$out")"
-    [ "$code" = 200 ] && ok "runtime: confirmation accepted (HTTP 200)" || no "runtime: confirmation accepted (HTTP $code)"
-  fi
-  # Allow the confirmed response to flush before bounded lifecycle cleanup.
-  for i in $(seq 1 50); do
-    proc_dead "$curlpid" && break
-    sleep 0.2
-  done
-  if kill_child "$curlpid"; then
-    local finalcode; finalcode="$(grep -oE '[0-9]{3}$' "$curlout" | tail -1)"
-    [ "$finalcode" = 200 ] && ok "runtime: conditional switch POST completed 200 after confirmation" \
-      || no "runtime: conditional switch POST completed 200 (got ${finalcode:-missing})"
-  else
-    no "runtime: conditional switch child terminated and was reaped within bounded deadline"
-    no "runtime: conditional switch POST completed 200 after confirmation (child still alive/unreapable)"
-  fi
+  sc "unconditional return to designer (runtime)"
+  code="$(dapi POST /facet '{"facet":"workflow-designer"}' "$out")"
+  [ "$code" = 200 ] && ok "runtime: PM return requires no confirmation" \
+    || no "runtime: PM return requires no confirmation (HTTP $code)"
   [ "$(daemon_state | jq -r .active_facet)" = "workflow-designer" ] \
-    && ok "runtime: confirmed switch lands on workflow-designer" \
-    || no "runtime: confirmed switch lands on workflow-designer"
-  # The session log lives under the on-disk session directory, which differs
-  # from the session_id field of /state. The isolated sessions dir belongs to
-  # this daemon alone, so locate it directly.
-  # This controller-only smoke has no model session, so no session log is
-  # created. The active facet and confirmed response above are the available
-  # runtime evidence; session-log provenance is not applicable here.
-  echo "  not applicable: session log provenance requires a started model session"
+    && ok "runtime: return lands on designer" || no "runtime: return lands on designer"
   stop_daemon
 }
 
@@ -523,25 +466,14 @@ run_delivery_policy() {
   sc "delivery frontmatter contract"
   expect_fm "workflow-project-manager: model pin" "$DELIVERY" '.polytoken.model' '"zai/glm-5.3-flash(high)"'
   expect_list "workflow-project-manager: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "codex/gpt-5.6-luna-1m(medium)"
-  expect_list "delivery: tools" "$DELIVERY" '.polytoken.tools' \
-    "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,shell_monitor,shell_service,subagent,message_subagent,skill,job_status,job_block,job_result,job_cancel,list_jobs,ask_user_question,tool_search,todo_create,todo_update,todo_complete,todo_delete,todo_list,pushd,popd,switch_facet,propose_goal,read_goal,complete_goal,block_goal,mcp__ratatoskr"
-  expect_list "delivery: tools_deny" "$DELIVERY" '.polytoken.tools_deny' \
-    "write_plan,edit_plan,handoff_plan"
-  expect_list "delivery: undeferred_tools" "$DELIVERY" '.polytoken.undeferred_tools' \
-    "file_read,file_write,file_edit_search_replace,glob,grep,lsp,shell_exec,subagent,message_subagent,skill,job_status,job_block,job_result,list_jobs,ask_user_question,todo_create,todo_update,todo_complete,todo_list,read_goal,complete_goal,block_goal,propose_goal"
-  expect_list "delivery: skills_allow" "$DELIVERY" '.polytoken.skills_allow' \
-    "tag!research,brainstorming,github-project-backlog,agent-orchestration,git-workflow,using-git-worktrees,systematic-debugging,test-driven-development,receiving-code-review,requesting-code-review,verification-before-completion,artifact-retention-policy,polytoken:modifying-polytoken,polytoken:researching-on-the-internet,polytoken:investigating-a-codebase"
-  expect_fm "delivery: skills_deny empty" "$DELIVERY" '.polytoken.skills_deny' '[]'
-  expect_fm "delivery: autonomous_hint" "$DELIVERY" '.polytoken.autonomous_hint' \
-    '"Allow approved bounded implementation and verification; `gh project` planning bookkeeping writes via the `github-project-backlog` skill (friction sync) proceed under its standing authorization; require confirmation for scope expansion, any other remote writes, destructive operations, or unverified authority."'
-  expect_fm "delivery: compaction_hint" "$DELIVERY" '.polytoken.compaction_hint' \
-    '"Preserve approval evidence or its absence, approved scope, change classes, worktree/CWD, jobs, revisions, review dispositions, tests, limitations, completion state, and pending-friction items not yet synced to Project #1 (with friction-keys)."'
+  expect_list "delivery: tools" "$DELIVERY" '.polytoken.tools' "tag!ALL,mcp__ratatoskr,switch_facet"
+  expect_list "delivery: tools_deny" "$DELIVERY" '.polytoken.tools_deny' "write_plan,edit_plan,handoff_plan"
+  expect_fm "delivery: unrestricted skills" "$DELIVERY" '.polytoken.skills_allow' 'null'
   [ "$(fm_json "$DELIVERY" '.polytoken.facet_transitions.workflow-designer.allowed')" = "true" ] \
     && ok "delivery: facet_transitions.workflow-designer.allowed is true" \
     || no "delivery: facet_transitions.workflow-designer.allowed is true"
-  expect_fm "delivery: transition condition exact" "$DELIVERY" \
-    '.polytoken.facet_transitions.workflow-designer.condition' \
-    '"Material redesign requires renewed planning and operator approval."'
+  expect_fm "delivery: return is unconditional" "$DELIVERY" \
+    '.polytoken.facet_transitions.workflow-designer.condition' 'null'
 
   sc "delivery policy and isolation (manual content review)"
   echo "  manual: independently review delivery isolation and delegation wording"
@@ -618,7 +550,7 @@ run_ratatoskr() {
     stop_daemon
     return
   fi
-  for facet in workflow-designer workflow-project-manager; do
+  for facet in workflow-designer workflow-project-manager product-design project-manager process-friction-triage; do
     out="$DAEMON_WORK/$facet-effective.json"
     if effective_plan "$facet" "$out"; then
       bad_mcp="$(jq -r '.plan.full_schema[].name' "$out" | grep '^mcp__' | grep -v '^mcp__ratatoskr__' || true)"
@@ -656,30 +588,8 @@ run_docs() {
   sc "docs validation (manual content review)"
   echo "  manual: independently review README workflow documentation"
 
-  sc "workflow lifecycle and evidence contract assertions"
-  local f t missing
-  for f in "$PRODUCT_DESIGN" "$PROJECT_MANAGER" "$DESIGNER" "$DELIVERY"; do
-    missing=""
-    for t in T0 T1 T2 T3 source_revision plan_revision approval; do
-      grep -Fq "$t" "$f" || missing="$missing $t"
-    done
-    [ -z "$missing" ] && ok "$(basename "$f"): PRD/approval/revision/T0-T3 contract" \
-      || no "$(basename "$f"): PRD/approval/revision/T0-T3 contract (missing:$missing)"
-  done
-  for t in 'scope_id' 'source_revision' 'plan_revision' 'exact-byte digest' 'fails closed'; do
-    grep -Fq "$t" "$README" && ok "README: workflow contract mentions $t" \
-      || no "README: workflow contract mentions $t"
-  done
-  for f in "$SUBAGENTS_SRC/validator.md" "$SUBAGENTS_SRC/review-general.md" "$SUBAGENTS_SRC/agent-workflow-architect.md"; do
-    grep -Fq 'source_revision' "$f" && grep -Fq 'scope_id' "$f" && grep -Fq 'evidence' "$f" \
-      && ok "$(basename "$f"): revision-bound evidence contract" \
-      || no "$(basename "$f"): revision-bound evidence contract"
-  done
-  if tr '\n' ' ' < "$DELIVERY" | grep -Fq 'at most one focused delta re-review against'; then
-    ok "workflow-project-manager: one-delta convergence cap"
-  else
-    no "workflow-project-manager: one-delta convergence cap"
-  fi
+  echo "  manual: walk through scripts/jira-triage-validation.md against rendered roles"
+  echo "  limitation: no literal phrase assertions or policy simulator prove prompt adherence"
 }
 
 # =====================================================================

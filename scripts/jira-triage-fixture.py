@@ -1,6 +1,8 @@
 """Offline validation support, NOT a production gateway or agent-policy engine.
 
-The explicit decision adapter is the revision-3 fallback, not the facet runtime.
+RETIRED: the revision-3 decision adapter below is historical, not current policy
+or the facet runtime. Its create-confirmation and digest gates are superseded by
+jira-workflow. Do not use it as validation evidence; see jira-triage-validation.md.
 No endpoint, network, process or filesystem interface exists in this module.
 """
 from copy import deepcopy

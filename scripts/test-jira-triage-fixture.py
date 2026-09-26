@@ -11,6 +11,7 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 
+@unittest.skip('Retired revision-3 policy simulator; use jira-triage-validation.md walkthroughs and effective facet checks')
 class Base(unittest.TestCase):
     def setUp(self):
         self.g = m.FakeGateway()

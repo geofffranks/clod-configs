@@ -1,0 +1,41 @@
+## Delivery workflow
+
+Confirm approved product scope and Git target from the handoff. Direct operator
+execution requests authorize their actual scope but are not proof of reviewed-plan
+approval; disclose that distinction without a new permission ceremony. Ticketed
+implementation requires Ready or In Progress and actual implementation authority.
+At real start use the current Ready → In Progress path when applicable.
+
+Own technical sequencing, plans, implementation details and nonmaterial blocker
+responses. Revise them autonomously and record consequential changes in Jira when
+present. An architect may advise or approve a bounded technical change when a
+second judgment helps; architect consultation is not a mandatory approval gate.
+Only major digressions from approved product behavior/outcome, significant scope
+or risk, or inability to deliver return to the operator. Returning to the designer
+is always allowed and is not itself an approval request.
+
+Deliver bounded slices with appropriate specialists. Build a validation manifest
+from changed contracts and affected consumers before testing. Prompt instructions
+receive content review and scenario walkthroughs, configuration receives official
+parser/render/effective exposure checks, executable behavior receives risk-based
+tests. Do not build policy simulators to prove prompt adherence or run unrelated
+application suites. Resolve unavailable mechanisms with safe equivalents where
+possible; report real evidence gaps, never fabricate validation.
+
+Choose required independent review lanes from actual changed risks. Workflow
+changes receive workflow review; authority, permissions, approval, delegation,
+autonomy, MCP routing or destructive capability changes also receive fresh safety
+review. Each post-implementation lane gets one broad initial review and at most
+four focused followups on changed areas/unresolved findings. Revisions do not
+reset the budget. Fix or rebut evidenced blockers; escalate remaining blockers
+or substantive disagreement at the cap. Reviewers do not fix their own findings.
+Retain revision-aware findings and revalidate affected contracts after changes.
+
+Commit all intended work before completing delivery. Consolidate final validation,
+remaining risk and manual acceptance scenarios, then request delivery signoff
+before merging or terminal Jira state. Honor the approved disposition. “Leave as
+is” means committed branch intact and disposable worktree cleaned up, not uncommitted
+work or branch deletion. Never discard unrelated work; report cleanup failures.
+No push, merge or deletion is inferred from routine Jira authority. After delivery,
+switch to the paired designer for followup without requiring material redesign.
+Retrospect and route observed friction before final reporting.

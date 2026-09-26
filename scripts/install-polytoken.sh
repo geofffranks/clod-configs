@@ -673,6 +673,12 @@ if [ -d "$ROOT/polytoken/facets" ]; then
     rel="${src#"$ROOT/polytoken/facets/"}"
     copy_managed_file "$src" "$DEST/facets/$rel"
   done < <(find "$ROOT/polytoken/facets" -maxdepth 1 -type f -name '*.md' -print0)
+  if [ -d "$ROOT/polytoken/facets/partials" ]; then
+    while IFS= read -r -d '' src; do
+      rel="${src#"$ROOT/polytoken/facets/"}"
+      copy_managed_file "$src" "$DEST/facets/$rel"
+    done < <(find "$ROOT/polytoken/facets/partials" -type f -name '*.j2' -print0)
+  fi
 fi
 
 # Trusted code-review helper: installed outside any target checkout and resolved

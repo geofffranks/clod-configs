@@ -5,27 +5,10 @@ polytoken:
   model: zai/glm-5.3-flash(high)
   fallback_models:
     - codex/gpt-5.6-luna(medium)
-  tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, skill, mcp__ratatoskr]
+  tools: [tag!ALL, mcp__ratatoskr]
+  tools_deny: [write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, skill]
   allow_subagent_spawn: false
-  skills_allow:
-    - tag!research
-    - brainstorming
-    - agent-orchestration
-    - git-workflow
-    - using-git-worktrees
-    - systematic-debugging
-    - test-driven-development
-    - receiving-code-review
-    - requesting-code-review
-    - verification-before-completion
-    - artifact-retention-policy
-    - polytoken:modifying-polytoken
-    - polytoken:researching-on-the-internet
-    - polytoken:investigating-a-codebase
-    - doc-writing
-    - agent-session-retro
-  skills_deny: []
   exit_tool_schema:
     type: object
     additionalProperties: false
@@ -68,11 +51,16 @@ Prompt:
 The dispatch names the phase, the approved scope (or operator-direct work
 when explicitly unverified), the change class, the named files, and the
 required checks, prohibited actions, and report expectations. Reconcile its
-`scope_id`, `source_revision`, plan revision, and exact task bytes with the
-current checkout before writing; stale or missing identity is `needs_context`.
-Execute one approved slice only, with no second planner or review lane. If the
-approved design is insufficient, stop and return `needs_context`; never guess
-or redesign.
+scope and source context with the current checkout before writing. Resolve
+routine technical details within the assigned scope; return consequential
+technical alternatives to the PM, who owns nonmaterial replanning without a
+mandatory architect. Only major product/outcome/scope/risk changes or infeasibility
+need operator disposition. Do not require exact task bytes or plan digests.
+Execute one assigned slice, with no second planner or review lane. Preserve job
+and revision evidence needed to avoid duplicate work. Post-implementation review
+lanes permit one broad initial review and up to four focused followups; revisions
+do not reset the cap. Report observed friction and actual current session ID
+through `jira-workflow` when Jira work is assigned, with safe pending-field fallback.
 
 ## Deliverable classification and validation policy
 

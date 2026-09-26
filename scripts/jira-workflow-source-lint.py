@@ -15,8 +15,6 @@ LEGACY = re.compile(r'github\s+projects?\b|\bgh\s+project\b|\bherdle\b|\bproject
 EXCEPTIONS = {
     ('global', 'polytoken/hooks/container-awareness.sh'):
         {"- The herdle lifecycle gatekeeper builds from source on first use (no prebuilt binary in the container). Lifecycle gates ARE enforced; the first gated tool call in a session takes a few seconds to compile, then the cached binary is near-instant.' \\"},
-    ('global', 'home/skills/jira-workflow/SKILL.md'):
-        {'The retained dcs-retribution herdle workflow is an explicit repository exception;'},
     # Reviewed TDC archive notices; exact wording denies live archive authority.
     ('tdc', 'AI-EXPERTS.md'):
         {'GitHub Project #1 is a frozen, read-only historical archive; Jira is authoritative.'},

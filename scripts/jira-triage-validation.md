@@ -1,79 +1,95 @@
-# Revision-3 triage validation manifest
+# Jira workflow validation
 
-Scope: `lap-105-108-cohesive-design`, plan revision 3, snapshot SHA-256
-`501275335ea8930722e76dfa8e0bf2e90b6811183c7f37ef5f1495603d72c385`.
-Baseline GLOBAL `7425984dde926f349e6506d490999a61c881906c`.
+Scope: `JIRA-WORKFLOW-REDESIGN-0c2rae-urban`, source base
+`6d44200146ded41f3c289e0ba041db3208e3f132`. This supersedes revision-3 fixture
+policy. The old decision adapter does not execute prompts; its tests are retired,
+not runtime proof. No TDD is required for skill/facet Markdown.
 
-## Contracts and checks
+## Validation manifest
 
-| Changed paths | Consumed contract / consumer | Focused check |
+| Changed paths / consumers | Contract | Focused checks |
 |---|---|---|
-| `home/skills/jira-workflow/SKILL.md` | Prompt authority for eligible Jira actors; skill frontmatter | CLI skill validation; content review and named scenario walkthroughs |
-| `polytoken/facets/process-friction-triage.md` | Facet loader frontmatter and actor prompt | CLI facet validation; effective-plan and refusal checks at authorized rollout |
-| `scripts/jira-triage-fixture.py`, `scripts/test-jira-triage-fixture.py` | Offline validation support only | Python unittest runner, positive/negative calls and fault fixtures |
-| `scripts/test-install-polytoken.sh` | Existing installer-test facet inventory | Shell syntax and source inventory comparison; installer execution withheld by no-install restriction |
-| This manifest | Evidence classification | Manual review |
+| `home/skills/jira-workflow/SKILL.md`, five scoped facets, `facets/partials/*.j2`, two workflow specialists, README | Agent instructions | Manual content review and scenarios below; no literal phrase assertions or policy simulator |
+| Facet/subagent frontmatter and body transclusion | Loader, effective tools/skills, transitions | Official `polytoken validate`, rendered prompt and `/tools/effective`; unconditional PM return controller check |
+| `scripts/install-polytoken.sh` | Managed installation | Shell syntax, isolated installer checks, copied fragment equality and rendered installed facets |
+| Existing workflow harness/source lint and fixture retirement | Validation support | Shell/Python parsing, source lint, explicit skip results; no new production behavior engine |
 
-Run from the feature worktree:
+Container-local commands: `bash scripts/test-polytoken-workflow-facets.sh
+--validate-definitions`, `--designer-authority`, `--approval-contract`; source lint
+`bash scripts/test-jira-workflow-contracts.sh`; installer
+`bash scripts/test-install-polytoken.sh`. Run focused modes rather than unrelated
+application suites. Application builds, mobile suites and full daemon suite are
+not applicable: no application contract changed. Existing unrelated daemon
+failures are not evidence of a new regression.
 
-```sh
-polytoken validate skill home/skills/jira-workflow/SKILL.md
-polytoken validate facet polytoken/facets/process-friction-triage.md
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-jira-triage-fixture.py
-bash scripts/test-jira-workflow-contracts.sh
-git diff --check
-```
+Ratatoskr-mediated host checks inspect Jira schemas and read-only samples for
+Story/Bug/AI Workflow/Process Friction. Never create lifecycle test tickets or
+write production fields as a probe. Schema validity does not prove custom-field
+encoding, concurrency safety, or model adherence.
 
-All are container-local. Existing source lint is inventory/legacy-reference
-validation only. Full application/mobile/native suites are not applicable:
-there is no affected application or integration code. No shared runtime or
-installer changes; dcs/unrelated-repository runtime regression suites are not
-applicable to this delta. Independent implementation/safety reviews belong to
-the parent delivery lane, not this helper.
+## Focused manual walkthroughs
 
-## Why retain the fake harness?
+Review the rendered roles and skill, not a Python imitation of policy:
 
-The approved fallback needs observable calls, attempted writes, consumed
-confirmation, unchanged declines and uncertain-outcome reconciliation. Lexical
-lint cannot observe these. The adapter supplies in-memory issue states and
-transition objects with denial, timeout-after-mutation, index lag and partial
-readback; no endpoint option, network client, shell or production connection.
-Its contract tests reject uninspected/unauthorized fake calls and retain rejected
-write attempts. The separate decision adapter makes scripted calls through this
-boundary. It is NOT production authorization middleware and is NOT connected to
-the facet runtime; it does not load prompt text or prove model adherence.
+1. **Optional intake (AC.1, AC.7):** A free-form feature proceeds with saved plan,
+   contextual branch from main and disposable worktree. LAP key fetches type/status
+   and suggests that key as branch name. Ideas pauses planning and offers confirmed
+   intake. Ready/In Progress permits planning; PM rejects Plannable implementation
+   unless approval enables the routine Ready step. Explicit target wins.
+2. **Lifecycle/plan (AC.2, AC.3):** Approved product plan is posted readably and
+   Plannable → Ready needs no second ask. Real start moves Ready → In Progress.
+   Done/Canceled needs acceptance/confirmation and live name+destination check.
+   Process Friction does not acquire an invented Ready route. Normalized Markdown
+   succeeds if semantically complete; missing/truncated pages remain pending.
+   `file_read` wrappers are stripped, actual Markdown preserved, all pages read;
+   unavailable tool-flow composition uses sequential read → gateway comment.
+3. **Attribution (AC.4):** For each of Story, Bug, AI Workflow, Process Friction,
+   an actual current session ID is added without replacing existing IDs. A repeat
+   encounter does not duplicate it. Unsupported encoding or unsafe concurrency
+   yields a nonduplicative session evidence comment and pending field status,
+   while unrelated work continues. Missing identity is disclosed, never invented.
+   A timeout triggers reconciliation before retry, not duplicate comments.
+4. **Friction (AC.4):** Search open AND resolved semantic/root matches. A relevant
+   match gets evidence/session attribution; fresh occurrence Count changes only
+   with proven safe update. Retry is not recurrence. Unknown Count is not zero;
+   inconclusive search does not permit creation. A new deduplicated issue includes
+   stable symptom, impact, reproduction and non-authorization warning; creation
+   needs no second ask, closure does.
+5. **Technical autonomy/review (AC.5, AC.6):** PM changes sequencing or an unspecified
+   implementation detail without architect approval. Optional advice resolves a
+   technical judgment. Changed user outcome/significant risk returns to operator.
+   Design review stops after one delta; delivery lanes stop after four focused
+   followups, never restart on revision. Both roles retrospect and route friction.
+6. **Delivery (AC.7):** All intended work committed before completion. Acceptance
+   precedes merge/terminal status. Leave-as-is removes disposable worktree only
+   after safe committed state, preserves branch, and reports cleanup failures.
+   PM returns to designer without a material-change confirmation.
 
-Named classes map directly to AC.1–AC.6: `TriageDedupeCases`,
-`TriageCreateAuthorizationCases`, `TriageCloseAuthorizationCases`,
-`LifecycleGateCases`, `OccurrenceIdentityCases`, `UnsafeFieldPendingCases`,
-`PlanRoundTripCases`, `TriageNegativeMutationCase`. `FakeAdapterContract` tests
-the boundary itself. Passing these establishes fixture behavior only, not live
-Jira payload support, semantic matching quality, persistence or exact-once safety.
-The lifecycle/occurrence helpers are explicit scenario oracles, not an automated
-evaluation of the skill. No prompt-body literal tests or production TDD claim.
+## Implementation evidence
 
-## Manual prompt walkthrough / required rollout evidence
+Container-local checks passed: official definition loader 21/21; designer effective
+contract 10/10; unconditional workflow PM return 7/7; PM effective contract 12/12;
+all-five-facet gateway exposure 14/14; installer 254/254 including three fragment
+copy comparisons; source lint and shell syntax. Retired fixture: 16 skipped, not
+16 passed. Initial runtime failure identified missing explicit `switch_facet`
+grants on PMs and was corrected before the successful runs. An earlier combined
+runtime command timed out; successful focused reruns supersede it.
 
-- Relevant open/resolved match: evidence and actual session attribution, no
-  duplicate/reopen. Distinct cause or uncertain search: ask before proposing.
-- Create: particular exact proposal confirmation permits one attempt; decline,
-  generic approval, changed fields or stale search permits none. Unknown outcome
-  consumes consent and blocks blind retry, even with delayed indexing.
-- Close: verify remedy or legitimate named disposition and intended live path;
-  confirm exact key/state/destination/evidence. Stale state, missing path,
-  unverified remedy or global Done shortcut stops.
-- Preserve four design/PM actors' existing routine authority and lifecycle gates;
-  wrong-state correction asks; Ready is not implementation approval.
-- Two events in one session are distinct; repeated reports are not occurrences.
-  Unsafe payload/history/concurrency leaves Count/session fields pending.
-- Exact snapshot bytes and external digest plus key/scope/target/source/revision
-  must survive fresh-session retrieval. Outage or stale identity blocks transfer.
-- Partial installation grants nothing. Audit loaded skill and effective tools
-  after coordinated authorized installation/reload. Generic ratatoskr execute
-  is write-capable, not an enforceable operation sandbox.
+Manual self-review walked the six scenarios above against the skill and shared
+bodies. Official templating documentation confirms relative subtree paths and
+body-only transclusion; the loader and daemon accept these definitions. No
+render-only CLI/API was found, so actual model-rendered fragment content remains
+unverified. The live configuration disables fallback models; tests enable only
+referenced models in isolated copies, never modify live config. Daemon cleanup
+can print `Killed` after successful assertions.
 
-Pending operator-authorized rollout: `InstalledPolicyExposureCheck`, effective
-facet refusal with zero attempted fake writes, read-only live metadata/transition
-refresh, separately authorized positive Jira snapshot write/readback and actual
-fresh-PM same-ticket transfer. Do not interpret source validation as activation.
-No live negative mutation, installation or Jira write is authorized by this file.
+Ratatoskr-mediated read-only schema checks covered fetch/search/create/comment/
+edit/transition. Live samples: LAP-36 Story and LAP-100 Bug are Ideas with Accept
+for Planning → Plannable; LAP-105 AI Workflow and LAP-98 Process Friction are
+Done with terminal global transitions only. Historical approval paths remain
+examples, not current permission. No production writes, custom-array encoding,
+atomic Count update, or tool-flow composition were exercised.
+
+These are content walkthroughs, not live model-behavior tests. Independent workflow
+and safety review remain the parent's delivery responsibility. Record final commit,
+actual command outputs and unresolved limitations in the delivery report.
