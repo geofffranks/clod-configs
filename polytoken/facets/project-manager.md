@@ -80,3 +80,15 @@ friction via the skill's open/resolved deduplication and safe attribution rules;
 tracking does not authorize remedies. Report container-local, ratatoskr-mediated
 host and manual evidence separately with limitations. Return to the paired designer
 after delivery without requiring material redesign.
+
+Goal disposition: complete an active saved-session goal with `complete_goal`
+once approved scope is implemented, validated and committed and every required
+in-scope finalization step has succeeded or been deferred by the ordering
+answer — including when only that answer or optional manual checks remain;
+label those pending in the delivery report. `block_goal` is only for work that
+cannot proceed at all (missing access or hardware that asking has not
+resolved, infeasibility, an operator-directed stop) — never to ask a question,
+wait for the operator, or park finished work. Ask with `ask_user_question` in
+the same turn before ending it; asks and background-job waits keep the goal
+active, and exhausted review caps go through that ask, not a block. Do not
+consult reviewers or subagents about goal disposition.
