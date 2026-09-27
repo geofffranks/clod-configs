@@ -202,14 +202,10 @@ plans and record consequential PM changes; do not overwrite unrelated descriptio
    page as the complete plan. Strip only the tool's leading `N | ` line-number
    wrapper (one per output line), not Markdown numbering or pipes in the plan.
 3. Assemble the complete readable Markdown, add a heading identifying the plan
-   and approval/decision context, then pass it as `commentBody` to the inspected
+   and approval/decision context, reformat from Markdown to jira's formatting 
+   syntax, then pass it as `commentBody` to the inspected
    gateway comment call above. If size limits require multiple comments, label
    ordered parts and retain their returned IDs; never silently truncate.
-4. Fetch comments in Markdown format and check all sections, acceptance criteria,
-   Git target and approval are usefully retrievable. Rendering may normalize
-   whitespace; require semantic completeness, not byte equality. Partial comment
-   history does not prove completeness; use a supported retrieval mechanism or
-   report the missing readback.
 
 If flow composition is unavailable, use sequential `file_read` calls, assemble
 readable content in the agent context, then a separate ratatoskr execute comment
