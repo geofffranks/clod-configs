@@ -465,7 +465,7 @@ run_approval_contract() {
 run_delivery_policy() {
   sc "delivery frontmatter contract"
   expect_fm "workflow-project-manager: model pin" "$DELIVERY" '.polytoken.model' '"zai/glm-5.3-flash(high)"'
-  expect_list "workflow-project-manager: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "codex/gpt-5.6-luna-1m(medium)"
+  expect_list "workflow-project-manager: fallback_models" "$DELIVERY" '.polytoken.fallback_models' "ocgo-c/glm-5.3-flash,codex/gpt-6-sol-1m(medium),neuralwatt/glm-5.3-flash-flex(high)"
   expect_list "delivery: tools" "$DELIVERY" '.polytoken.tools' "tag!ALL,mcp__ratatoskr,switch_facet"
   expect_list "delivery: tools_deny" "$DELIVERY" '.polytoken.tools_deny' "write_plan,edit_plan,handoff_plan"
   expect_fm "delivery: unrestricted skills" "$DELIVERY" '.polytoken.skills_allow' 'null'
