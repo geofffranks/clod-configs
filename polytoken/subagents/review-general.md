@@ -2,9 +2,7 @@
 name: review-general
 description: Review pinned code-review snapshots and bounded changes for specification compliance and cross-cutting quality; carries the Lappie task-review modes with severity-classified findings.
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models:
-    - codex/gpt-5.6-luna(high)
+  model: "@mg:reviewer"
   tools: 
   - file_read
   - glob

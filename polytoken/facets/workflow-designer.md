@@ -1,9 +1,7 @@
 ---
 name: workflow-designer
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models: 
-  - codex/gpt-5.6-luna-1m(medium)
+  model: "@mg:ai_workflow_facet"
   tools: [tag!ALL, mcp__ratatoskr]
   tools_deny: [file_write, file_edit_search_replace, patch_edit, shell_monitor, shell_service, lsp, switch_facet, complete_goal]
   undeferred_tools: [file_read, glob, grep, shell_exec, subagent, skill, write_plan, edit_plan, handoff_plan, tool_flow]

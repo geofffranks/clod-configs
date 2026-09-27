@@ -1,11 +1,7 @@
 ---
 name: project-manager
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models: 
-  - ocgo-c/glm-5.3-flash
-  - codex/gpt-6-sol-1m(medium)
-  - neuralwatt/glm-5.3-flash-flex(high)
+  model: "@mg:pm_facet"
   color: "#16a34a"
   color_light: "#dcfce7"
   color_dark: "#14532d"

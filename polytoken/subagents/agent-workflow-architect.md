@@ -2,9 +2,7 @@
 name: agent-workflow-architect
 description: Design and independently review Polytoken agent workflows for authority, usability, token efficiency, Docker/macOS boundaries, and ratatoskr routing.
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models:
-    - codex/gpt-6-astra(medium)
+  model: "@mg:ai_workflow"
   tools: [tag!ALL, mcp__ratatoskr]
   tools_deny: [file_write, file_edit_search_replace, patch_edit, shell_exec, shell_monitor, shell_service, lsp, write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, glob, grep, web_search, web_fetch, skill]

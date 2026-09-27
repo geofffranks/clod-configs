@@ -2,9 +2,7 @@
 name: mobile-app-expert
 description: Advise on mobile lifecycle, permissions, native bridges, device variance, offline behavior, resource use, accessibility, platform conventions, and evidence limits. Read-only.
 polytoken:
-  model: zai/glm-5.3-flash(low)
-  fallback_models:
-    - codex/gpt-5.6-luna(high)
+  model: "@mg:implementer"
   tools: [file_read, glob, grep, skill]
   undeferred_tools: [file_read, glob, grep, skill]
   allow_subagent_spawn: false

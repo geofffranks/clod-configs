@@ -1,11 +1,7 @@
 ---
 name: workflow-project-manager
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models: 
-  - ocgo-c/glm-5.3-flash
-  - codex/gpt-6-sol-1m(medium)
-  - neuralwatt/glm-5.3-flash-flex(high)
+  model: "@mg:ai_workflow_facet"
   tools: [tag!ALL, mcp__ratatoskr, switch_facet]
   tools_deny: [write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, shell_exec, subagent, skill, switch_facet, tool_flow]

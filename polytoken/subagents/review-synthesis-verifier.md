@@ -2,9 +2,7 @@
 name: review-synthesis-verifier
 description: Fresh-context verifier that validates proposed code-review claims against pinned source and captured metadata.
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models: 
-  - codex/gpt-5.6-luna(high)
+  model: "@mg:reviewer"
   tools: 
   - file_read
   - glob

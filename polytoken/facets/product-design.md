@@ -1,7 +1,7 @@
 ---
 name: product-design
 polytoken:
-  model: zai/glm-5.3-flash(high)
+  model: "@mg:pm_facet"
   fallback_models:
   - codex/gpt-5.6-luna-1m(medium)
   tools: [tag!ALL, mcp__ratatoskr]

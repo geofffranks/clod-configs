@@ -2,9 +2,7 @@
 name: agent-workflow-engineer
 description: Implement bounded Polytoken workflow changes with risk-based testing and explicit container/host evidence.
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models:
-    - codex/gpt-5.6-luna(medium)
+  model: "@mg:ai_workflow"
   tools: [tag!ALL, mcp__ratatoskr]
   tools_deny: [write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, lsp, shell_exec, skill]

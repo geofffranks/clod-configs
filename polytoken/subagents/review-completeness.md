@@ -2,9 +2,7 @@
 name: review-completeness
 description: Review pinned code-review snapshots and bounded changes for missing wiring, placeholders, mocked production paths, unsupported errors, and partial end-to-end behavior.
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models:
-    - codex/gpt-5.6-luna(high)
+  model: "@mg:reviewer"
   tools: 
   - file_read
   - glob

@@ -1,9 +1,7 @@
 ---
 name: code-review
 polytoken:
-  model: zai/glm-5.3-flash(high)
-  fallback_models:
-    - codex/gpt-5.6-luna-1m(medium)
+  model: "@mg:pm_facet"
   tools: [file_read, glob, grep, shell_exec, skill, subagent, message_subagent, job_status, job_block, job_result, job_cancel, list_jobs, file_write]
   tools_deny: [file_edit_search_replace, lsp, shell_monitor, shell_service, web_search, web_fetch, pushd, popd, switch_facet, complete_goal, write_plan, edit_plan, handoff_plan]
   undeferred_tools: [file_read, glob, grep, shell_exec, skill, subagent, message_subagent, job_status, job_block, job_result, job_cancel, list_jobs, file_write]
