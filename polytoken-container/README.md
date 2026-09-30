@@ -27,8 +27,8 @@ The image installs the LSPs justified by the repositories mounted into the
 container. The shared Polytoken mappings live in the parent repository's
 `polytoken/config.recommended.yaml` and are installed into the live
 `~/.config/polytoken/config.yaml` by `scripts/install-polytoken.sh`. The
-container's `.polytoken/config.yaml` remains an ephemeral Bypass+ permission
-override and does not own the global LSP configuration.
+container's `.polytoken/config.yaml` gets Bypass+ merged in for the session
+and does not own the global LSP configuration.
 
 | Language/file family | Server | Notes |
 |---|---|---|
@@ -186,11 +186,13 @@ workspace root. Args pass through (`run.sh config validate`). Alias:
 alias pt='bash "$HOME/workspace/claude-config/polytoken-container/run.sh"'
 ```
 
-The container launches in **Bypass+**: run.sh drops an ephemeral
-`.polytoken/config.yaml` (`default_permission_matcher: bypass_plus`) that
-overrides the host's global Autonomous, and removes it on exit — so the host
-keeps Autonomous. If the repo already has a project config, run.sh temporarily
-moves it aside and restores it unchanged when the container exits.
+The container launches in **Bypass+**: run.sh merges
+`default_permission_matcher: bypass_plus` into the project's
+`.polytoken/config.yaml` for the session — overriding the host's global
+Autonomous while keeping the project's own keys (e.g.
+`active_session.default_facet`) in effect. When the container exits, the
+merged file is removed and the original project config is restored
+byte-for-byte (a symlinked config comes back as a symlink).
 
 ## Safety model (layered)
 
