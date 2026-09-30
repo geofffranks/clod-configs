@@ -2,7 +2,7 @@
 name: software-engineer
 description: Implement or debug bounded repository work across Swift, TypeScript, React, and adjacent languages using repository conventions, tests, and explicit evidence.
 polytoken:
-  model: "@mg:implementer"
+  model: "@mg:implementor"
   tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
   allow_subagent_spawn: false

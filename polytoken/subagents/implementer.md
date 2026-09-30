@@ -2,7 +2,7 @@
 name: implementer
 description: Implement a single plan task via TDD — writes code, runs focused then full tests, commits, self-reviews, and reports status. Dispatch one per task with its task-brief file path and report-file path.
 polytoken:
-  model: "@mg:implementer"
+  model: "@mg:implementor"
   tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
   undeferred_tools: [file_read, file_write, file_edit_search_replace, glob, grep, shell_exec, skill]
   allow_subagent_spawn: false
