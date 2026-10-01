@@ -321,12 +321,17 @@ into your `hooks.json`:
 
 | Name | Event | Wraps |
 |---|---|---|
-| `bash-guard` | `pre_tool_use` (`shell_exec`) | `compat/bash-guard/hook.sh` |
-| `branch-guard` | `pre_tool_use` (`shell_exec`) | `compat/branch-guard/hook.sh` |
 | `git-safe` | `pre_tool_use` (`shell_exec`) | `compat/git-safe/hook.sh` |
 | `no-remote-writes` | `pre_tool_use` (`shell_exec`) | `compat/hooks/no-remote-writes.sh` |
 | `read-once` | `pre_tool_use` (`file_read`) | `compat/read-once/hook.sh` |
 | `read-once-reset` | `post_compaction` | `compat/read-once/compact.sh` |
+
+`branch-guard` and `bash-guard` ship in `compat/` but are not registered by
+default: the hook transport cannot distinguish a linked-worktree checkout from
+the main checkout, so `branch-guard` would deny every legitimate worktree
+commit, and `bash-guard` remains under evaluation for false-positive risk.
+Direct-`main` commits are governed by facet and project rules; wire these
+guards manually only for single-checkout setups where that tradeoff is wanted.
 
 Polytoken deliberately does not install skill-once or its compaction reset. Its tool-hook contract does not guarantee per-agent identity, so session-scoped deduplication could deny a skill based on another agent's context. Failing open allows repeated bodies but never strands an agent. Polytoken's native `skill` tool accepts only a name, so no `--force` syntax is claimed or supported.
 

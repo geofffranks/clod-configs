@@ -1,6 +1,5 @@
 [
   {"event":"pre_tool_use","handler":{"bash":"bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" git-safe/hook.sh shell"},"matcher":"shell_exec","name":"git-safe"},
-  {"event":"pre_tool_use","handler":{"bash":"bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" branch-guard/hook.sh shell"},"matcher":"shell_exec","name":"branch-guard"},
   {"event":"pre_tool_use","handler":{"bash":"bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" hooks/no-remote-writes.sh shell"},"matcher":"shell_exec","name":"no-remote-writes"},
   {"event":"pre_tool_use","handler":{"bash":"bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" read-once/hook.sh read"},"matcher":"file_read","name":"read-once"},
   {"event":"post_compaction","handler":{"bash":"bash \"${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}/hooks/adapter.sh\" read-once/compact.sh compact"},"name":"read-once-reset"},

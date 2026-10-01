@@ -65,6 +65,17 @@ case "$mapping" in
 esac
 
 export AGENT_CONFIG_DIR="${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}"
+# Expose the session's project directory to canonical guards so repo-relative
+# hooks (e.g. branch-guard) evaluate the checkout the session actually runs
+# in, including linked worktrees. Polytoken's hook contract carries no cwd
+# field; the authoritative signal is the POLYTOKEN_PROJECT_DIR/PATH env the
+# daemon sets for known projects. Fall back to a cwd supplied in the payload,
+# then leave the canonical hook's own fallback untouched when neither exists.
+guard_cwd="${POLYTOKEN_PROJECT_DIR:-${POLYTOKEN_PROJECT_PATH:-}}"
+[ -n "$guard_cwd" ] || guard_cwd=$(jq -r 'try (.cwd | select(type == "string")) // empty' <<<"$input" 2>/dev/null || true)
+if [ -n "$guard_cwd" ] && [ -d "$guard_cwd" ]; then
+  export POLYTOKEN_CWD="$guard_cwd"
+fi
 canonical_root="${POLYTOKEN_CANONICAL_ROOT:-$AGENT_CONFIG_DIR/compat}"
 canonical_script="$canonical_root/$canonical_path"
 if command -v python3 >/dev/null 2>&1; then

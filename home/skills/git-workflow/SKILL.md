@@ -10,10 +10,13 @@ skill does not choose a different base or finalization model.
 
 ## Guard hooks are allies
 
-The registered `shell_exec` guards deny commits to protected branches
-(`main`/`master`/`dev`), `git push` and `gh` writes, and destructive Git operations.
-A block means reconsider the operation and authority, not bypass the hook. These
-are shell-command guards, not a universal sandbox for every tool or process.
+The registered `shell_exec` guards deny `git push` and `gh` writes
+(`no-remote-writes`) and destructive Git operations (`git-safe`). Direct commits
+to protected branches are governed by facet and project rules rather than a hook:
+the shipped `branch-guard` is unwired because the hook transport cannot tell a
+linked-worktree checkout from the main checkout. A block means reconsider the
+operation and authority, not bypass the hook. These are shell-command guards,
+not a universal sandbox for every tool or process.
 Never push or publish without explicit authority.
 
 ## Orient in the intended repository

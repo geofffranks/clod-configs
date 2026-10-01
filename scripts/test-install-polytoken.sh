@@ -624,7 +624,7 @@ POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$INSTALL_P
 cmp -s "$D/config.before" "$D/config.yaml" && ok "deployment preserves config bytes" || no "deployment preserves config bytes"
 cmp -s "$D/permissions.before" "$D/permissions.yaml" && ok "deployment preserves permissions bytes" || no "deployment preserves permissions bytes"
 ajq "$D/hooks.json" '[.[]|select(.name|test("notify|watchdog|superpowers"))]|length == 0' "deployment retires old managed hooks"
-ajq "$D/hooks.json" '[.[]|select(.name=="branch-guard" or .name=="no-remote-writes")]|length == 2' "deployment registers both Git guards"
+ajq "$D/hooks.json" '([.[]|select(.name=="no-remote-writes")]|length == 1) and ([.[]|select(.name=="branch-guard")]|length == 0)' "deployment registers no-remote-writes only; branch-guard unregistered like bash-guard"
 rm -rf "$D"
 
 # --- PN: notify-only install modes ($2: empty | notify | notify-container) ---
@@ -692,7 +692,7 @@ run_pt "$D" /nonexistent-xyz 0 >/dev/null
 for f in config.yaml permissions.yaml AGENTS.md hooks/adapter.sh; do
   [ -f "$D/$f" ] && ok "added by full install: $f" || no "added by full install: $f"
 done
-ajq "$D/hooks.json" '[.[]|select(.name=="branch-guard" or .name=="no-remote-writes")]|length == 2' "default upgrade adds both guards"
+ajq "$D/hooks.json" '([.[]|select(.name=="no-remote-writes")]|length == 1) and ([.[]|select(.name=="branch-guard")]|length == 0)' "default upgrade adds no-remote-writes only; branch-guard unregistered like bash-guard"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names after upgrade"
 ayq "$D/config.yaml" '.mcp_servers.ratatoskr.transport == "http"' "config.yaml landed (ratatoskr entry)"
 rm -rf "$D"
