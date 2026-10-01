@@ -3,32 +3,19 @@ name: review-correctness
 description: Review pinned code-review snapshots and bounded changes for crashes, races, deadlocks, corruption, lifecycle and state-machine defects, unsafe cancellation, and recovery failures.
 polytoken:
   model: "@mg:reviewer"
-  tools: 
-  - file_read
-  - glob
-  - grep
-  - skill
-  undeferred_tools: 
-  - file_read
-  - glob
-  - grep
-  - skill
+  tools: [tag!ALL, mcp__ratatoskr]
+  tools_deny: [file_write, file_edit_search_replace, patch_edit, switch_facet, write_plan, edit_plan, handoff_plan, complete_goal, shell_service]
+  undeferred_tools: [file_read, glob, grep, shell_exec, skill]
   allow_subagent_spawn: false
-  skills_allow: 
-  - github-review-snapshot
-  - code-review-evidence
-  - polytoken:investigating-a-codebase
-  - polytoken:modifying-polytoken
-  - receiving-code-review
-  skills_deny: []
+  skills_deny: [ai-workflow, agent-orchestration, finishing-a-development-branch]
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [source_revision, scope_id, verdict, findings, evidence, limitations]
+    required: [verdict, findings, limitations]
     if:
       required: [review_run_id]
     then:
-      required: [snapshot_digest, head_sha]
+      required: [source_revision, scope_id, snapshot_digest, head_sha, evidence]
       properties:
         findings:
           items:
@@ -104,9 +91,10 @@ Exit-tool recovery: if `exit_tool` rejects your input, retry at most once with a
 - **Snapshot mode:** inspect the pinned diff against base and head sources for
   the correctness classes above, including interactions the change introduces
   across module or thread boundaries that neither side shows alone.
-- **Bounded-change mode:** review unresolved prior correctness findings plus
-  changed hunks; verify cancellation, cleanup, ordering, and recovery paths the
-  change touches or invalidates.
+- **Bounded-change mode:** initially review the approved change and affected
+  behavior broadly for correctness. In focused followups, review unresolved
+  findings and affected behavior. Verify cancellation, cleanup, ordering, and
+  recovery paths the change touches or invalidates.
 - Report only correctness findings. Out-of-specialty concerns (security,
   completeness, maintainability, abstraction, specification) go in the single
   routing line with the owning specialty named.

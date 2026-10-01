@@ -123,102 +123,83 @@ with Polytoken-native equivalents.
 | `hooks.json` | `polytoken/hooks.json` | Native hooks merged by unique name, including the notification entries documented in [docs/agent-notify.md](docs/agent-notify.md). Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
 | `hooks/agent-notify.sh`, `hooks/session-watchdog.sh`, `hooks/*keepalive.sh`, `lib/notify-*.sh` | `home/` | The notification stack (hooks, session watchdog, SSE event watcher) — see [docs/agent-notify.md](docs/agent-notify.md). |
-| `facets/` | `polytoken/facets/` | The `workflow-designer`, `workflow-project-manager`, `product-design`, and `project-manager` workflow facets described below. |
+| `facets/` | `polytoken/facets/` | Three lifecycle facets: `product-design`, `project-manager`, `quick-delivery`; standalone `code-review` and `process-friction-triage` remain available. |
 | `subagents/` | `polytoken/subagents/` | Managed built-in and workflow-specialist roles, including `agent-workflow-architect` and `agent-workflow-engineer`. |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
 | `compat/` | `home/{bash-guard,branch-guard,git-safe,grep-guard,large-read-guard,read-once}` + `home/hooks/no-remote-writes.sh` | Canonical hook scripts installed under `compat/`; a fresh install does not copy `compat/skill-once`. |
 
-#### Agent-workflow design and delivery
+#### Design and delivery
 
-Use `workflow-designer` when you want to turn a desired AI-workflow behavior
-into an implementation plan. It can inspect the project, consult the read-only
-`agent-workflow-architect` and other read-only specialists, compare approaches,
-and edit a saved plan. It cannot directly modify the project. Because Polytoken
-does not restrict subagent names per facet, its promise to dispatch only
-read-only roles is a prompt rule rather than a runtime security boundary.
+Use `product-design` to investigate requirements, consult useful experts and write
+one design covering outcome, observable requirements, solution, non-goals,
+acceptance, material risks, Git choices, delivery mode and proposed review panel.
+Immediately before design writing, choose the starting/effort branch, isolated
+workspace, mergeback target or leave-unmerged, and standard/quick mode. The
+designer may perform approved workspace setup, not repository implementation,
+build/install or service launches. Delivery receives the same workspace.
 
-Before implementation, the designer sends the saved plan to
-`agent-workflow-architect` for one bounded workflow review covering plan
-coherence and scope, authority, approval, delegation, MCP routing, host
-boundaries, usability, operational risks, and compliance with the requested
-design. The design-time lane affords one initial architect review and, when
-needed, at most one focused delta re-review per scope, without revision resets, over
-unresolved finding IDs and changed sections. A blocker is an evidenced
-violation of an agreed requirement, feasibility constraint, or material
-safety/authority boundary; preferences, speculative future-proofing, and
-optional polish are nonblocking. After the follow-up, any blocker that remains
-unfixed or unrebutted, or substantive disagreement that remains unresolved,
-escalates to the operator rather than triggering another pass or automatic
-approval — never auto-approve, and never silently suppress a newly evidenced
-critical risk. The independent final implementation review remains required
-and is a separate lane, including a conditional second safety review for
-authority, approval, delegation, autonomous behavior, MCP-routing, or
-destructive-capability changes. The designer presents the plan to the
-operator and waits for approval. After approval it hands the plan to `workflow-project-manager`; it
-cannot switch facets itself. Directly invoking `workflow-project-manager` is also
-supported and authorizes the requested execution, but it does not prove that a
-plan was reviewed or approved. Delivery reports that provenance honestly.
+Design review uses `design-reviewer`, or `agent-workflow-architect` for AI workflows:
+one initial pass and at most one focused delta, with concrete blockers resolved
+or escalated. It does not demand detailed implementation prescriptions or named
+automation per criterion. The operator approves the complete design and review
+panel, including roles/reasons/focus, before handoff.
 
-`workflow-project-manager` implements the approved scope, normally through the
-write-capable `agent-workflow-engineer`, with these gates:
+`project-manager` owns proportionate technical planning in working task state,
+implementation coordination, approved-panel review and feasible acceptance checks.
+There is no second technical-plan approval unless material outcome/scope/risk
+changes or infeasibility require disposition. `quick-delivery` uses a brief
+approach, implements directly by default, runs relevant tests and one correctness
+review by default, with no separate validation stage or manual completion gate.
+Neither automatically returns to design. Generic implementation defaults to
+`software-engineer`; conditional [ai-workflow](home/skills/ai-workflow/SKILL.md)
+routes AI-workflow work to its specialists. Missing optional roles/skills are not
+blockers. Workers load relevant procedures themselves; no mandatory architect,
+persona or final-validator chain.
 
-- material changes to scope, permissions, approval, delegation, or MCP routing
-  return to `workflow-designer` for renewed approval;
-- default to a feature branch and disposable worktree, honoring explicit targets;
-- checks are selected by the actual consumed contract: Markdown instructions
-  receive independent content review and scenario walkthroughs; machine-
-  consumed configuration receives parser/CLI/schema and effective-runtime
-  validation; executable production behavior receives risk-based executable
-  checks and TDD only when required;
-- executable replicas of prompt policies are not created solely to unit-test
-  prose, and new validation infrastructure requires a concrete contract,
-  failure, simpler-alternative, and limitation justification;
-- substantive work gets an independent workflow-architecture review, with a
-  second fresh review when authority, permissions, autonomous behavior,
-  approval gates, delegation, destructive capability, or MCP routing changes;
-- scoped Jira bookkeeping follows `jira-workflow`; it does not authorize
-  unrelated remote writes, pushing, merging or branch deletion.
+Each approved implementation lane gets one initial review and up to four focused
+followups on unresolved findings and affected behavior. Consolidate repairs;
+renaming/reslicing never resets budgets. Reviewers may run relevant tests/builds
+and use web/MCP/skills, but never fix source, commit, perform destructive operations
+or spawn agents. Concrete defects, requirement violations and material risks may
+block; preferences are advisory. Snapshot mode retains its separate boundary.
 
-Reviewers are routed to one bounded question and named evidence. They identify
-risks and missing evidence rather than prescribing unit tests by default. The
-workflow is diagnosis-first: T0 clarifies requirements and authority, T1 gathers
-only the smallest conditional evidence, T2 uses one planner for one durable plan,
-and T3 delivers only after approval. Broad fan-out, parallel planners, and
-carte-blanche review are not substitutes for diagnosis.
+Checks are outcome-focused: relevant existing tests, practical regression coverage,
+official configuration parsers/loaders and effective-tool checks where exposure
+changes. Prompt instructions receive content review/scenarios, not phrase tests
+or policy replicas. No mandatory TDD transcript, clean-commit checkpoint, digest,
+identity ledger, evidence manifest or new validation framework merely to finish.
+Only changed inputs/affected behavior invalidate checks/reviews, not commit IDs.
+Missing assets/tooling are access/procedure gaps, not redesign authority. Report
+untested/manual work honestly.
 
-Keep a saved product plan and concise decision record with the Git target,
-approval, jobs, findings, validation and pending Jira sync. Exact plan digests,
-immutable snapshots and coordinated activation rituals are not prerequisites.
-PMs own technical sequencing, plans and nonmaterial blocker responses; an architect
-is optional advice, not a standing approval gate. Ask the operator for major
-product/outcome/scope/risk changes or infeasibility, not routine technical choices.
+Honor upfront Git disposition after successful required checks/reviews: commit,
+approved local mergeback, effort-owned cleanup, then active-goal completion before
+the all-done summary. Manual checks remain visible but do not block these steps.
+No new finalize-before/after-human-checks question. Leave-unmerged retains the
+branch; branch deletion/push is not implied. Preserve unrelated work; substantive
+conflicts or unresolved blockers require escalation.
 
-Design review permits one initial review and one focused delta. Each required
-post-implementation lane permits one broad initial review and up to four focused
-followups on changed areas and unresolved findings. Revisions do not reset budgets;
-escalate unresolved blockers at the applicable cap. Returning from PM to designer
-is unconditional.
+Jira remains optional without a supplied ticket. Preserve live status checks,
+authority, actual session attribution and uncertain-write reconciliation via
+[jira-workflow](home/skills/jira-workflow/SKILL.md). Done/Canceled still requires
+confirmation. No mandatory retrospective or automatic friction tickets.
 
-Jira is optional. A supplied LAP key is fetched and checked; designers plan in
-Plannable/Ready/In Progress and PMs implement in Ready/In Progress. Scoped comments,
-supported preservative edits and deduplicated friction creation are routine.
-Plan approval drives Plannable → Ready and actual start drives Ready → In Progress;
-Ideas → Plannable and Done/Canceled require human confirmation. Every worked ticket
-receives the actual current session ID, using a nonduplicative evidence comment
-and pending-field status when a safe additive field update is unavailable.
-See [jira-workflow](home/skills/jira-workflow/SKILL.md) for worked tool recipes.
+Conditional [screenshots](home/skills/screenshots/SKILL.md),
+[Appium](home/skills/appium/SKILL.md) and
+[native checks](home/skills/xcode-native-checks/SKILL.md) hold tool procedures,
+shared-session ownership and device exclusions, not facets. Screenshot runtime
+storage is `/Users/gfranks/workspace/screenshots/<branch-folder>/`; reviewers open
+absolute paths, without checksums/manifests/fixture gates.
 
-Default to a contextual feature branch (the Jira key when provided), from `main`,
-in a disposable worktree; honor explicit targets and never commit on `main`.
-Delivery completes with committed work and requests acceptance before merge or
-terminal Jira state. “Leave as is” preserves the committed branch and cleans up
-the disposable worktree. Designers and PMs retrospect and route observed friction.
-Shared body fragments under `polytoken/facets/partials/` are installed alongside
-facets; frontmatter grants are explicit and are not inherited from fragments.
+For source-only deployment, select the actual installation destination and run
+`POLYTOKEN_CONFIG_DIR=<destination> bash scripts/install-polytoken.sh 0 definitions`.
+It preserves config/providers/quota/MCP/hooks and prompts decline-default before
+moving known retired copies to backups; force mode never retires them. Retired
+copies include workflow-designer/workflow-project-manager, local escape facets,
+obsolete Lappie lifecycle/bootstrap skills and inactive design-workflow.j2.
+Custom definitions remain. Source edits, installed copies and runtime activation
+are separate facts; inspect the chosen destination and activate separately.
 
-The second workflow pair is `product-design`, which plans the product approval
-lifecycle and hands off via an approved plan to `project-manager`, which
- delivers it. These five are the global facets claude-config ships.
 
 #### Read-only GitHub code review
 

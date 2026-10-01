@@ -1,3 +1,25 @@
-{# Inactive compatibility fragment. The delivery contract is inline in
-   project-manager.md and workflow-project-manager.md until installed rendering
-   can be captured directly. Do not use this file as an instruction source. #}
+## Checks and completion
+
+Select outcome-focused checks for changed behavior: existing relevant unit and
+integration tests, practical regression coverage, and official parsers/loaders
+for configuration. Prompt instructions receive content review and scenario
+walkthroughs, not literal phrase tests or executable prompt-policy replicas.
+Keep effective-tool/runtime checks when exposure changes. No mandatory TDD or
+RED/GREEN transcript, new validation framework, validation manifest, or unrelated
+application suite merely to finish. Repair or escalate known failed required
+checks and defects; report what was actually checked and its limits.
+
+Commit intended work on the approved effort branch, never main. Honor upfront
+Git disposition: when mergeback is approved, integrate locally after successful
+required checks/reviews, then clean only effort-owned worktrees after preserving
+intended work and confirming it is reachable. Substantive conflicts or unresolved
+blockers require escalation. Leave-unmerged keeps the committed branch; branch
+deletion is not implied. No push without explicit authority. Preserve unrelated
+changes and unknown worktrees. Use `finishing-a-development-branch` where useful,
+without a new finalize-before/after-human-checks question.
+
+Manual checks do not block mergeback, effort-owned cleanup or goal completion.
+After required finalization succeeds, complete the active saved goal, if any,
+before the all-done summary. Do not block a goal merely to await manual checks.
+Report completed work, actual checks, remaining risks/manual steps and pending
+Jira sync. Source changes, installed copies and runtime reload are separate facts.

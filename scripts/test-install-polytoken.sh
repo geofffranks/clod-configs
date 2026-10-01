@@ -75,22 +75,22 @@ for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/h
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-expected_subagents="$(printf '%s\n' agent-workflow-architect.md agent-workflow-engineer.md implementer.md mobile-app-expert.md partials/review-contract.md researcher.md review-abstraction.md review-adversarial.md review-completeness.md review-correctness.md review-general.md review-maintainability.md review-synthesis-verifier.md software-architect.md software-engineer.md validator.md | sort)"
+expected_subagents="$(printf '%s\n' agent-workflow-architect.md agent-workflow-engineer.md design-reviewer.md implementer.md mobile-app-expert.md partials/review-contract.md researcher.md review-abstraction.md review-adversarial.md review-completeness.md review-correctness.md review-general.md review-maintainability.md review-synthesis-verifier.md software-architect.md software-engineer.md validator.md | sort)"
 actual_subagents="$(find "$D/subagents" -type f -name '*.md' -printf '%P\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
   && ok "installed exactly the 15 shipped subagents + shared partial" || no "installed exactly the 15 shipped subagents + shared partial"
 cmp -s "$REPO/polytoken/subagents/partials/review-contract.md" "$D/subagents/partials/review-contract.md" 2>/dev/null \
   && ok "installed review-contract partial matches source" || no "installed review-contract partial matches source"
-for fragment in workflow-common design-workflow delivery-workflow; do
+for fragment in workflow-common delivery-workflow; do
   cmp -s "$REPO/polytoken/facets/partials/$fragment.j2" "$D/facets/partials/$fragment.j2" \
     && ok "installed facet fragment matches source: $fragment" \
     || no "installed facet fragment matches source: $fragment"
 done
-expected_facets="$(printf '%s\n' code-review.md process-friction-triage.md product-design.md project-manager.md workflow-designer.md workflow-project-manager.md | sort)"
+expected_facets="$(printf '%s\n' code-review.md process-friction-triage.md product-design.md project-manager.md quick-delivery.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
   && ok "installed exactly the 6 shipped facets" || no "installed exactly the 6 shipped facets"
-for facet in code-review process-friction-triage product-design project-manager workflow-designer workflow-project-manager; do
+for facet in code-review process-friction-triage product-design project-manager quick-delivery; do
   cmp -s "$REPO/polytoken/facets/$facet.md" "$D/facets/$facet.md" 2>/dev/null \
     && ok "installed facet matches source: $facet" || no "installed facet matches source: $facet"
 done
@@ -474,15 +474,15 @@ custom_subagent="$D/subagents/my-custom.md"
 mkdir -p "$D/subagents" "$D/facets"
 printf 'user subagent definition\n' > "$custom_subagent"
 printf -- '---\nname: implementer\npolytoken:\n  model: codex/gpt-5.6-luna\n---\nUSER-CUSTOM-IMPLEMENTER-MARKER\n' > "$D/subagents/implementer.md"
-cp "$REPO/polytoken/facets/workflow-designer.md" "$D/facets/workflow-designer.md"
-printf '\nUSER-CUSTOM-FACET-MARKER\n' >> "$D/facets/workflow-designer.md"
+cp "$REPO/polytoken/facets/product-design.md" "$D/facets/product-design.md"
+printf '\nUSER-CUSTOM-FACET-MARKER\n' >> "$D/facets/product-design.md"
 before_subagent="$(cat "$D/subagents/implementer.md")"
-before_facet="$(cat "$D/facets/workflow-designer.md")"
+before_facet="$(cat "$D/facets/product-design.md")"
 TTY="$(mktemp)"; printf 'n\n' > "$TTY"
 out="$(run_pt "$D" "$TTY" 0)"
 [ "$(cat "$D/subagents/implementer.md")" = "$before_subagent" ] \
   && ok "declined subagent conflict kept your bytes" || no "declined subagent conflict kept your bytes"
-[ "$(cat "$D/facets/workflow-designer.md")" = "$before_facet" ] \
+[ "$(cat "$D/facets/product-design.md")" = "$before_facet" ] \
   && ok "declined facet conflict kept your bytes" || no "declined facet conflict kept your bytes"
 [ ! -e "$custom_subagent" ] && no "unrelated destination subagent preserved" || ok "unrelated destination subagent preserved"
 ls "$D"/subagents/implementer.md.bak-* >/dev/null 2>&1 \
@@ -494,16 +494,16 @@ custom_subagent="$D/subagents/my-custom.md"
 mkdir -p "$D/subagents" "$D/facets"
 printf 'user subagent definition\n' > "$custom_subagent"
 printf -- '---\nname: implementer\npolytoken:\n  model: codex/gpt-5.6-luna\n---\nUSER-CUSTOM-IMPLEMENTER-MARKER\n' > "$D/subagents/implementer.md"
-cp "$REPO/polytoken/facets/workflow-designer.md" "$D/facets/workflow-designer.md"
-printf '\nUSER-CUSTOM-FACET-MARKER\n' >> "$D/facets/workflow-designer.md"
+cp "$REPO/polytoken/facets/product-design.md" "$D/facets/product-design.md"
+printf '\nUSER-CUSTOM-FACET-MARKER\n' >> "$D/facets/product-design.md"
 out="$(run_pt "$D" /nonexistent-xyz 1)"
 cmp -s "$REPO/polytoken/subagents/implementer.md" "$D/subagents/implementer.md" \
   && ok "overwrite took recommended subagent bytes" || no "overwrite took recommended subagent bytes"
 ls "$D"/subagents/implementer.md.bak-* >/dev/null 2>&1 \
   && ok "overwrite subagent conflict wrote backup" || no "overwrite subagent conflict wrote backup"
-cmp -s "$REPO/polytoken/facets/workflow-designer.md" "$D/facets/workflow-designer.md" \
+cmp -s "$REPO/polytoken/facets/product-design.md" "$D/facets/product-design.md" \
   && ok "overwrite took recommended facet bytes" || no "overwrite took recommended facet bytes"
-ls "$D"/facets/workflow-designer.md.bak-* >/dev/null 2>&1 \
+ls "$D"/facets/product-design.md.bak-* >/dev/null 2>&1 \
   && ok "overwrite facet conflict wrote backup" || no "overwrite facet conflict wrote backup"
 [ "$(cat "$custom_subagent")" = "user subagent definition" ] \
   && ok "unrelated destination subagent preserved under overwrite" || no "unrelated destination subagent preserved under overwrite"
@@ -514,27 +514,28 @@ run_pt "$D" /nonexistent-xyz 1 >/dev/null
   && ok "unrelated destination facet preserved under overwrite" || no "unrelated destination facet preserved under overwrite"
 rm -rf "$D"
 
-# --- P25: upgrade preserves stale renamed facet until explicit retirement ---
-sc "P25 upgrade -> stale workflow-delivery preserved, then explicitly retired"
+# --- P25: scoped definitions migration is reversible and config-preserving ---
+sc "P25 definitions-only -> known retirement, custom/config preservation"
 D="$(valid_base)"
-mkdir -p "$D/facets"
-printf '%s\n' 'old workflow-delivery definition retained during upgrade' > "$D/facets/workflow-delivery.md"
-run_pt "$D" /nonexistent-xyz 0 >/dev/null
-[ -f "$D/facets/workflow-delivery.md" ] \
-  && ok "upgrade preserves unmanaged workflow-delivery facet" || no "upgrade preserves unmanaged workflow-delivery facet"
-[ -f "$D/facets/workflow-project-manager.md" ] \
-  && ok "upgrade installs workflow-project-manager facet" || no "upgrade installs workflow-project-manager facet"
-retire_backup="$(mktemp -d)/workflow-delivery.md.retired"
-retire_before="$(mktemp)"
-cp "$D/facets/workflow-delivery.md" "$retire_before"
-cp "$D/facets/workflow-delivery.md" "$retire_backup"
-rm "$D/facets/workflow-delivery.md"
-cmp -s "$retire_before" "$retire_backup" \
-  && ok "retirement backup preserves stale facet bytes" || no "retirement backup preserves stale facet bytes"
-[ ! -e "$D/facets/workflow-delivery.md" ] && ok "retirement deletes exact stale facet" || no "retirement deletes exact stale facet"
-[ "$(find "$D/facets" -maxdepth 1 -type f \( -name 'workflow-project-manager.md' -o -name 'workflow-delivery.md' \) -printf '%f\n' | sort)" = "workflow-project-manager.md" ] \
-  && ok "retirement leaves only workflow-project-manager among delivery pair" || no "retirement leaves only workflow-project-manager among delivery pair"
-rm -rf "$D" "$(dirname "$retire_backup")" "$retire_before"
+mkdir -p "$D/facets" "$D/skills/lappie-review-convergence"
+printf 'old facet\n' > "$D/facets/workflow-designer.md"
+printf 'custom facet\n' > "$D/facets/custom.md"
+printf 'old skill\n' > "$D/skills/lappie-review-convergence/SKILL.md"
+before_config="$(sha256sum "$D/config.yaml")"
+POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$REPO/scripts/install-polytoken.sh" 1 definitions >/dev/null
+[ "$(sha256sum "$D/config.yaml")" = "$before_config" ] && ok "scoped mode preserves config" || no "scoped mode preserves config"
+[ ! -e "$D/hooks.json" ] && ok "scoped mode does not install hooks" || no "scoped mode does not install hooks"
+[ -f "$D/facets/workflow-designer.md" ] && ok "force does not retire" || no "force does not retire"
+POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$REPO/scripts/install-polytoken.sh" 0 definitions >/dev/null
+[ -f "$D/facets/workflow-designer.md" ] && ok "no-TTY declines retirement" || no "no-TTY declines retirement"
+TTY="$(mktemp)"; printf 'y\n' > "$TTY"
+POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY="$TTY" bash "$REPO/scripts/install-polytoken.sh" 0 definitions >/dev/null
+[ ! -e "$D/facets/workflow-designer.md" ] && ok "confirmed exact facet retired" || no "confirmed exact facet retired"
+[ ! -e "$D/skills/lappie-review-convergence/SKILL.md" ] && ok "confirmed exact skill retired" || no "confirmed exact skill retired"
+[ "$(cat "$D"/facets/workflow-designer.md.bak-*)" = 'old facet' ] && ok "retirement backup preserves bytes" || no "retirement backup preserves bytes"
+[ -f "$D/facets/custom.md" ] && ok "custom facet preserved" || no "custom facet preserved"
+[ -f "$D/facets/quick-delivery.md" ] && ok "new delivery installed" || no "new delivery installed"
+rm -rf "$D" "$TTY"
 
 # --- P26: second-run definition idempotence -> no new backup, unchanged lines ---
 sc "P26 definition idempotence -> second run no new backup, unchanged"
@@ -545,8 +546,8 @@ out="$(run_pt "$D" /nonexistent-xyz 0)"
 n2="$(find "$D/subagents" "$D/facets" -name '*.bak-*' | wc -l | tr -d ' ')"
 [ "$n2" = "$n1" ] && ok "definition repeat run no new backup ($n1 -> $n2)" || no "definition repeat run no new backup ($n1 -> $n2)"
 has "$out" "unchanged: subagents/implementer.md" "second run reports subagent unchanged"
-has "$out" "unchanged: facets/workflow-designer.md" "second run reports first facet unchanged"
-has "$out" "unchanged: facets/workflow-project-manager.md" "second run reports workflow-project-manager unchanged"
+has "$out" "unchanged: facets/product-design.md" "second run reports design unchanged"
+has "$out" "unchanged: facets/quick-delivery.md" "second run reports quick delivery unchanged"
 rm -rf "$D"
 
 # --- P27: recursive reconcile ships partials and retires planted orphans ---

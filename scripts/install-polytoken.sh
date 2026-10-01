@@ -27,11 +27,11 @@ die() { echo "polytoken: $*" >&2; exit 1; }
 FORCE="${1:-0}"
 MODE="${2:-}"
 case "$MODE" in
-  ""|notify|notify-container) ;;
-  *) die "unknown install mode: $MODE (expected empty, notify, or notify-container)" ;;
+  ""|notify|notify-container|definitions) ;;
+  *) die "unknown install mode: $MODE (expected empty, notify, notify-container, or definitions)" ;;
 esac
 notify_mode=0
-[ -n "$MODE" ] && notify_mode=1
+case "$MODE" in notify|notify-container) notify_mode=1 ;; esac
 # Every mode is jq-based (hooks.json render, filter, and merge); fail closed
 # before resolving paths or creating anything.
 command -v jq >/dev/null 2>&1 || die "jq is required (https://stedolan.github.io/jq)"
@@ -192,6 +192,44 @@ prune_subagents() {
       echo "  preserved: ${dst#"$DEST"/} (not in repository; kept yours)"
     fi
   done
+}
+
+# Known retired workflow copies only; never enumerate custom facets/skills.
+# Decline by default, preserve in force mode, move aside rather than delete.
+retire_workflow_definitions() {
+  local rel dst backup
+  for rel in facets/workflow-designer.md facets/workflow-project-manager.md \
+    facets/app-engineering.md facets/ui-workshop.md facets/partials/design-workflow.j2 \
+    skills/lappie-workflow-coordination/SKILL.md skills/lappie-review-convergence/SKILL.md \
+    skills/lappie-ui-evidence-review/SKILL.md skills/updating-project-personas/SKILL.md; do
+    dst="$DEST/$rel"
+    [ -f "$dst" ] || continue
+    if [ "$mode" != force ] && prompt_yn "$rel is retired; move aside with backup?" conflict; then
+      backup="$dst.bak-$TS"
+      if [ -e "$backup" ]; then
+        echo "polytoken: backup already exists; preserving $rel" >&2
+        continue
+      fi
+      mv "$dst" "$backup"
+      echo "  retired:   $rel (saved to ${backup#"$DEST"/})"
+    else
+      echo "  preserved: $rel (retired definition; confirmation required)"
+    fi
+  done
+}
+
+install_definitions() {
+  local src rel
+  for srcroot in "$ROOT/home/skills" "$ROOT/polytoken/subagents" "$ROOT/polytoken/facets"; do
+    [ -d "$srcroot" ] || continue
+    while IFS= read -r -d '' src; do
+      rel="${src#"$srcroot"/}"
+      copy_managed_file "$src" "$DEST/${srcroot##*/}/$rel"
+    done < <(find "$srcroot" -type f \( -name '*.md' -o -name '*.j2' \) -print0)
+  done
+  copy_managed_file "$ROOT/scripts/code-review-helper.py" "$DEST/bin/code-review-helper.py"
+  chmod +x "$DEST/bin/code-review-helper.py"
+  retire_workflow_definitions
 }
 
 # ---- validated atomic write for structured files ----
@@ -586,6 +624,12 @@ ensure_local_bin_on_path() {
 echo "Installing Polytoken config into: $DEST"
 mkdir -p "$DEST"
 
+if [ "$MODE" = definitions ]; then
+  echo "  definitions-only: $DEST (config/providers/quota/MCP/hooks unchanged)"
+  install_definitions
+  exit 0
+fi
+
 if [ "$notify_mode" = 1 ]; then
   # ---- notify-only branch ----
   # Exactly the attention stack, nothing else: no AGENTS.md, adapter,
@@ -683,6 +727,7 @@ fi
 
 # Trusted code-review helper: installed outside any target checkout and resolved
 # by code-review facets through the config-root absolute path.
+retire_workflow_definitions
 copy_managed_file "$ROOT/scripts/code-review-helper.py" "$DEST/bin/code-review-helper.py"
 chmod +x "$DEST/bin/code-review-helper.py"
 

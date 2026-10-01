@@ -3,32 +3,19 @@ name: review-general
 description: Review pinned code-review snapshots and bounded changes for specification compliance and cross-cutting quality; carries the Lappie task-review modes with severity-classified findings.
 polytoken:
   model: "@mg:reviewer"
-  tools: 
-  - file_read
-  - glob
-  - grep
-  - skill
-  undeferred_tools: 
-  - file_read
-  - glob
-  - grep
-  - skill
+  tools: [tag!ALL, mcp__ratatoskr]
+  tools_deny: [file_write, file_edit_search_replace, patch_edit, switch_facet, write_plan, edit_plan, handoff_plan, complete_goal, shell_service]
+  undeferred_tools: [file_read, glob, grep, shell_exec, skill]
   allow_subagent_spawn: false
-  skills_allow: 
-  - github-review-snapshot
-  - code-review-evidence
-  - polytoken:investigating-a-codebase
-  - polytoken:modifying-polytoken
-  - receiving-code-review
-  skills_deny: []
+  skills_deny: [ai-workflow, agent-orchestration, finishing-a-development-branch]
   exit_tool_schema:
     type: object
     additionalProperties: false
-    required: [source_revision, scope_id, verdict, findings, evidence, limitations]
+    required: [verdict, findings, limitations]
     if:
       required: [review_run_id]
     then:
-      required: [snapshot_digest, head_sha]
+      required: [source_revision, scope_id, snapshot_digest, head_sha, evidence]
       properties:
         findings:
           items:

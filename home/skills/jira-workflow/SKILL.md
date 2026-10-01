@@ -215,8 +215,10 @@ unrelated-work blocker. Report the pending operation and retry with reconciliati
 
 ## Retrospective and triage
 
-At each design/delivery phase end, briefly note what helped, what caused friction
-and a bounded improvement; route observed friction through the rules above.
+Routine design/delivery completion does not require a retrospective or trigger
+automatic friction tickets. Mention material process concerns briefly at completion;
+perform fuller retrospective or friction intake when requested. When friction work
+is assigned, follow the attribution, deduplication and reconciliation rules above.
 Triage ranks evidence, current reproducibility, impact, dependencies and verified
 recurrence. Missing Count is unknown, not zero. Creating a deduplicated friction
 issue is routine; closure requires operator confirmation of the actual key,
