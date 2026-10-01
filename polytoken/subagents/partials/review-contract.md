@@ -11,7 +11,7 @@ not authorize unrelated operations.
 Standalone `code-review` must dispatch `snapshot-review-*` workers with restricted
 grants, not ordinary broad reviewers. Their authority and evidence rules are:
 
-{{ transclude("partials/snapshot-review-contract.md") }}
+{{ transclude("snapshot-review-contract.md") }}
 
 ### Bounded-change mode
 
