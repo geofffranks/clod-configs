@@ -88,7 +88,7 @@ install_polytoken_launch_agent() {
 install_polytoken_target() {
   local rc=0
   bash "$SELF_DIR/scripts/install-polytoken.sh" "$force" "$pt_mode" || rc=$?
-  if [ "$rc" = 0 ]; then
+  if [ "$rc" = 0 ] && [ "$notify_only" = 1 ]; then
     install_polytoken_launch_agent || rc=$?
   fi
   return "$rc"

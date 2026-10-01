@@ -1,6 +1,6 @@
 ---
 name: review-adversarial
-description: Review pinned code-review snapshots and bounded changes for security and abuse paths, without network, shell, or mutation access.
+description: Review bounded changes for security and abuse paths; read-only over reviewed source, no mutation or fixes, focused checks allowed.
 polytoken:
   model: "@mg:reviewer"
   tools: [tag!ALL, mcp__ratatoskr]

@@ -3,14 +3,12 @@
 #
 # Invoked by install.sh as: scripts/install-polytoken.sh FORCE [MODE]
 #   FORCE is "0" or "1". MODE (default empty) selects the scope:
-#     ""                 full install (config, permissions, hooks, managed files)
-#     notify             notify-only: the attention-notification stack and its
-#                        hook entries. The macOS LaunchAgent (invoked by
-#                        install.sh) owns the death scan, so the two keepalive
-#                        hook entries are dropped.
-#     notify-container   notify-only for containerized sessions: no LaunchAgent,
-#                        so the keepalive hook entries are installed instead and
-#                        keep the watchdog and SSE watcher running in-container.
+#     ""                 full install without notifications
+#     definitions        definitions only; runtime configuration/hooks unchanged
+#     deployment         definitions/guards/hooks; config/permissions unchanged
+#     notify             explicit notify-only stack; no SSE keepalive registration
+#     notify-container   explicit notify-only stack with SSE watcher keepalive
+#                        (watchdog keepalive is retired in every mode).
 #
 # Consumes:
 #     POLYTOKEN_CONFIG_DIR  destination config root (default ~/.config/polytoken)
@@ -27,7 +25,7 @@ die() { echo "polytoken: $*" >&2; exit 1; }
 FORCE="${1:-0}"
 MODE="${2:-}"
 case "$MODE" in
-  ""|notify|notify-container|definitions) ;;
+  ""|notify|notify-container|definitions|deployment) ;;
   *) die "unknown install mode: $MODE (expected empty, notify, notify-container, or definitions)" ;;
 esac
 notify_mode=0
@@ -44,6 +42,7 @@ TTY="${POLYTOKEN_CONFIG_TTY:-/dev/tty}"
 PT_CFG="$ROOT/polytoken/config.recommended.yaml"
 PT_PERMS="$ROOT/polytoken/permissions.recommended.yaml"
 PT_HOOKS="$ROOT/polytoken/hooks.json"
+if [ "$notify_mode" = 1 ]; then PT_HOOKS="$ROOT/polytoken/hooks.notifications.json"; fi
 PT_AGENTS="$ROOT/polytoken/AGENTS.md"
 PT_ADAPTER="$ROOT/polytoken/hooks/adapter.sh"
 
@@ -58,7 +57,6 @@ EXEC_SCRIPTS=(
   hooks/bridge-connector-launcher.sh
   hooks/agent-notify.sh
   hooks/session-watchdog.sh
-  hooks/watchdog-keepalive.sh
   hooks/notify-watcher-keepalive.sh
   compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/hook.sh
   compat/read-once/hook.sh compat/read-once/compact.sh compat/read-once/read-once
@@ -66,14 +64,11 @@ EXEC_SCRIPTS=(
   compat/hooks/no-remote-writes.sh
 )
 
-# The attention-notification stack, shared verbatim by full and notify-only
-# installs (one array — no second enumeration): the agent-notify hook with its
-# mac-lane lib, the session watchdog and its container keepalive, and the SSE
-# event watcher with its libraries and session-start keepalive hook.
+# Explicit notify-only stack. Default/deployment installs never copy these files.
+# The optional host watchdog has no container keepalive or credential env file.
 NOTIFY_FILES=(
   "home/hooks/agent-notify.sh:hooks/agent-notify.sh"
   "home/session-watchdog.sh:hooks/session-watchdog.sh"
-  "home/hooks/watchdog-keepalive.sh:hooks/watchdog-keepalive.sh"
   "home/hooks/notify-watcher-keepalive.sh:hooks/notify-watcher-keepalive.sh"
   "home/lib/notify-mac.sh:lib/notify-mac.sh"
   "home/lib/notify-event-watcher.sh:lib/notify-event-watcher.sh"
@@ -92,7 +87,7 @@ notify_hook_names() {
     printf '%s\n' agent-notify agent-notify-cancel agent-notify-stop agent-notify-ask agent-notify-answer
   else
     printf '%s\n' agent-notify agent-notify-cancel agent-notify-stop agent-notify-ask agent-notify-answer \
-      session-watchdog-keepalive notify-watcher-keepalive
+      notify-watcher-keepalive
   fi
 }
 
@@ -336,7 +331,11 @@ render_legacy_skill_hooks() {
   fi
   jq -nc --arg dir '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '[
     {name:"skill-once",event:"pre_tool_use",matcher:"skill",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/hook.sh skill")}},
-    {name:"skill-once-reset",event:"post_compaction",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/compact.sh compact")}}
+    {name:"skill-once-reset",event:"post_compaction",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/compact.sh compact")}},
+    {name:"superpowers-session-start"}, {name:"superpowers-post-compaction"},
+    {name:"agent-notify"}, {name:"agent-notify-cancel"}, {name:"agent-notify-stop"},
+    {name:"agent-notify-ask"}, {name:"agent-notify-answer"},
+    {name:"session-watchdog-keepalive"}, {name:"notify-watcher-keepalive"}
   ]'
 }
 
@@ -628,9 +627,25 @@ ensure_local_bin_on_path() {
 echo "Installing Polytoken config into: $DEST"
 mkdir -p "$DEST"
 
-if [ "$MODE" = definitions ]; then
-  echo "  definitions-only: $DEST (config/providers/quota/MCP/hooks unchanged)"
+if [ "$MODE" = definitions ] || [ "$MODE" = deployment ]; then
+  echo "  scoped definitions ($MODE): $DEST (config/providers/quota/MCP/permissions unchanged)"
   install_definitions
+  if [ "$MODE" = deployment ]; then
+    copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
+    copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
+    for s in container-awareness bridge-connector-autostart bridge-connector-launcher; do
+      copy_managed_file "$ROOT/polytoken/hooks/$s.sh" "$DEST/hooks/$s.sh"
+    done
+    for d in "${COMPAT_DIRS[@]}"; do
+      while IFS= read -r -d '' src; do
+        rel="${src#"$ROOT/home/"}"
+        copy_managed_file "$src" "$DEST/compat/$rel"
+      done < <(find "$ROOT/home/$d" -type f -print0)
+    done
+    for h in "${COMPAT_HOOKS[@]}"; do copy_managed_file "$ROOT/home/$h" "$DEST/compat/$h"; done
+    for s in "${EXEC_SCRIPTS[@]}"; do [ ! -f "$DEST/$s" ] || chmod +x "$DEST/$s"; done
+    install_hooks
+  fi
   exit 0
 fi
 
@@ -682,10 +697,7 @@ copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
 copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/container-awareness.sh"
 copy_managed_file "$ROOT/polytoken/hooks/bridge-connector-autostart.sh" "$DEST/hooks/bridge-connector-autostart.sh"
 copy_managed_file "$ROOT/polytoken/hooks/bridge-connector-launcher.sh" "$DEST/hooks/bridge-connector-launcher.sh"
-# The notify stack (hooks + libs, incl. the SSE watcher) from the one shared array.
-for spec in "${NOTIFY_FILES[@]}"; do
-  copy_managed_file "$ROOT/${spec%%:*}" "$DEST/${spec#*:}"
-done
+# Notifications are opt-in through notify/notify-container modes, never defaults.
 for d in "${COMPAT_DIRS[@]}"; do
   if [ -d "$ROOT/home/$d" ]; then
     while IFS= read -r -d '' src; do

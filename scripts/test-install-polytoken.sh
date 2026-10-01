@@ -61,11 +61,10 @@ p4_seed() {
 sc "P1 fresh target -> expected files, no Claude-only artifacts"
 D="$(mktemp -d)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
-for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh lib/notify-mac.sh bin/code-review-helper.py; do
+for f in config.yaml permissions.yaml hooks.json AGENTS.md hooks/adapter.sh bin/code-review-helper.py; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
-cmp -s "$REPO/home/lib/notify-mac.sh" "$D/lib/notify-mac.sh" 2>/dev/null \
-  && ok "installed notify-mac.sh matches source" || no "installed notify-mac.sh matches source"
+[ ! -e "$D/lib/notify-mac.sh" ] && ok "default omits notify libraries" || no "default omits notify libraries"
 cmp -s "$REPO/scripts/code-review-helper.py" "$D/bin/code-review-helper.py" 2>/dev/null \
   && ok "installed trusted code-review helper matches source" || no "installed trusted code-review helper matches source"
 [ -x "$D/bin/code-review-helper.py" ] && ok "trusted code-review helper executable" || no "trusted code-review helper executable"
@@ -614,12 +613,26 @@ out5="$(POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY="$TTY" bash "$S/scripts/i
 has "$out5" "backup already exists" "reconcile: backup collision reported"
 rm -rf "$D" "$S" "$TTY"
 
+# Scoped deployment must not alter runtime config or permission policy.
+sc "PD scoped deployment preserves config/permissions and retires old managed hooks"
+D="$(valid_base)"
+cp "$D/config.yaml" "$D/config.before"
+printf 'version: 2\nallow: []\n' > "$D/permissions.yaml"
+cp "$D/permissions.yaml" "$D/permissions.before"
+cp "$REPO/polytoken/hooks.notifications.json" "$D/hooks.json"
+POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$INSTALL_PT" 1 deployment >/dev/null
+cmp -s "$D/config.before" "$D/config.yaml" && ok "deployment preserves config bytes" || no "deployment preserves config bytes"
+cmp -s "$D/permissions.before" "$D/permissions.yaml" && ok "deployment preserves permissions bytes" || no "deployment preserves permissions bytes"
+ajq "$D/hooks.json" '[.[]|select(.name|test("notify|watchdog|superpowers"))]|length == 0' "deployment retires old managed hooks"
+ajq "$D/hooks.json" '[.[]|select(.name=="branch-guard" or .name=="no-remote-writes")]|length == 2' "deployment registers both Git guards"
+rm -rf "$D"
+
 # --- PN: notify-only install modes ($2: empty | notify | notify-container) ---
 # Hard-coded expected name sets (NOT derived from source): a rename in
 # polytoken/hooks.json must fail these tests loudly.
 # jq sort order is by codepoint: "-answer" < "-ask" ("an" < "as").
 EXPECTED_NOTIFY5_SORTED="agent-notify agent-notify-answer agent-notify-ask agent-notify-cancel agent-notify-stop"
-EXPECTED_NOTIFY7_SORTED="$EXPECTED_NOTIFY5_SORTED notify-watcher-keepalive session-watchdog-keepalive"
+EXPECTED_NOTIFY7_SORTED="$EXPECTED_NOTIFY5_SORTED notify-watcher-keepalive" # six entries; watchdog keepalive retired
 pt_hook_names() { jq -r '[.[].name] | sort | join(" ")' "$1" 2>/dev/null; }
 run_pt_mode() { local d="$1" t="$2" f="$3" m="$4"; POLYTOKEN_CONFIG_DIR="$d" POLYTOKEN_CONFIG_TTY="$t" bash "$INSTALL_PT" "$f" "$m" 2>&1; }
 
@@ -628,9 +641,9 @@ D="$(mktemp -d)"
 out="$(run_pt_mode "$D" /nonexistent-xyz 0 notify-container)"
 [ "$(pt_hook_names "$D/hooks.json")" = "$EXPECTED_NOTIFY7_SORTED" ] && ok "hooks.json == expected 7 notify names" || no "hooks.json == expected 7 notify names (got: $(pt_hook_names "$D/hooks.json"))"
 hasnt "$(cat "$D/hooks.json")" '__POLYTOKEN_CONFIG_DIR__' "literal token rendered out of hooks.json"
-ajq "$D/hooks.json" '[.[]|select(.name=="session-watchdog-keepalive")]|length == 1' "watchdog keepalive entry present (container mode)"
+ajq "$D/hooks.json" '[.[]|select(.name=="session-watchdog-keepalive")]|length == 0' "watchdog keepalive retired even in opt-in mode"
 ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive" and .event=="session_start")]|length == 1' "watcher keepalive session_start entry present"
-for f in hooks/agent-notify.sh hooks/session-watchdog.sh hooks/watchdog-keepalive.sh hooks/notify-watcher-keepalive.sh \
+for f in hooks/agent-notify.sh hooks/session-watchdog.sh hooks/notify-watcher-keepalive.sh \
          lib/notify-event-watcher.sh lib/notify-watcher-signals.sh lib/notify-identity.sh lib/notify-send.sh lib/notify-claim.sh lib/notify-mac.sh; do
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
@@ -638,7 +651,7 @@ done
 for f in config.yaml permissions.yaml AGENTS.md hooks/adapter.sh hooks/container-awareness.sh compat skills subagents facets; do
   [ ! -e "$D/$f" ] && ok "omitted: $f" || no "omitted: $f"
 done
-[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "11" ] && ok "exactly the 11 notify files on disk (10 + hooks.json)" || no "exactly 11 files (got $(find "$D" -type f | wc -l | tr -d ' '))"
+[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "10" ] && ok "exactly 10 opt-in files including hooks.json" || no "exactly 10 opt-in files"
 rm -rf "$D"
 
 sc "PN2 fresh notify (LaunchAgent mode) -> 5 names, keepalive entries dropped"
@@ -647,7 +660,7 @@ out="$(run_pt_mode "$D" /nonexistent-xyz 0 notify)"
 [ "$(pt_hook_names "$D/hooks.json")" = "$EXPECTED_NOTIFY5_SORTED" ] && ok "hooks.json == expected 5 notify names" || no "hooks.json == expected 5 notify names (got: $(pt_hook_names "$D/hooks.json"))"
 ajq "$D/hooks.json" '[.[]|select(.name=="session-watchdog-keepalive")]|length == 0' "watchdog keepalive entry dropped (LaunchAgent owns the scan)"
 ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive")]|length == 0' "watcher keepalive entry dropped"
-[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "11" ] && ok "same 11 notify files on disk" || no "same 11 notify files on disk (got $(find "$D" -type f | wc -l | tr -d ' '))"
+[ "$(find "$D" -type f | wc -l | tr -d ' ')" = "10" ] && ok "same 10 opt-in files on disk" || no "same 10 opt-in files on disk"
 rm -rf "$D"
 
 sc "PN3 notify-container re-run -> idempotent, no new backup"
@@ -667,9 +680,9 @@ run_pt "$D" /nonexistent-xyz 0 >/dev/null
 before="$(cat "$D/hooks.json")"
 nb1="$(find "$D" -name '*.bak-*' | wc -l | tr -d ' ')"
 run_pt_mode "$D" /nonexistent-xyz 0 notify-container >/dev/null
-[ "$(cat "$D/hooks.json")" = "$before" ] && ok "hooks.json byte-identical" || no "hooks.json byte-identical"
+ajq "$D/hooks.json" '[.[]|select(.name=="agent-notify")]|length == 1' "explicit notify opt-in adds notification hooks"
 nb2="$(find "$D" -name '*.bak-*' | wc -l | tr -d ' ')"
-[ "$nb2" = "$nb1" ] && ok "no backups created by the notify re-run" || no "no backups created by the notify re-run ($nb1 -> $nb2)"
+[ "$nb2" -gt "$nb1" ] && ok "opt-in hook change backed up" || no "opt-in hook change backed up"
 rm -rf "$D"
 
 sc "PN5 full install after notify-only -> adds the remainder"
@@ -679,19 +692,19 @@ run_pt "$D" /nonexistent-xyz 0 >/dev/null
 for f in config.yaml permissions.yaml AGENTS.md hooks/adapter.sh; do
   [ -f "$D/$f" ] && ok "added by full install: $f" || no "added by full install: $f"
 done
-[ "$(pt_hook_names "$D/hooks.json")" = "$(jq -r '[.[].name]|sort|join(" ")' "$RECOMMENDED_HOOKS")" ] \
-  && ok "hooks.json == full recommended inventory" || no "hooks.json == full recommended inventory"
+ajq "$D/hooks.json" '[.[]|select(.name=="branch-guard" or .name=="no-remote-writes")]|length == 2' "default upgrade adds both guards"
 ajq "$D/hooks.json" '([.[].name]|length)==([.[].name]|unique|length)' "no duplicate hook names after upgrade"
 ayq "$D/config.yaml" '.mcp_servers.ratatoskr.transport == "http"' "config.yaml landed (ratatoskr entry)"
 rm -rf "$D"
 
-sc "PN6 full install (mode empty) gains the SSE watcher stack"
+sc "PN6 default install omits notification scripts, libraries, hooks and runtime"
 D="$(mktemp -d)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
-for f in lib/notify-event-watcher.sh lib/notify-watcher-signals.sh lib/notify-identity.sh lib/notify-send.sh lib/notify-claim.sh hooks/notify-watcher-keepalive.sh; do
-  [ -f "$D/$f" ] && ok "full install now ships: $f" || no "full install now ships: $f"
+for f in lib/notify-event-watcher.sh lib/notify-watcher-signals.sh lib/notify-identity.sh lib/notify-send.sh lib/notify-claim.sh hooks/notify-watcher-keepalive.sh hooks/agent-notify.sh hooks/watchdog-keepalive.sh watchdog.env .agent-notify; do
+  [ ! -e "$D/$f" ] && ok "default omits: $f" || no "default omits: $f"
 done
-ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive" and .event=="session_start")]|length == 1' "full install wires the watcher keepalive entry"
+ajq "$D/hooks.json" '[.[]|select(.name|test("notify|watchdog|superpowers"))]|length == 0' "default omits notification and superpowers hooks"
+ajq "$D/hooks.json" '[.[]|select(.name=="read-once-reset" and .event=="post_compaction")]|length == 1' "read-once compaction reset preserved"
 rm -rf "$D"
 
 sc "PN7 notify modes need only jq; full installs still require yq v4"
@@ -741,8 +754,8 @@ run_install() { local la_log="$1" os="$2" cfg="$3"; shift 3
 sc "PG1 macOS default full install -> LaunchAgent once, keepalive entries present"
 D="$(mktemp -d)"; LALOG="$LASTUB/la-pg1.log"
 out="$(run_install "$LALOG" Darwin "$D" "$REPO/install.sh" --target polytoken)"
-[ "$(la_count "$LALOG")" = "1" ] && ok "LaunchAgent invoked exactly once" || no "LaunchAgent invoked exactly once (got $(la_count "$LALOG"))"
-ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive")]|length == 1' "keepalive entries present (full install)"
+[ "$(la_count "$LALOG")" = "0" ] && ok "default never invokes LaunchAgent" || no "default never invokes LaunchAgent"
+ajq "$D/hooks.json" '[.[]|select(.name=="notify-watcher-keepalive")]|length == 0' "default omits keepalive entries"
 [ "$(pt_hook_names "$D/hooks.json")" = "$(jq -r '[.[].name]|sort|join(" ")' "$RECOMMENDED_HOOKS")" ] && ok "full hook inventory" || no "full hook inventory"
 rm -rf "$D"
 
@@ -781,7 +794,7 @@ rm -rf "$C" "$D"
 sc "PG6 notty on macOS default still auto-runs the LaunchAgent (default-on)"
 D="$(mktemp -d)"; LALOG="$LASTUB/la-pg6.log"
 out="$(run_install "$LALOG" Darwin "$D" "$REPO/install.sh" --target polytoken 2>&1)"
-[ "$(la_count "$LALOG")" = "1" ] && ok "LaunchAgent invoked without a TTY" || no "LaunchAgent invoked without a TTY (got $(la_count "$LALOG"))"
+[ "$(la_count "$LALOG")" = "0" ] && ok "default without TTY still omits LaunchAgent" || no "default without TTY still omits LaunchAgent"
 rm -rf "$D"
 
 sc "PG7 --containerized-polytoken without --notify-hook-only -> usage error"
@@ -804,7 +817,7 @@ S="$(mktemp -d)"; mkdir -p "$S/scripts" "$S/polytoken" "$S/home"
 cp "$INSTALL_PT" "$S/scripts/install-polytoken.sh"
 cp -R "$REPO/polytoken/." "$S/polytoken/"
 ln -s "$REPO/home" "$S/home"
-sed -i.bak 's/"name": "agent-notify-ask"/"name": "agent-notify-ask-renamed"/' "$S/polytoken/hooks.json"
+sed -i.bak 's/"name":"agent-notify-ask"/"name":"agent-notify-ask-renamed"/' "$S/polytoken/hooks.notifications.json"
 D="$(mktemp -d)"
 out="$(POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S/scripts/install-polytoken.sh" 0 notify-container 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && ok "renamed source fails loudly (rc=$rc)" || no "renamed source fails loudly (rc=$rc)"

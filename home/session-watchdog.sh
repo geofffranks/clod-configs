@@ -36,15 +36,9 @@
 # and a 3-attempt retry cap.
 set -u
 
-ENV_FILE="${WATCHDOG_ENV_FILE:-$HOME/.config/polytoken/watchdog.env}"
-# Explicit process environment wins over the env file: a seeded file must
-# never override credentials a caller (or a test mock) passed in.
-_app="${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}"
-_user="${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}"
-[ -f "$ENV_FILE" ] && . "$ENV_FILE"
-APP_TOKEN="${_app:-${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}}"
-USER_KEY="${_user:-${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}}"
-unset _app _user
+# Credentials are explicit process inputs; no watchdog.env is sourced or created.
+APP_TOKEN="${PUSHOVER_APP_TOKEN:-${PUSHOVER_TOKEN:-}}"
+USER_KEY="${PUSHOVER_USER_KEY:-${PUSHOVER_USER:-}}"
 # Best-effort source of the shared identity library (sole title/body-tag
 # formatter) and the credential-free mac Notification Center lane: the
 # watchdog lives at $DEST/hooks/ (native) or ~/.claude/ (watchdog-only

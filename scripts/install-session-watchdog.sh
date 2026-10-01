@@ -12,8 +12,7 @@
 #
 # Credentials: PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY are inherited from the
 # invoking shell when set (baked into the plist, chmod 600). Without them the
-# installer wires an env file instead and prints how to create it:
-#   ~/.config/polytoken/watchdog.env   (sourced by the watchdog every scan)
+# installer uses the credential-free mac notification lane; no env file is created.
 set -euo pipefail
 
 LABEL="dev.gf.polytoken-session-watchdog"
@@ -24,7 +23,6 @@ SCRIPT_DST="${HOME}/.claude/session-watchdog.sh"
 MAC_MODULE_SRC="$SELF_DIR/home/lib/notify-mac.sh"
 MAC_MODULE_DST="${HOME}/.claude/lib/notify-mac.sh"
 PLIST_DST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
-ENV_FILE="${HOME}/.config/polytoken/watchdog.env"
 LOG_FILE="${HOME}/Library/Logs/polytoken-session-watchdog.log"
 
 action="install"
@@ -81,12 +79,10 @@ cp "$MAC_MODULE_SRC" "$MAC_MODULE_DST"
 mkdir -p "$(dirname "$PLIST_DST")" "$(dirname "$LOG_FILE")"
 if [ -z "${PUSHOVER_APP_TOKEN:-}" ] || [ -z "${PUSHOVER_USER_KEY:-}" ]; then
   echo "PUSHOVER_APP_TOKEN / PUSHOVER_USER_KEY not in environment."
-  echo "The watchdog will read them from: $ENV_FILE"
-  echo "Create it with (chmod 600):"
-  echo "  printf 'PUSHOVER_APP_TOKEN=<app token>\nPUSHOVER_USER_KEY=<user key>\n' > $ENV_FILE && chmod 600 $ENV_FILE"
+  echo "No credential file is generated; the credential-free mac notification lane remains available."
 else
   echo "Baking Pushover credentials from the environment into the plist (chmod 600)."
-  echo "They can be rotated later via $ENV_FILE instead."
+  echo "Re-run this explicit installer with new environment credentials to rotate them."
 fi
 
 render_plist > "$PLIST_DST"

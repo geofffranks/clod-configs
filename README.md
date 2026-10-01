@@ -57,6 +57,18 @@ default to `/dev/tty`.
 
 ### Attention notifications (agent-notify)
 
+Polytoken defaults do **not** install notification hooks, scripts, libraries,
+watchdog credentials or runtime data. Opt in explicitly with
+`./install.sh --target polytoken --notify-hook-only` (add
+`--containerized-polytoken` for the SSE watcher keepalive). The watchdog keepalive
+component is retired, and no `watchdog.env` is generated or sourced. Discord
+bridge autostart and quota hooks remain in default installation.
+
+For a scoped refresh of definitions, guards and hooks without configuration or
+permission-policy merges, use `POLYTOKEN_CONFIG_DIR=<destination> bash
+scripts/install-polytoken.sh 1 deployment`. Managed notification/Superpowers hook
+registrations are retired with a hooks backup; unrelated hooks remain.
+
 Both harnesses can push you when a run needs input or has died: the local
 Notification Center (credential-free on a mac, on by default) plus the
 optional Pushover. Install just the notification stack — none of the guards,

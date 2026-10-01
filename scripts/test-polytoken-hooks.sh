@@ -4,9 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIX="$ROOT/scripts/fixtures/polytoken-hooks"
 ADAPTER="$ROOT/polytoken/hooks/adapter.sh"
+# HOME isolation must not hide the interpreter selected by a mise shim.
+PYTHON_BIN_DIR="$(dirname "$(python3 -c 'import sys; print(sys.executable)')")"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/config" "$TMP/canonical/hooks" "$TMP/home"
+mkdir -p "$TMP/config" "$TMP/canonical/hooks" "$TMP/home" "$TMP/compat"
+# Installed compatibility files are materialized copies, not source symlinks.
+cp -RL "$ROOT/home/." "$TMP/compat/"
 printf 'adapter fixture\n' > "$TMP/read-target.txt"
 if stat -c '%Y' "$TMP/read-target.txt" >/dev/null 2>&1; then
   TEST_OSTYPE=linux-gnu
@@ -31,8 +35,8 @@ run_adapter() {
   RUN_STDERR="$TMP/stderr"
   set +e
   printf '%s' "$payload" | env \
-    HOME="$TMP/home" \
-    POLYTOKEN_CANONICAL_ROOT="$ROOT/home" \
+    HOME="$TMP/home" PATH="$PYTHON_BIN_DIR:$PATH" \
+    POLYTOKEN_CANONICAL_ROOT="$TMP/compat" \
     POLYTOKEN_CONFIG_DIR="$TMP/config" \
     POLYTOKEN_SESSION_ID="fallback-session" \
     OSTYPE="$TEST_OSTYPE" \
