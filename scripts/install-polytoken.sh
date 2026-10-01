@@ -79,9 +79,9 @@ NOTIFY_FILES=(
 )
 
 # Managed notify hook names expected in polytoken/hooks.json (rendered names).
-# In LaunchAgent mode (MODE=notify) the two keepalive entries are dropped: the
-# host LaunchAgent owns the death scan, and on stock macOS a keepalive loop
-# cannot spawn at all (no flock).
+# In LaunchAgent mode (MODE=notify) the notify-watcher-keepalive entry is
+# dropped: the host LaunchAgent owns the death scan, and on stock macOS a
+# keepalive loop cannot spawn at all (no flock).
 notify_hook_names() {
   if [ "$MODE" = "notify" ]; then
     printf '%s\n' agent-notify agent-notify-cancel agent-notify-stop agent-notify-ask agent-notify-answer

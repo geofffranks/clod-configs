@@ -132,9 +132,9 @@ with Polytoken-native equivalents.
 |---|---|---|
 | `config.yaml` | `polytoken/config.recommended.yaml` | `version: 3` + the single `mcp_servers.ratatoskr` gateway entry (see below). |
 | `permissions.yaml` | `polytoken/permissions.recommended.yaml` | Empty `version: 2` recommendation — your rules are always preserved. |
-| `hooks.json` | `polytoken/hooks.json` | Native hooks merged by unique name, including the notification entries documented in [docs/agent-notify.md](docs/agent-notify.md). Skill-once is omitted because per-agent hook identity is unavailable. |
+| `hooks.json` | `polytoken/hooks.json` | Native hooks merged by unique name. Notification entries are opt-in via `polytoken/hooks.notifications.json` (notify / notify-container modes); default installs wire no notification hooks. Skill-once is omitted because per-agent hook identity is unavailable. |
 | `AGENTS.md` | `polytoken/AGENTS.md` | Polytoken-native global instructions (Polytoken tool names), incl. rtk guidance (`rtk grep` for content search, `rtk <framework>` for tests/build; rules only — no hook). |
-| `hooks/agent-notify.sh`, `hooks/session-watchdog.sh`, `hooks/*keepalive.sh`, `lib/notify-*.sh` | `home/` | The notification stack (hooks, session watchdog, SSE event watcher) — see [docs/agent-notify.md](docs/agent-notify.md). |
+| `hooks/agent-notify.sh`, `hooks/session-watchdog.sh`, `hooks/notify-watcher-keepalive.sh`, `lib/notify-*.sh` | `home/` | The notification stack (hooks, session watchdog, SSE event watcher) — **opt-in** via `--notify-hook-only` / notify modes; default installs copy none of these. See [docs/agent-notify.md](docs/agent-notify.md). |
 | `facets/` | `polytoken/facets/` | Three lifecycle facets: `product-design`, `project-manager`, `quick-delivery`; standalone `code-review` and `process-friction-triage` remain available. |
 | `subagents/` | `polytoken/subagents/` | Managed built-in and workflow-specialist roles, including `agent-workflow-architect` and `agent-workflow-engineer`. |
 | `skills/` | `home/skills/` | The same canonical skills tree shared with Claude. |
@@ -325,6 +325,8 @@ into your `hooks.json`:
 | `no-remote-writes` | `pre_tool_use` (`shell_exec`) | `compat/hooks/no-remote-writes.sh` |
 | `read-once` | `pre_tool_use` (`file_read`) | `compat/read-once/hook.sh` |
 | `read-once-reset` | `post_compaction` | `compat/read-once/compact.sh` |
+| `grep-guard` | `pre_tool_use` (`Grep`) | `compat/grep-guard/hook.sh` |
+| `large-read-guard` | `pre_tool_use` (`file_read`) | `compat/large-read-guard/hook.sh` |
 
 `branch-guard` and `bash-guard` ship in `compat/` but are not registered by
 default: the hook transport cannot distinguish a linked-worktree checkout from

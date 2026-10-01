@@ -39,10 +39,10 @@ merge prompts.
   `hooks/agent-notify.sh` + `lib/notify-mac.sh` (the credential-free mac
   sender) + the three `agent-notify.sh` hook entries in `settings.json`.
 - **Under Polytoken** it is the notify files (`hooks/agent-notify.sh`,
-  `hooks/session-watchdog.sh`, `hooks/watchdog-keepalive.sh`,
-  `hooks/notify-watcher-keepalive.sh`, and the `lib/notify-*.sh` set) plus the
-  managed notify hook entries in `hooks.json` — seven names, or five on a
-  native macOS host where the LaunchAgent owns the death scan (below).
+  `hooks/session-watchdog.sh`, `hooks/notify-watcher-keepalive.sh`, and the
+  `lib/notify-*.sh` set) plus the managed notify hook entries in
+  `polytoken/hooks.notifications.json` — six names, or five on a native macOS
+  host where the LaunchAgent owns the death scan (below).
 
 `--containerized-polytoken` (only together with `--notify-hook-only`) tells the
 installer your sessions run in containers: it skips the macOS LaunchAgent and
@@ -105,11 +105,11 @@ noted where it applies).
 
 All notification lanes share the same session-aware title and canonical body tags; the SSE watcher's pushes receive that treatment too.
 
-Hook wiring (from `polytoken/hooks.json`): `agent-notify` (notification),
-`agent-notify-cancel` (pre_user_prompt), `agent-notify-stop` (stop),
-`agent-notify-ask` and `agent-notify-answer` (pre/post_tool_use on
-`ask_user_question`), plus the `session-watchdog-keepalive` and
-`notify-watcher-keepalive` session-start entries. The session id comes from
+Hook wiring (from `polytoken/hooks.notifications.json`): `agent-notify`
+(notification), `agent-notify-cancel` (pre_user_prompt), `agent-notify-stop`
+(stop), `agent-notify-ask` and `agent-notify-answer` (pre/post_tool_use on
+`ask_user_question`), plus the `notify-watcher-keepalive` session-start entry
+in keepalive modes. The session id comes from
 `POLYTOKEN_SESSION_ID`, and repo/branch resolution follows the session log's
 most recent working directory, so worktree sessions still name their repo.
 
@@ -157,9 +157,9 @@ the exceptional stale-reclaim race is not claimed to be strictly race-free.
 
   Each container session's hooks run inside the container with that env, so
   alerts work per session with no host-side daemon.
-- **Session watchdog LaunchAgent**: with no credentials in the environment,
-  the installer wires `~/.config/polytoken/watchdog.env` (chmod 600) instead —
-  the watchdog sources it on every scan.
+- **Session watchdog LaunchAgent**: credentials are environment-only — the
+  installer creates no env file; export the variables in the LaunchAgent
+  environment (or shell profile) it inherits.
 
 ## Death alerts (lifecycle shipper)
 
@@ -215,7 +215,7 @@ pings at most once per episode (then tombstoned).
 while the session was already long idle stays silent), `WATCHDOG_MASS` (many
 simultaneous deaths read as one host/container event), a boot-grace first scan,
 and a 3-attempt send retry. Environment (all optional): `WATCHDOG_LOG_DIR`,
-`WATCHDOG_SESSIONS_DIR`, `WATCHDOG_STATE_DIR`, `WATCHDOG_ENV_FILE`,
+`WATCHDOG_SESSIONS_DIR`, `WATCHDOG_STATE_DIR`,
 `WATCHDOG_LOOP_INTERVAL` (30s keepalive cadence),
 `WATCHDOG_LIVENESS_STALE` (90s scan / 180s keepalive-spawned loops).
 
@@ -241,11 +241,11 @@ there is **no death scan** on macOS.
 **Mac-side scanning of container sessions.** Container journals are
 host-visible through the `run.sh` bind mount under
 `~/.local/share/polytoken-dev`. To have the Mac LaunchAgent scan them too,
-point it at the container data root in `~/.config/polytoken/watchdog.env`:
+export the container data root in the LaunchAgent environment:
 
 ```bash
-WATCHDOG_LOG_DIR="$HOME/.local/share/polytoken-dev/logs"
-WATCHDOG_SESSIONS_DIR="$HOME/.local/share/polytoken-dev/sessions"
+export WATCHDOG_LOG_DIR="$HOME/.local/share/polytoken-dev/logs"
+export WATCHDOG_SESSIONS_DIR="$HOME/.local/share/polytoken-dev/sessions"
 ```
 
 **Silence immediately** (stop the keepalive-spawned scan loop; it resumes at
@@ -331,8 +331,8 @@ interaction between this watcher and the ask hook.
   `scripts/test-notify-watcher-keepalive.sh`,
   `scripts/test-notify-exit-record.sh`, `scripts/test-notify-libs.sh`,
   `scripts/test-notify-adapter.sh`, `scripts/test-notify-event-watcher.sh`,
-  `scripts/test-session-watchdog.sh`, `scripts/test-watchdog-keepalive.sh` —
-  all run offline with mock senders and assert no network egress.
+  `scripts/test-session-watchdog.sh` — all run offline with mock senders and
+  assert no network egress.
 - Raw SSE frames for watcher debugging: `bash scripts/capture-sse-experiment.sh --list`,
   then `bash scripts/capture-sse-experiment.sh <session-dir> --max-seconds 120`
   appends verbatim `data:` frames to a timestamped JSONL (no processing, no sends).
