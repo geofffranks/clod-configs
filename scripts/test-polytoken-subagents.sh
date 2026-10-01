@@ -14,9 +14,26 @@ for f in polytoken/subagents/*.md; do
   test "$(yq -r '.polytoken.allow_subagent_spawn' "$T/frontmatter.yaml")" = false
   count=$((count + 1))
 done
-test "$count" -eq 16
+test "$count" -eq 22
+for f in polytoken/subagents/snapshot-review-*.md; do
+  awk 'NR==1 && $0=="---"{next} /^---$/{exit} {print}' "$f" > "$T/frontmatter.yaml"
+  yq -o=json '.polytoken' "$T/frontmatter.yaml" > "$T/snapshot.json"
+  jq -e '.tools == ["file_read","glob","grep","skill"] and
+    .undeferred_tools == .tools and .allow_subagent_spawn == false and
+    .skills_allow == ["github-review-snapshot","code-review-evidence","polytoken:investigating-a-codebase","polytoken:modifying-polytoken","receiving-code-review"] and
+    .skills_deny == [] and
+    (.exit_tool_schema.required | index("source_revision") != null) and
+    (.exit_tool_schema.required | index("scope_id") != null) and
+    (.exit_tool_schema.required | index("evidence") != null) and
+    (.exit_tool_schema.required | index("review_run_id") != null) and
+    (.exit_tool_schema.required | index("snapshot_digest") != null) and
+    (.exit_tool_schema.required | index("head_sha") != null) and
+    (.exit_tool_schema.properties.findings.items.required | index("provenance") != null)' "$T/snapshot.json" >/dev/null
+done
 for name in review-adversarial review-correctness review-completeness review-maintainability review-general review-abstraction; do
   awk 'NR==1 && $0=="---"{next} /^---$/{exit} {print}' "polytoken/subagents/$name.md" > "$T/frontmatter.yaml"
+  test "$(yq -r '.polytoken.tools | join(",")' "$T/frontmatter.yaml")" = 'tag!ALL,mcp__ratatoskr'
+  test "$(yq -r '.polytoken.undeferred_tools | contains(["shell_exec"])' "$T/frontmatter.yaml")" = true
   yq -o=json '.polytoken.exit_tool_schema' "$T/frontmatter.yaml" > "$T/schema.json"
   # Snapshot-specific schema fields remain conditional, not ordinary-delivery prerequisites.
   jq -e '.required == ["verdict","findings","limitations"] and

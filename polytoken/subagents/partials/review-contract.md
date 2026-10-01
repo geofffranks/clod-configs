@@ -8,19 +8,10 @@ not authorize unrelated operations.
 
 ### Snapshot mode
 
-Preserve the standalone `code-review` boundary: no shell, network, MCP, repository
-code execution, builds, tests or write operations. Read only supplied immutable
-artifacts and bounded captured context using file reads/search and snapshot
-skills. Echo `scope_id`, `source_revision`, `review_run_id`, `snapshot_digest` and
-full `head_sha`. Identity mismatch or incomplete evidence is `blocked`. Read every
-artifact your checks depend on. Snapshot helper resolution is outside the reviewed
-checkout; do not acquire fresh live context or bypass the trusted helper.
+Standalone `code-review` must dispatch `snapshot-review-*` workers with restricted
+grants, not ordinary broad reviewers. Their authority and evidence rules are:
 
-For each finding state concrete `impact_if_unfixed` (including severity rationale),
-`triggering_use_cases`, `affected_scope`, and `provenance` (`introduced`,
-`pre_existing`, `mixed_or_exposed`, `uncertain`). Never substitute vague
-placeholders such as "bug" or "edge case". Preserve snapshot evidence, synthesis
-and existing follow-up behavior. Verdicts are `approved`, `needs_fixes`, `blocked`.
+{{ transclude("partials/snapshot-review-contract.md") }}
 
 ### Bounded-change mode
 

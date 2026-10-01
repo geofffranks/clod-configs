@@ -212,8 +212,12 @@ repository code by default. Immutable snapshots, append-only journals, and
 local reports live under
 `~/.local/share/polytoken/code-review/<canonical-host>/<owner>/<repo>/<scope_id>/`.
 
-Six independent read-only lanes — adversarial, correctness, completeness,
-maintainability, general, and abstraction — inspect the pinned snapshot, followed by a fresh
+Six independent `snapshot-review-*` workers — adversarial, correctness,
+completeness, maintainability, general, and abstraction — have mechanically
+restricted file-read/search and allowed-skill grants, with no shell, network,
+MCP or execution tools. Ordinary `review-*` workers retain relevant testing
+capability and are not used by this workflow. Snapshot workers inspect the
+pinned snapshot, followed by a fresh
 `review-synthesis-verifier`. Findings preserve exact evidence, severity,
 confidence, and provenance, with PR-actionable and pre-existing findings in
 separate ranked buckets. Missing, stale, truncated, unverifiable, or failed

@@ -75,10 +75,10 @@ for f in compat/bash-guard/hook.sh compat/branch-guard/hook.sh compat/git-safe/h
   [ -f "$D/$f" ] && ok "installed: $f" || no "installed: $f"
 done
 ls "$D"/skills/*/SKILL.md >/dev/null 2>&1 && ok "skills installed" || no "skills installed"
-expected_subagents="$(printf '%s\n' agent-workflow-architect.md agent-workflow-engineer.md design-reviewer.md implementer.md mobile-app-expert.md partials/review-contract.md researcher.md review-abstraction.md review-adversarial.md review-completeness.md review-correctness.md review-general.md review-maintainability.md review-synthesis-verifier.md software-architect.md software-engineer.md validator.md | sort)"
+expected_subagents="$(printf '%s\n' agent-workflow-architect.md agent-workflow-engineer.md design-reviewer.md implementer.md mobile-app-expert.md partials/review-contract.md partials/snapshot-review-contract.md researcher.md review-abstraction.md review-adversarial.md review-completeness.md review-correctness.md review-general.md review-maintainability.md review-synthesis-verifier.md snapshot-review-abstraction.md snapshot-review-adversarial.md snapshot-review-completeness.md snapshot-review-correctness.md snapshot-review-general.md snapshot-review-maintainability.md software-architect.md software-engineer.md validator.md | sort)"
 actual_subagents="$(find "$D/subagents" -type f -name '*.md' -printf '%P\n' | sort)"
 [ "$actual_subagents" = "$expected_subagents" ] \
-  && ok "installed exactly the 15 shipped subagents + shared partial" || no "installed exactly the 15 shipped subagents + shared partial"
+  && ok "installed exactly the 22 shipped subagents + two shared partials" || no "installed exactly the 22 shipped subagents + two shared partials"
 cmp -s "$REPO/polytoken/subagents/partials/review-contract.md" "$D/subagents/partials/review-contract.md" 2>/dev/null \
   && ok "installed review-contract partial matches source" || no "installed review-contract partial matches source"
 for fragment in workflow-common delivery-workflow; do
@@ -89,7 +89,7 @@ done
 expected_facets="$(printf '%s\n' code-review.md process-friction-triage.md product-design.md project-manager.md quick-delivery.md | sort)"
 actual_facets="$(find "$D/facets" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sort)"
 [ "$actual_facets" = "$expected_facets" ] \
-  && ok "installed exactly the 6 shipped facets" || no "installed exactly the 6 shipped facets"
+  && ok "installed exactly the 5 shipped facets" || no "installed exactly the 5 shipped facets"
 for facet in code-review process-friction-triage product-design project-manager quick-delivery; do
   cmp -s "$REPO/polytoken/facets/$facet.md" "$D/facets/$facet.md" 2>/dev/null \
     && ok "installed facet matches source: $facet" || no "installed facet matches source: $facet"
@@ -602,6 +602,16 @@ out4="$(POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY=/nonexistent-xyz bash "$S
 [ -f "$D/subagents/retired-lane-c.md" ] \
   && ok "reconcile: force mode preserves orphan" || no "reconcile: force mode preserves orphan"
 has "$out4" "force mode does not prune" "reconcile: force-mode skip reported"
+# Deterministic timestamp in the copied installer; never touch the source script.
+sed -i 's/^TS=.*/TS="collision-test"/' "$S/scripts/install-polytoken.sh"
+printf 'previous backup bytes\n' > "$D/subagents/retired-lane-c.md.bak-collision-test"
+printf 'y\n' > "$TTY"
+out5="$(POLYTOKEN_CONFIG_DIR="$D" POLYTOKEN_CONFIG_TTY="$TTY" bash "$S/scripts/install-polytoken.sh" 0 2>&1)"
+[ "$(cat "$D/subagents/retired-lane-c.md")" = 'old lane bytes' ] \
+  && ok "reconcile: backup collision preserves current definition" || no "reconcile: backup collision preserves current definition"
+[ "$(cat "$D/subagents/retired-lane-c.md.bak-collision-test")" = 'previous backup bytes' ] \
+  && ok "reconcile: backup collision never overwrites previous bytes" || no "reconcile: backup collision never overwrites previous bytes"
+has "$out5" "backup already exists" "reconcile: backup collision reported"
 rm -rf "$D" "$S" "$TTY"
 
 # --- PN: notify-only install modes ($2: empty | notify | notify-container) ---

@@ -186,6 +186,10 @@ prune_subagents() {
   fi
   for dst in "${candidates[@]}"; do
     if prompt_yn "${dst#"$DEST"/} no longer exists in the repository; retire (saved as <name>.bak-$TS)?" conflict; then
+      if [ -e "$dst.bak-$TS" ] || [ -L "$dst.bak-$TS" ]; then
+        echo "polytoken: backup already exists; preserving $dst" >&2
+        continue
+      fi
       mv "$dst" "$dst.bak-$TS"
       echo "  retired:   ${dst#"$DEST"/} (saved to ${dst#"$DEST"/}.bak-$TS)"
     else
@@ -206,7 +210,7 @@ retire_workflow_definitions() {
     [ -f "$dst" ] || continue
     if [ "$mode" != force ] && prompt_yn "$rel is retired; move aside with backup?" conflict; then
       backup="$dst.bak-$TS"
-      if [ -e "$backup" ]; then
+      if [ -e "$backup" ] || [ -L "$backup" ]; then
         echo "polytoken: backup already exists; preserving $rel" >&2
         continue
       fi

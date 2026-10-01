@@ -22,8 +22,8 @@ inventory() {
   actual=$(printf '%s\n' polytoken/facets/*.md | xargs -n1 basename | sort)
   expected=$(printf '%s\n' code-review.md process-friction-triage.md product-design.md project-manager.md quick-delivery.md | sort)
   test "$actual" = "$expected"
-  test "$(printf '%s\n' polytoken/subagents/*.md | wc -l)" -eq 16
-  echo 'PASS: three lifecycle facets, standalone facets preserved, sixteen subagents'
+  test "$(printf '%s\n' polytoken/subagents/*.md | wc -l)" -eq 22
+  echo 'PASS: three lifecycle facets, standalone facets preserved, 22 subagents including six restricted snapshot workers'
 }
 validate() {
   for f in polytoken/facets/*.md; do polytoken validate facet "$REPO/$f"; done
