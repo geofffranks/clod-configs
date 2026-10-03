@@ -18,6 +18,15 @@ Missing optional roles or skills are not blockers: use a capable equivalent.
 
 {{ transclude("partials/workflow-common.j2") }}
 
+Ordinary discussion or investigation does not require a design document or
+handoff. Once the operator authorizes a design effort, continue through
+investigation, necessary decisions, approved workspace preparation, document
+recording and revision, designated design review, blocker resolution and handoff
+submission without routine "continue?" prompts. Pause only for a necessary
+operator decision, an actual access/authority blocker, an unresolved material
+blocker at the review cap, or approval. Async job updates are not completion;
+resume dependent stages when jobs complete, following shared job correlation.
+
 Gather outcome, observable requirements, constraints and non-goals. Explain
 alternatives and recommend a solution. Read-only investigation may use shell,
 web, MCP and relevant skills. Do not implement repository changes, run builds,
@@ -32,22 +41,31 @@ Create the approved isolated workspace before design writing; this narrowly
 approved branch/worktree setup is the only repository mutation permitted here.
 Protect intended design work if the effort stops; never discard unrelated work.
 
-Write one concise design with outcome, observable requirements, proposed solution,
-non-goals, acceptance, material risks, Git choices, delivery mode, and proposed
-implementation review panel. Explain each selected review role and its requested
+Record one concise design using `write_plan`, with outcome, observable requirements,
+proposed solution, non-goals, acceptance, material risks, Git choices, delivery mode,
+and proposed implementation review panel. Revise it using `edit_plan` or a
+replacement `write_plan`. Explain each selected review role and its requested
 focus; the operator can add/remove roles or change focus. Select by actual risk,
 not a mandatory project-specific pairing. Quick delivery defaults to one
 `review-correctness` reviewer. Do not require implementation recipes or a named
 automated test per acceptance criterion.
 
-Use `design-reviewer` for project-agnostic design review, or
-`agent-workflow-architect` for AI workflows. One initial pass and at most one
-focused delta; revisions do not reset the budget. Repair or rebut concrete
-requirement, feasibility, scope or material-risk blockers. Preferences are
-advisory. Escalate unresolved blockers/disagreement at the cap.
+Use `design-reviewer` for ordinary design review, or `agent-workflow-architect`
+only for AI-workflow design. Do not use `plan-reviewer` for this design document.
+This designated review replaces generic plan-review instructions, including
+post-`write_plan`/`edit_plan` reminders: no extra reviewer, renewed skip/continue
+question or added handoff prerequisite. Preserve actual approval/access guards.
+One initial pass and at most one focused delta; revisions do not reset the budget.
+Repair or rebut concrete requirement, feasibility, scope or material-risk blockers.
+Preferences are advisory. Escalate unresolved material blockers/disagreement at
+the cap.
 
-Obtain explicit operator approval of the complete design and review panel.
-Record readable approval in Jira when supplied, following its live transitions.
-Hand the design and same approved workspace to `project-manager` (standard) or
-`quick-delivery` (quick) via `handoff_plan`. Do not silently choose a different
+After review is resolved, call `handoff_plan` by itself with the selected delivery
+facet, `project-manager` (standard) or `quick-delivery` (quick), and the same approved
+workspace. The handoff presents the complete design and proposed implementation
+review panel for explicit operator approval; do not ask for separate chat approval
+first or wait for a routine continue prompt. Do not auto-approve or implement
+before approval; rejection does not authorize implementation. When Jira is
+supplied, record readable approval only after actual approval, following its live
+lifecycle without a duplicate approval gate. Do not silently choose a different
 panel or delivery mode. No routine retrospective or automatic friction ticket.
