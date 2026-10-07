@@ -199,7 +199,26 @@ confirmation. No mandatory retrospective or automatic friction tickets.
 Conditional [screenshots](home/skills/screenshots/SKILL.md),
 [Appium](home/skills/appium/SKILL.md) and
 [native checks](home/skills/xcode-native-checks/SKILL.md) hold tool procedures,
-shared-session ownership and device exclusions, not facets. Screenshot runtime
+shared-session ownership and device exclusions, not facets. For MCP server code
+changes, load [mcp-development](home/skills/mcp-development/SKILL.md), then read
+only the relevant iOS, Appium, codex-imagegen, Foundry, Ratatoskr or remote/unknown
+companion. The canonical global trigger is in `polytoken/AGENTS.md`. Named
+Ratatoskr reconnects can apply all pending upstream configuration changes and
+reconnect eligible `NeedsLogin` peers; assess the full impact and affected owners
+before acting, or coordinate with the operator when host config is inaccessible.
+The skill separates worktree tests, staged/installed artifacts, process reload
+and verified live behavior; it grants no new deployment authority.
+
+Skill companions are copied recursively by the managed installer. For an
+approved targeted refresh, preserve unrelated/custom installed content and copy
+the whole `mcp-development/` directory plus approved instruction/definition edits
+into the chosen Polytoken config destination. Validate copied definitions with
+`polytoken validate`; activate separately through startup or `/daemon-reload`.
+File copying is not runtime activation, and neither requires a live MCP restart.
+Do not run a broad installer or the old gateway setup script to refresh this
+skill against the operator's live configuration.
+
+Screenshot runtime
 storage is `/Users/gfranks/workspace/screenshots/<branch-folder>/`; reviewers open
 absolute paths, without checksums/manifests/fixture gates.
 

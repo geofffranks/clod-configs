@@ -2,9 +2,14 @@
 
 Use job-relevant tools/skills within the authorized scope; broad access does not
 authorize unrelated operations. Use ratatoskr for MCP: list servers, inspect the
-tool schema, then execute. Reconnect only for auth/token expiry; do not authenticate
-a duplicate direct connection. Discover conditional technical procedures from
-skills and project instructions, not from facet-level platform recipes.
+tool schema, then execute; do not authenticate a duplicate direct connection.
+Reconnect for auth/token expiry or authorized MCP development under
+`mcp-development`, not unrelated restarts. Before reconnect/reload, assess all
+pending config changes, eligible `NeedsLogin` peers and affected owners; named
+reconnect can reconcile them too. If impact cannot be established (including
+inaccessible host config), defer for operator coordination before acting.
+Read-only roles gain no deployment/reload authority. Discover conditional
+technical procedures from skills and project instructions, not facet recipes.
 
 Jira is optional without a supplied ticket. Load `jira-workflow` before Jira work:
 fetch live type/status, attribute the actual session ID on each worked ticket,

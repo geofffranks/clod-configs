@@ -32,6 +32,16 @@ allow:
   - tool: grep
 ```
 
+## MCP development
+
+Load `mcp-development` when modifying, building, testing or deploying MCP server
+code, including worktree work. Read only its relevant companion guide; ordinary
+Appium use still follows `appium`. Development reconnects need task authority
+and pre-action assessment of all pending config changes, eligible `NeedsLogin`
+peers and affected owners. If host config is inaccessible and impact cannot be
+established, coordinate with the operator before acting. This grants no new
+operation authority to read-only roles.
+
 ## Commit messages
 
 Apostrophes in commit messages are fine — `git commit -m "fix: it's broken"`
