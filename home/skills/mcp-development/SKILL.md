@@ -18,15 +18,19 @@ the relevant companion with `file_read`, resolving links relative to this skill:
 1. Read the selected repo's current instructions, manifests and build scripts.
    Confirm the intended source worktree, change and focused checks. These guides
    are starting recipes; resolve drift against current source and configuration.
-2. Discover Ratatoskr servers, then tools and schemas. Use its configured Lua
-   names, not guessed names or duplicate direct authentication. Tool access and
-   this skill do not grant installation, restart, device or host-access authority.
-   Read-only reviewers/designers remain read-only.
+2. Native reads, Git, development commands and project scripts need no gateway
+   discovery. For actual MCP work, discover Ratatoskr servers, list tools, inspect
+   schemas, then execute with configured Lua names when available. Do not guess
+   names or authenticate duplicate connections. Tool access and this skill do not
+   grant installation, restart, device or host-access authority. Read-only
+   reviewers/designers remain read-only.
 3. Identify separately: source root, staging output, configured launch artifact,
-   source-to-runtime paths, Mac OS/architecture and runtime dependencies. Run
-   development commands directly on this Mac, where Ratatoskr and stdio servers
-   also run. `<workspace>` means the discovered workspace, not a literal path.
-   `~` means the Mac user's home.
+   source-to-runtime paths, actual execution OS/architecture, runtime host and
+   dependencies. On macOS run directly with the user's configured environment.
+   Linux checks of mounted source are not Mac runtime verification; do not claim
+   Xcode/device access or stage Linux native dependencies as Mac deployment.
+   `<workspace>` means the discovered workspace, not a literal path. `~` in Mac
+   host instructions means that user's home, not a Linux session's HOME.
 4. Current Ratatoskr launch command/args/env are authoritative. The Mac config is
    normally `~/Library/Preferences/ratatoskr/config.json` (`mcpClients`). It is
    native user configuration; inspect it directly. Operator-confirmed relocation puts
@@ -113,7 +117,15 @@ responses and live catalog listings are different evidence.
 For guidance changes themselves, validate skills/definitions with `polytoken
 validate`; review instructions with scenarios rather than phrase tests. Source
 edits, targeted skill installation and Polytoken activation are separate too.
-Preserve custom instructions, providers/models/quota, permissions, hooks and MCP
-settings. The installer already copies companions recursively; do not run a
-broad live installer just to refresh this skill. Activate approved installed
-changes through startup or `/daemon-reload`, not a Ratatoskr restart.
+Before any authorized guidance installation, inspect the real target Mac's
+active config/discovery roots and compare installed instructions/skills with
+canonical source. Do not infer the target from Linux HOME or install there as a
+substitute. Preserve custom instructions/definitions, providers/models/quota,
+permissions, hooks and MCP settings. Refresh only assigned files and companions,
+with backups; migrate retired installed copies reversibly only with explicit
+authority. The installer already copies companions recursively, but a broad live
+installer/config merge is not a scoped guidance refresh. If host configuration
+is inaccessible, report installation/activation pending for operator coordination.
+Activate approved installed guidance through startup or authorized
+`/daemon-reload`, not a Ratatoskr restart. Check affected session owners before
+a daemon reload; it is separate from an upstream reconnect.

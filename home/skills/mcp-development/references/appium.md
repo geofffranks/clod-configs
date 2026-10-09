@@ -23,6 +23,24 @@
   health/version tool. An unchanged catalog or static version does not prove
   this build is running.
 
+Appium's shared authority adapter invokes the retained `ios-app-dev-mcp`
+executable with the versioned effort JSON protocol. Confirm the configured
+executable resolution, user/state, actual parent session/worktree and assigned
+UDID remain compatible with native callers; explicit authority executable
+configuration is preferred where supported. Retiring iOS build tools does not
+retire this executable or protocol. Appium admits its own operations: do not add
+a second operation wrapper around calls. Preserve pending session creation,
+WDA listener/process identity, structured recovery diagnostics and owned boot
+resource compatibility. Uncertain ownership is recovery-required, never a reason
+to reset/replace WDA, bypass busy results or force-unlock.
+
+Mac automation and native dependencies require actual Mac host access. Linux
+TypeScript/source checks do not verify WDA, simulator or runtime activation.
+Preserve explicit session IDs and reachable file-based screenshots. The assigned
+owner coordinates session -> WDA -> effort-owned boot -> owned Metro cleanup;
+verify owned resource absence before release and preserve operator/prebooted
+resources. Native application build/install/Metro policy remains project-owned.
+
 Load the existing `appium` skill for any automation/device work. Its device
 exclusions and single-owner/shared-session rules remain in force. Disconnect
 cleanup may skip session deletion, but that does not guarantee state survives

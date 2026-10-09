@@ -4,11 +4,16 @@ description: Capture and hand off reachable screenshots for practical visual rev
 ---
 # Screenshots
 
-Save task screenshots under
+On the operator's Mac, save task screenshots under
 `/Users/gfranks/workspace/screenshots/<branch-folder>/`; branch slashes may form
 nested folders. This is operator runtime storage, never application code or
-portable application configuration. Configure the capture tool's save directory
-before capture and verify the image is reachable by the consuming agent.
+portable application configuration. Establish the actual capture host and
+consumer-visible path; a mounted `/Users/...` directory on Linux is not proof of
+Mac capture access. If the path is unavailable, coordinate an accessible location
+with the owner rather than pretending the capture occurred. Configure the capture
+tool's save directory before capture and verify the consuming agent can open it.
+Native file/process capture needs no gateway discovery; actual Appium MCP capture
+uses Ratatoskr list/schema/execute when available and the explicit owned session.
 
 Supply absolute image paths and enough screen/state context to review: scenario,
 route, visible state and relevant viewport/device. Reviewers must actually open

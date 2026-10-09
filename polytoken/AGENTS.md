@@ -34,10 +34,18 @@ allow:
 
 ## Native execution
 
-Run development commands directly on this Mac from the intended worktree.
-Use the user's normal shell environment; do not substitute container launchers
-or hardcoded toolchain paths. Native runtime and device operations still require
-task authority and coordination with their owners.
+Use built-in filesystem tools, native processes and project-owned scripts from
+the intended worktree by default. Reads, Git, dependencies, builds and tests need
+no MCP discovery. On macOS use the user's normal shell/toolchain; do not substitute
+container launchers or hardcoded toolchain paths. Establish the actual OS: Linux
+or a mounted Mac path is not Mac runtime access. Report unavailable native checks.
+
+Project instructions own application preparation/build/test policy. Load
+`xcode-native-checks` for Apple native work and `appium` for automation. Native
+access does not bypass shared ownership, fresh operation admission or recovery;
+runtime/device mutations still need task authority and coordination with owners.
+Actual MCP calls use Ratatoskr discovery, schema inspection and execution when
+available; do not authenticate duplicate connections or guess retired tools.
 
 ## MCP development
 
