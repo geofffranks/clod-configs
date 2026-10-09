@@ -32,6 +32,13 @@ allow:
   - tool: grep
 ```
 
+## Native execution
+
+Run development commands directly on this Mac from the intended worktree.
+Use the user's normal shell environment; do not substitute container launchers
+or hardcoded toolchain paths. Native runtime and device operations still require
+task authority and coordination with their owners.
+
 ## MCP development
 
 Load `mcp-development` when modifying, building, testing or deploying MCP server

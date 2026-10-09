@@ -23,13 +23,13 @@ the relevant companion with `file_read`, resolving links relative to this skill:
    this skill do not grant installation, restart, device or host-access authority.
    Read-only reviewers/designers remain read-only.
 3. Identify separately: source root, staging output, configured launch artifact,
-   host-visible mapping, host OS/architecture and runtime dependencies. In this
-   setup agents may run on Linux while Ratatoskr and stdio servers run on macOS.
-   `<workspace>` below means the discovered shared workspace, not a literal path.
-   `~` in host paths means the Mac user's home, not the container's HOME.
+   source-to-runtime paths, Mac OS/architecture and runtime dependencies. Run
+   development commands directly on this Mac, where Ratatoskr and stdio servers
+   also run. `<workspace>` means the discovered workspace, not a literal path.
+   `~` means the Mac user's home.
 4. Current Ratatoskr launch command/args/env are authoritative. The Mac config is
    normally `~/Library/Preferences/ratatoskr/config.json` (`mcpClients`). It is
-   not normally mounted into the container. Operator-confirmed relocation puts
+   native user configuration; inspect it directly. Operator-confirmed relocation puts
    iOS, codex-imagegen and Foundry artifacts in their sibling repos' `bin/`
    directories; older `~/go/bin` instructions are stale, not permission to revert
    that relocation. Binary presence or discovery alone does not verify active
@@ -39,16 +39,15 @@ the relevant companion with `file_read`, resolving links relative to this skill:
 ## Test and stage from the intended worktree
 
 Run the selected repo's focused checks there, with RTK wrapping where supported.
-Build into a separate staging location for the verified runtime target. Go's
-Linux-native test artifact is not the Darwin deployment artifact. Inspect format
-and architecture (for example `file <staging-artifact>`) before installation;
-never install a Linux executable into the Mac runtime. Do not execute a Mac
-artifact on Linux to prove its behavior.
+Build directly on the Mac into a separate staging location for the verified
+runtime target. Inspect format and architecture (for example
+`file <staging-artifact>`) before installation; an artifact for another OS or
+architecture is not a deployable Mac build.
 
 A worktree build does not update the launch artifact in the main checkout.
 Never switch checkout or merge source merely to deploy. For Appium, stage the
-complete `dist/` output, not just `index.js`; do not copy Linux `node_modules`
-or native dependencies into the host runtime. Keep host Node/Codex installations
+complete `dist/` output, not just `index.js`; keep runtime dependencies compatible
+with the native Mac build. Keep native Node/Codex installations
 and dependency resolution intact.
 
 ## Install only with explicit deployment authority

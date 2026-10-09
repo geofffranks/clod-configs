@@ -4,10 +4,10 @@
   Read `AGENTS.md`, `README.md`, `go.mod`, `scripts/build.sh` and the upstream
   example. Use the Go toolchain required by the current manifest.
 - **Checks from the intended worktree:** `rtk go vet ./... && rtk go test ./...`.
-- **Mac arm64 staging build from Linux:**
-  `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o <staging-artifact> .`.
-  `scripts/build.sh` also produces Linux and Darwin outputs; identify which is
-  deployable rather than installing the native Linux result.
+- **Native Mac staging build (verify architecture first):**
+  `go build -o <staging-artifact> .`.
+  `scripts/build.sh` also produces multiple target outputs; select the verified
+  Mac artifact rather than installing an artifact for another OS.
 - **Configured destination:** expected shared
   `<workspace>/ios-app-dev-mcp/bin/ios-app-dev-mcp`; confirm actual host command
   and mapping before installation. An isolated worktree's `bin/` is not the

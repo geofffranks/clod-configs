@@ -52,7 +52,6 @@ COMPAT_HOOKS=(hooks/no-remote-writes.sh)
 # Executable managed scripts, relative to DEST.
 EXEC_SCRIPTS=(
   hooks/adapter.sh
-  hooks/container-awareness.sh
   hooks/bridge-connector-autostart.sh
   hooks/bridge-connector-launcher.sh
   hooks/agent-notify.sh
@@ -200,7 +199,8 @@ retire_workflow_definitions() {
   for rel in facets/workflow-designer.md facets/workflow-project-manager.md \
     facets/app-engineering.md facets/ui-workshop.md facets/partials/design-workflow.j2 \
     skills/lappie-workflow-coordination/SKILL.md skills/lappie-review-convergence/SKILL.md \
-    skills/lappie-ui-evidence-review/SKILL.md skills/updating-project-personas/SKILL.md; do
+    skills/lappie-ui-evidence-review/SKILL.md skills/updating-project-personas/SKILL.md \
+    hooks/container-awareness.sh; do
     dst="$DEST/$rel"
     [ -f "$dst" ] || continue
     if [ "$mode" != force ] && prompt_yn "$rel is retired; move aside with backup?" conflict; then
@@ -330,6 +330,7 @@ render_legacy_skill_hooks() {
     return 0
   fi
   jq -nc --arg dir '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '[
+    {name:"container-awareness",event:"session_start",handler:{bash:("bash \""+$dir+"/hooks/container-awareness.sh\"")}},
     {name:"skill-once",event:"pre_tool_use",matcher:"skill",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/hook.sh skill")}},
     {name:"skill-once-reset",event:"post_compaction",handler:{bash:("bash \""+$dir+"/hooks/adapter.sh\" skill-once/compact.sh compact")}},
     {name:"superpowers-session-start"}, {name:"superpowers-post-compaction"},
@@ -417,7 +418,7 @@ install_hooks() {
         else
           printf '  - hook %s: %s\n' "$name" "$(jq -cS '.your' <<<"$patch")" >&2
           if [ "$mode" = notty ]; then
-            echo "customized hook $name still enables unsafe cross-agent skill deduplication; remove it from $DEST/hooks.json manually or rerun with --overwrite" >&2
+            echo "customized retired hook $name remains; remove it from $DEST/hooks.json manually or rerun with --overwrite" >&2
             accept=1
           elif prompt_yn "remove customized hook $name?" conflict; then
             accept=0
@@ -633,7 +634,7 @@ if [ "$MODE" = definitions ] || [ "$MODE" = deployment ]; then
   if [ "$MODE" = deployment ]; then
     copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
     copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
-    for s in container-awareness bridge-connector-autostart bridge-connector-launcher; do
+    for s in bridge-connector-autostart bridge-connector-launcher; do
       copy_managed_file "$ROOT/polytoken/hooks/$s.sh" "$DEST/hooks/$s.sh"
     done
     for d in "${COMPAT_DIRS[@]}"; do
@@ -694,7 +695,6 @@ fi
 # 1. Plain managed files: AGENTS.md, adapter, compat scripts, skills.
 copy_managed_file "$PT_AGENTS" "$DEST/AGENTS.md"
 copy_managed_file "$PT_ADAPTER" "$DEST/hooks/adapter.sh"
-copy_managed_file "$ROOT/polytoken/hooks/container-awareness.sh" "$DEST/hooks/container-awareness.sh"
 copy_managed_file "$ROOT/polytoken/hooks/bridge-connector-autostart.sh" "$DEST/hooks/bridge-connector-autostart.sh"
 copy_managed_file "$ROOT/polytoken/hooks/bridge-connector-launcher.sh" "$DEST/hooks/bridge-connector-launcher.sh"
 # Notifications are opt-in through notify/notify-container modes, never defaults.

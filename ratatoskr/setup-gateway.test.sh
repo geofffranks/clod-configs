@@ -6,6 +6,10 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/setup-gateway.sh"
+# Fake HOME must not change interpreter/toolchain selection through mise shims.
+PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
+TEST_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '/mise/shims$' | paste -sd: -)"
+PATH="$TEST_PATH"
 
 pass=0 fail=0
 ok() { echo "  ok: $1"; pass=$((pass + 1)); }
@@ -70,6 +74,7 @@ DEPLOY
 make_stubbin() {
   local bin="$1/stubbin"
   mkdir -p "$bin"
+  ln -s "$PYTHON_BIN" "$bin/python3"
   cat > "$bin/cargo" <<'S'
 #!/usr/bin/env bash
 [ "$1" = "--version" ] && echo "cargo 1.90.0" || exit 0
@@ -107,19 +112,18 @@ S
 run_setup() { # run_setup SANDBOX STUBBIN ARGS...
   local home="$1" bin="$2"; shift 2
   HOME="$home" PATH="$bin:$PATH" RATO_REPO="$home/workspace/ratatoskr" \
-    RATO_HOSTS_FILE="$home/hosts" TOOLLOG="$home/tool.log" DEPLOYLOG="$home/deploy.log" \
+    TOOLLOG="$home/tool.log" DEPLOYLOG="$home/deploy.log" \
     bash "$SCRIPT" "$@"
 }
 
 # --- S1: dry-run prints the plan and writes nothing --------------------------
 sc "S1 dry-run -> plan printed, nothing written, nothing run"
-SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"; : > "$SBX/hosts"
+SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"
 out="$(FOUNDRY_API_KEY=secret-test-key run_setup "$SBX" "$STUB" --dry-run 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "dry-run exits 0" || no "dry-run exits 0 (got $rc)"
 case "$out" in *"(dry-run)"*) ok "plan lines present" ;; *) no "plan lines present" ;; esac
 [ ! -e "$SBX/Library/Preferences/ratatoskr/config.json" ] && ok "config.json not written" || no "config.json not written"
 [ ! -e "$SBX/Library/LaunchAgents/local.ratatoskr.plist" ] && ok "plist not installed" || no "plist not installed"
-[ ! -s "$SBX/hosts" ] && ok "hosts file untouched" || no "hosts file untouched"
 [ ! -e "$SBX/deploy.log" ] && ok "deploy not run" || no "deploy not run"
 [ -e "$SBX/.local/bin/foundry-mcp" ] && ok "stale wrappers kept (dry-run)" || no "stale wrappers kept (dry-run)"
 yq -e 'has("mcp_servers") | not' "$SBX/.config/polytoken/config.yaml" >/dev/null \
@@ -129,7 +133,7 @@ rm -rf "$SBX"
 
 # --- S2: missing prereq fails loudly ------------------------------------------
 sc "S2 missing prereq -> nonzero exit, actionable message"
-SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"; rm "$STUB/cargo"; : > "$SBX/hosts"
+SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"; rm "$STUB/cargo"
 out="$(FOUNDRY_API_KEY=k run_setup "$SBX" "$STUB" --dry-run 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && ok "missing cargo exits nonzero" || no "missing cargo exits nonzero"
 case "$out" in *"cargo not found"*) ok "message names cargo and the fix" ;; *) no "message names cargo and the fix" ;; esac
@@ -137,10 +141,10 @@ case "$out" in *"cargo not found"*) ok "message names cargo and the fix" ;; *) n
 rm -rf "$SBX"
 
 # --- S3: full run wires everything --------------------------------------------
-sc "S3 full run -> config, plist, hosts, wrappers, deploy, polytoken wiring"
-SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"; : > "$SBX/hosts"
+sc "S3 full run -> config, plist, wrappers, deploy, polytoken wiring"
+SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"
 out="$(FOUNDRY_API_KEY=secret-test-key run_setup "$SBX" "$STUB" 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] && ok "full run exits 0" || no "full run exits 0 (got $rc)"
+[ "$rc" -eq 0 ] && ok "full run exits 0" || { printf '%s\n' "$out" >&2; no "full run exits 0 (got $rc)"; }
 CFG="$SBX/Library/Preferences/ratatoskr/config.json"
 [ -f "$CFG" ] && ok "config.json written" || no "config.json written"
 [ "$(stat -c %a "$CFG" 2>/dev/null)" = "600" ] && ok "config.json is 0600" || no "config.json is 0600"
@@ -167,12 +171,11 @@ grep -q "/Users/YOU" "$PLIST" && no "plist /Users/YOU substituted" || ok "plist 
 grep -q "$SBX/.local/bin/rato" "$PLIST" && ok "plist points at HOME rato" || no "plist points at HOME rato"
 grep -A1 "<key>PATH</key>" "$PLIST" | grep -q "$STUB" \
   && ok "plist PATH captured from invoking shell" || no "plist PATH captured from invoking shell"
-grep -q "host.docker.internal" "$SBX/hosts" && ok "hosts alias added" || no "hosts alias added"
 [ -e "$SBX/.local/bin/foundry-mcp" ] && no "stale wrappers removed" || ok "stale wrappers removed"
 grep -q "deploy-ran" "$SBX/deploy.log" && ok "deploy.sh invoked" || no "deploy.sh invoked"
 grep -q "go install ./cmd/foundry-mcp" "$SBX/tool.log" && ok "foundry installed from source" || no "foundry installed from source"
 PTC="$SBX/.config/polytoken/config.yaml"
-yq -e '.mcp_servers.ratatoskr.url == "http://host.docker.internal:8910/mcp"' "$PTC" >/dev/null \
+yq -e '.mcp_servers.ratatoskr.url == "http://127.0.0.1:8910/mcp"' "$PTC" >/dev/null \
   && ok "polytoken wired to gateway URL" || no "polytoken wired to gateway URL"
 yq -e '.providers.zai.auth.key == "stub"' "$PTC" >/dev/null \
   && ok "existing polytoken keys preserved" || no "existing polytoken keys preserved"
@@ -181,27 +184,26 @@ rm -rf "$SBX"
 
 # --- S4: idempotent re-run + env-file key sourcing -----------------------------
 sc "S4 re-run idempotent; env-file key sourcing strips quotes"
-SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"; : > "$SBX/hosts"
+SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"
 printf 'FOUNDRY_API_KEY="quoted-secret"\nOTHER=1\n' > "$SBX/.config/polytoken-container.env"
 out="$(env -u FOUNDRY_API_KEY HOME="$SBX" PATH="$STUB:$PATH" RATO_REPO="$SBX/workspace/ratatoskr" \
-  RATO_HOSTS_FILE="$SBX/hosts" TOOLLOG="$SBX/tool.log" DEPLOYLOG="$SBX/deploy.log" \
+  TOOLLOG="$SBX/tool.log" DEPLOYLOG="$SBX/deploy.log" \
   bash "$SCRIPT" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "env-file run exits 0" || no "env-file run exits 0 (got $rc)"
 jq -e '.mcpClients.foundry.env.FOUNDRY_API_KEY == "quoted-secret"' "$SBX/Library/Preferences/ratatoskr/config.json" >/dev/null \
   && ok "key sourced from env file, quotes stripped" || no "key sourced from env file, quotes stripped"
 before="$(yq -o=json '.' "$SBX/.config/polytoken/config.yaml")"
 out="$(env -u FOUNDRY_API_KEY HOME="$SBX" PATH="$STUB:$PATH" RATO_REPO="$SBX/workspace/ratatoskr" \
-  RATO_HOSTS_FILE="$SBX/hosts" TOOLLOG="$SBX/tool.log" DEPLOYLOG="$SBX/deploy.log" \
+  TOOLLOG="$SBX/tool.log" DEPLOYLOG="$SBX/deploy.log" \
   bash "$SCRIPT" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "re-run exits 0" || no "re-run exits 0 (got $rc)"
 after="$(yq -o=json '.' "$SBX/.config/polytoken/config.yaml")"
 [ "$before" = "$after" ] && ok "re-run leaves wired config untouched" || no "re-run leaves wired config untouched"
-[ "$(grep -c 'host.docker.internal' "$SBX/hosts")" = 1 ] && ok "hosts alias not duplicated" || no "hosts alias not duplicated"
 rm -rf "$SBX"
 
 # --- S5: dead gateway -> wiring is skipped ------------------------------------
 sc "S5 curl code 000 -> nonzero exit, polytoken wiring SKIPPED"
-SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"; : > "$SBX/hosts"
+SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"
 out="$(FOUNDRY_API_KEY=k CURLCODE=000 run_setup "$SBX" "$STUB" 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && ok "dead gateway exits nonzero" || no "dead gateway exits nonzero"
 case "$out" in *"polytoken wiring SKIPPED"*) ok "wiring skipped message" ;; *) no "wiring skipped message" ;; esac
@@ -211,7 +213,7 @@ rm -rf "$SBX"
 
 # --- S6: curl nonzero exit (real dead-gateway path) ----------------------------
 sc "S6 curl exit 7 (refused) -> diagnostic fires, wiring SKIPPED"
-SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"; : > "$SBX/hosts"
+SBX="$(make_sandbox)"; STUB="$(make_stubbin "$SBX")"
 out="$(FOUNDRY_API_KEY=k CURLEXIT=7 run_setup "$SBX" "$STUB" 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && ok "curl failure exits nonzero (not silent errexit)" || no "curl failure exits nonzero (not silent errexit)"
 case "$out" in *"gateway not answering on loopback"*) ok "dead-gateway diagnostic present" ;; *) no "dead-gateway diagnostic present" ;; esac

@@ -9,8 +9,8 @@
   Inspect `scripts/validate.sh` for race/protocol smoke coverage and environment
   requirements. Its smoke expects installed/logged-in Codex; real image E2E is
   opt-in. Do not treat credential absence as evidence of a Go source defect.
-- **Mac arm64 staging build (verify host target first):**
-  `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o <staging-artifact> .`.
+- **Native Mac staging build (verify architecture first):**
+  `go build -o <staging-artifact> .`.
 - **Configured destination:** operator-confirmed relocation is
   `<workspace>/codex-imagegen-mcp/bin/codex-imagegen-mcp`. Inspect current host
   launch config/mapping when accessible; older `~/go/bin` instructions do not

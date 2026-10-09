@@ -65,7 +65,7 @@ polytoken:
             path: {type: string}
             line: {type: integer}
             observation: {type: string}
-            tier: {type: string, enum: [container_local, ratatoskr_host, manual]}
+            tier: {type: string, enum: [native_local, ratatoskr_host, manual]}
       limitations: {type: array, items: {type: string}}
       review_run_id: {type: string}
       snapshot_digest: {type: string}

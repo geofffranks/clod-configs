@@ -21,7 +21,7 @@ product change. Delegates receive only their explicitly assigned scope.
 
 Ask the operator for product requirements/signoff and delivery acceptance;
 major changes to behavior, outcome, scope, risk or feasibility; experiments
-outside the container/on physical hardware or with exceedingly difficult access;
+on physical devices, outside assigned authority or with exceedingly difficult access;
 rogue behavior or exhausted review budgets. Ideas → Plannable and Done/Canceled
 (including friction closure) are human lifecycle decisions. Reopening or other
 exceptional moves also require confirmation. Routine evidence-backed approval

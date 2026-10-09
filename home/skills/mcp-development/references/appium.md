@@ -14,7 +14,7 @@
   launch location; do not assume it updates the main checkout's `dist/`.
 - **Install:** preserve a rollback `dist/` and compatible dependency context.
   Replace the whole staged directory coherently at the authorized destination,
-  not just `index.js`. Never copy Linux `node_modules`/native dependencies to Mac.
+  not just `index.js`. Preserve compatible Mac `node_modules`/native dependencies.
 - **Reload:** reconnect discovered `appium` only after the shared workflow's
   full pending-config/NeedsLogin/owner assessment. Missing host visibility means
   pre-action operator coordination, not a blind named reconnect.

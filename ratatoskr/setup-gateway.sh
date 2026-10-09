@@ -2,10 +2,8 @@
 # setup-gateway.sh — one-shot deploy of the ratatoskr MCP gateway on the Mac.
 #
 # Why this exists: every MCP server is fronted by the ratatoskr gateway running
-# natively on the Mac (launchd agent, loopback :8910). Polytoken — host and
-# container sessions — reaches it at http://host.docker.internal:8910/mcp,
-# which resolves to loopback on the Mac via the /etc/hosts alias this script
-# installs, and to the VM bridge inside dev containers.
+# natively on the Mac (launchd agent, loopback :8910). Native Polytoken
+# reaches it at http://127.0.0.1:8910/mcp; no hosts alias is needed.
 #
 # What it does (idempotent where possible):
 #   1. precheck toolchain (cargo >=1.88, go, node >=22, codex, yq v4)
@@ -15,7 +13,6 @@
 #      FOUNDRY_API_KEY as a literal; rotation = edit + reload-config)
 #   4. install the LaunchAgent plist, injecting the invoking shell's PATH so
 #      gateway children (node, codex) resolve under launchd
-#   5. add the /etc/hosts alias `127.0.0.1 host.docker.internal` if missing
 #   6. remove superseded MCP wrapper scripts from ~/.local/bin
 #   7. run ratatoskr's scripts/deploy.sh (fmt/clippy/test gate, release build,
 #      install to ~/.local/bin/rato, launchd restart, listening check)
@@ -29,20 +26,18 @@
 #                                 # gateway's reconnect-upstream tool to respawn)
 #   setup-gateway.sh --dry-run   # print the plan, write nothing, run nothing
 #
-# Overridable for testing: RATO_REPO, RATO_HOSTS_FILE (default /etc/hosts).
+# Overridable for testing: RATO_REPO.
 # All other paths derive from $HOME so a fake HOME sandboxes the run.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RATO_REPO="${RATO_REPO:-$HOME/workspace/ratatoskr}"
-HOSTS_FILE="${RATO_HOSTS_FILE:-/etc/hosts}"
 CONFIG_DIR="$HOME/Library/Preferences/ratatoskr"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 PLIST_DST="$HOME/Library/LaunchAgents/local.ratatoskr.plist"
 PT_CFG="$HOME/.config/polytoken/config.yaml"
 GATEWAY_PORT=8910
-GATEWAY_URL="http://host.docker.internal:${GATEWAY_PORT}/mcp"
-HOSTS_LINE="127.0.0.1 host.docker.internal # ratatoskr gateway: one URL for host + containers"
+GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}/mcp"
 
 DRY_RUN=0
 REFRESH=0
@@ -261,20 +256,6 @@ else
   rm -f "$staged"
 fi
 
-# ---- 6. /etc/hosts alias -------------------------------------------------------
-say "ensuring /etc/hosts alias ($HOSTS_LINE)"
-if grep -qE '^\s*127\.0\.0\.1\s+.*host\.docker\.internal' "$HOSTS_FILE" 2>/dev/null; then
-  echo "    already present"
-else
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    (dry-run) would append (sudo required)"
-  else
-    printf '%s\n' "$HOSTS_LINE" | sudo tee -a "$HOSTS_FILE" >/dev/null \
-      || die "could not add the /etc/hosts alias — add this line manually and re-run: $HOSTS_LINE"
-    echo "    added"
-  fi
-fi
-
 # ---- 7. remove superseded wrappers ---------------------------------------------
 say "removing superseded MCP wrapper scripts from ~/.local/bin"
 for w in foundry-mcp codex-imagegen-mcp minime-vision; do
@@ -338,7 +319,7 @@ say "done"
 
 Next steps:
   - restart any running polytoken sessions so they pick up the gateway
-  - from a dev container: curl -s -o /dev/null -m 5 -w '%{http_code}\n' $GATEWAY_URL
-    (any code other than 000 proves the container -> Mac path)
+  - on the Mac: curl -s -o /dev/null -m 5 -w '%{http_code}\n' $GATEWAY_URL
+    (any code other than 000 proves the local endpoint is reachable)
   - in a session: call list-servers — all five upstreams should report healthy
 NEXT

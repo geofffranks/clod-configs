@@ -261,7 +261,36 @@ The design/PM and triage facets pin `zai/glm-5.3-flash(high)` with fallback
 `codex/gpt-5.6-luna-1m(medium)`. They use allow-all tools with small literal denies,
 unrestricted skills and ratatoskr-only MCP instructions. This routing is a prompt
 contract, not a sandbox for future tools or upstream operations. The gateway runs
-on the Mac, including when Polytoken runs in the Linux container.
+on the same Mac as native Polytoken.
+
+#### Native launcher
+
+Run `scripts/polytoken-native.sh` from the project worktree. It resolves `polytoken`
+through Bash login startup and loads `.bashrc` if startup did not already load it,
+then restores the caller's cwd and forwards arguments unchanged. Startup files
+must be suitable for noninteractive use. The observer avoids a second `.bashrc`
+load for conventional direct sourcing; profiles that replace the DEBUG trap
+should set `bashrc_loaded=1` after sourcing it. Arbitrary startup code can still
+print output or exit, so verify the real Mac login files before automation.
+
+`POLY_SPAWN_HEADLESS=1 scripts/polytoken-native.sh --prompt '…'` uses native
+`polytoken new --no-attach`; otherwise arguments go to normal manual CLI use.
+The executable is prepared for a future `BRIDGE_SPAWN_LAUNCHER` value, **not wired
+into Discord**. No container polling or supervision is involved.
+
+The supported Bypass+ preference is `default_permission_matcher: bypass_plus`
+in the native user's Polytoken config, as recommended here. The CLI has no
+permission-mode launch flag. Project configuration can override that preference;
+the launcher does not copy or rewrite project config to force it.
+
+For a narrow existing-install update, change only that global preference and the
+Ratatoskr URL, update the two quota handlers, and remove the `container-awareness`
+hook by name while preserving all other entries. Move its installed script aside
+with a backup. The installer no longer copies it and retires its canonical
+registration; customized retired handlers require confirmation. Retire stale
+skill directories outside the `skills/` discovery tree, not to another directory
+containing `SKILL.md` within that tree. Preserve custom definitions and unrelated
+backups. Source checks do not prove native installation or activation.
 
 #### MCP: everything behind the ratatoskr gateway
 
@@ -271,14 +300,14 @@ The only MCP entry the recommendation carries is the ratatoskr gateway:
 mcp_servers:
   ratatoskr:
     transport: http
-    url: http://host.docker.internal:8910/mcp
+    url: http://127.0.0.1:8910/mcp
 ```
 
 The gateway runs natively on the Mac as a launchd agent and fronts every MCP
-server (codex-imagegen, foundry, minime_vision, appium, homeassistant). One
-literal URL serves both contexts because `host.docker.internal` resolves to
-loopback on the Mac (an `/etc/hosts` alias) and to the VM bridge inside the dev
-containers. Deploy or refresh it with this repo's
+server (codex-imagegen, foundry, minime_vision, appium, homeassistant). Native
+Polytoken connects over loopback; setup does not create a hosts alias. Existing
+aliases are left for the operator to retire separately. For an authorized fresh
+installation, use this repo's
 `ratatoskr/setup-gateway.sh`; that script also wires this entry into your live
 `~/.config/polytoken/config.yaml` — only after the gateway is verified
 listening, so no session ever points at a dead URL. Per-project MCP

@@ -5,19 +5,18 @@
   Read `AGENTS.md`, `Cargo.toml`, toolchain/config and `scripts/deploy.sh` first.
 - **Dependencies/runtime:** current Rust toolchain (workspace presently requires
   Rust >=1.88), macOS host target and launchd supervisor. Inspect any native/link
-  dependencies before considering Linux-to-Mac cross-compilation; do not invent
-  a generic Rust cross-build recipe.
+  dependencies and run builds directly on this Mac; do not invent a cross-build
+  recipe.
 - **Development checks from the intended worktree:** `rtk cargo fmt --all --check`,
   `rtk cargo clippy --workspace --all-targets`, `rtk cargo test --workspace`.
   The current deploy script gates `cargo fmt --check`, clippy with all targets
   and all features, and `cargo test --all --quiet -- --include-ignored`.
   Inspect requirements before running host/integration tests.
 - **Build/artifact:** host `cargo build --release` produces `target/release/rato`.
-  A Linux result is not a Mac deployment binary. The deploy script builds its
-  own checkout's output; run from the intended host-visible source worktree.
-- **Configured destination:** leave host `~/.local/bin/rato` unchanged. Verify
-  launchd `ProgramArguments` and host mapping before installation; container
-  `~/.local/bin` is not the host destination.
+  The deploy script builds its own checkout's output; run directly on the Mac
+  from the intended source worktree.
+- **Configured destination:** leave native `~/.local/bin/rato` unchanged. Verify
+  launchd `ProgramArguments` and source-to-runtime paths before installation.
 - **Deploy/reload:** `scripts/deploy.sh` validates, builds, installs, bootouts and
   bootstraps `local.ratatoskr`, checks port release and post-restart listening.
   It needs Mac/launchd access and disrupts every connection. Only run with

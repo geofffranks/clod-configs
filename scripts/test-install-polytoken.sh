@@ -376,7 +376,7 @@ ajq "$D/hooks.json" '[.[].name]|index("skill-once")==null' "overwrite removes cu
 [ "$(backup_count "$D")" = 1 ] && ok "overwrite removal creates one backup" || no "overwrite removal creates one backup"
 rm -rf "$D"
 D="$(valid_base)"; printf '[%s]\n' "$custom" >"$D/hooks.json"; out="$(run_pt "$D" /nonexistent-xyz 0)"
-has "$out" "customized hook skill-once still enables unsafe cross-agent skill deduplication; remove it from $D/hooks.json manually or rerun with --overwrite" "no-TTY warning exact"
+has "$out" "customized retired hook skill-once remains; remove it from $D/hooks.json manually or rerun with --overwrite" "no-TTY warning exact"
 ajq "$D/hooks.json" '[.[].name]|index("skill-once")!=null' "no-TTY preserves customized hook"
 [ "$(backup_count "$D")" = 1 ] && ok "no-TTY backup for new hooks only" || no "no-TTY backup for new hooks only"
 rm -rf "$D"
@@ -395,7 +395,7 @@ sc "P21 ratatoskr gateway entry -> fresh lands, additive merge preserves"
 D="$(mktemp -d)"
 run_pt "$D" /nonexistent-xyz 0 >/dev/null
 ayq "$D/config.yaml" '.mcp_servers.ratatoskr.transport == "http"' "fresh install: ratatoskr transport http"
-ayq "$D/config.yaml" '.mcp_servers.ratatoskr.url == "http://host.docker.internal:8910/mcp"' "fresh install: ratatoskr url"
+ayq "$D/config.yaml" '.mcp_servers.ratatoskr.url == "http://127.0.0.1:8910/mcp"' "fresh install: ratatoskr url"
 rm -rf "$D"
 D="$(valid_base)"
 yq -i '.mcp_servers = {"other-server": {"transport": "stdio", "command": "true"}}' "$D/config.yaml"
@@ -625,6 +625,19 @@ cmp -s "$D/config.before" "$D/config.yaml" && ok "deployment preserves config by
 cmp -s "$D/permissions.before" "$D/permissions.yaml" && ok "deployment preserves permissions bytes" || no "deployment preserves permissions bytes"
 ajq "$D/hooks.json" '[.[]|select(.name|test("notify|watchdog|superpowers"))]|length == 0' "deployment retires old managed hooks"
 ajq "$D/hooks.json" '([.[]|select(.name=="no-remote-writes")]|length == 1) and ([.[]|select(.name=="branch-guard")]|length == 0)' "deployment registers no-remote-writes only; branch-guard unregistered like bash-guard"
+rm -rf "$D"
+
+# Native briefing retirement: canonical registration is removed, custom hooks
+# survive, and reinstall does not copy the retired executable back.
+sc "native briefing retirement preserves unrelated hooks and cannot resurrect"
+D="$(mktemp -d)"
+jq -nc --arg d '${POLYTOKEN_CONFIG_DIR:-$HOME/.config/polytoken}' '[{name:"container-awareness",event:"session_start",handler:{bash:("bash \""+$d+"/hooks/container-awareness.sh\"")}},{name:"custom-native",event:"session_start",handler:{bash:"true"}}]' > "$D/hooks.json"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ajq "$D/hooks.json" '[.[]|select(.name=="container-awareness")]|length==0' "canonical briefing removed"
+ajq "$D/hooks.json" '[.[]|select(.name=="custom-native")]|length==1' "unrelated hook preserved"
+[ ! -e "$D/hooks/container-awareness.sh" ] && ok "retired executable not installed" || no "retired executable not installed"
+run_pt "$D" /nonexistent-xyz 0 >/dev/null
+ajq "$D/hooks.json" '[.[]|select(.name=="container-awareness")]|length==0' "reinstall keeps briefing retired"
 rm -rf "$D"
 
 # --- PN: notify-only install modes ($2: empty | notify | notify-container) ---

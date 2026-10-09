@@ -1,14 +1,15 @@
 version: 3
 
-# Single MCP entry: every MCP server is fronted by the ratatoskr gateway running
-# natively on the Mac (launchd agent local.ratatoskr, loopback :8910; see
-# ratatoskr/setup-gateway.sh). host.docker.internal resolves to loopback on the
-# Mac via the /etc/hosts alias that script installs, and to the VM bridge inside
-# the dev containers — one literal URL serves both contexts.
+# Native launches use Bypass+: allow calls except explicit deny rules.
+# Project configuration can override this setting; keep project choices explicit.
+default_permission_matcher: bypass_plus
+
+# Every MCP server is fronted by the native Mac Ratatoskr gateway
+# (launchd agent local.ratatoskr; see ratatoskr/setup-gateway.sh).
 mcp_servers:
   ratatoskr:
     transport: http
-    url: http://host.docker.internal:8910/mcp
+    url: http://127.0.0.1:8910/mcp
 
 daemon:
   max_concurrent_subagents: 3

@@ -4,9 +4,9 @@ description: Use available Apple host build surfaces for proportionate native pr
 ---
 # Xcode and native checks
 
-Inspect ratatoskr's configured host surfaces before calling SwiftPM, Xcode,
-CocoaPods or Expo unavailable merely because the container lacks those tools.
-Discover servers, inspect tool schemas, then execute. No duplicate authentication.
+Run SwiftPM, Xcode, CocoaPods and Expo checks directly on this Mac from the
+intended worktree. When using Ratatoskr's configured native build surfaces,
+discover servers, inspect tool schemas, then execute. No duplicate authentication.
 Use project instructions for local dependency, Podfile and generated-project
 requirements; keep generic facets free of native build sequences.
 

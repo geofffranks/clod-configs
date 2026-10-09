@@ -8,8 +8,8 @@
 - **Checks:** `rtk go build ./... && rtk go test ./...` in the intended worktree.
   Focused tool-catalog smoke:
   `rtk go test ./cmd/foundry-mcp/ -run TestServerListsTools`.
-- **Mac arm64 staging build (verify actual host target):**
-  `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o <staging-artifact> ./cmd/foundry-mcp`.
+- **Native Mac staging build (verify architecture first):**
+  `go build -o <staging-artifact> ./cmd/foundry-mcp`.
 - **Configured destination:** operator-confirmed relocation is
   `<workspace>/foundry-mcp-tools/bin/foundry-mcp`. The older `AGENTS.md`
   `~/go/bin` destination is stale; do not restore it over current configuration.
