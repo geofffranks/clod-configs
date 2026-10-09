@@ -49,12 +49,13 @@ success. Screenshots follow `screenshots` and reviewers open the actual assets.
 
 The assigned owner deletes task-created one-off sessions when finished unless
 the operator requests retention. Then use Appium's retained
-`cleanup_ios_simulator` within its schema/ownership contract for owned WDA and
-boot cleanup, followed by project-native cleanup of owned Metro and verified
-effort release. Coordinate Appium and native boot ownership so cleanup happens
-once, not through competing teardown paths. Preserve prebooted devices, operator
-Metro and somebody else's sessions/WDA. Independently verify owned resource
-absence before release; a lost response or unresolved producer/process remains
+`cleanup_ios_simulator` within its schema/ownership contract for owned WDA only;
+it does not shut down the simulator. Next use the project-native owned-shutdown
+procedure only for a simulator booted by this effort, then stop owned Metro and
+release the effort only after independently verified resource absence. Coordinate
+Appium and native boot ownership so cleanup happens once, not through competing
+teardown paths. Preserve prebooted devices, operator Metro and somebody else's
+sessions/WDA. A lost response or unresolved producer/process remains
 recovery-required, not permission for force cleanup.
 
 Cleanup is resource hygiene, not a visual-acceptance gate. Report retained or
