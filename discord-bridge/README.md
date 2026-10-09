@@ -19,11 +19,11 @@ The host uses `scripts/polytoken-native.sh` for headless `/spawn`. Headless mode
 - Logs: `~/Library/Logs/discord-bridge.log` and `<sessions-root>/discord-bridge/<session-id>.log`
 - Rotate Discord token in `~/.config/polytoken-discord.env`; rotate relay token in both the host env and connector JSON, then restart the host and affected sessions.
 
-Native session termination is unavailable: the installed `polytoken reap` accepts a session ID but has no daemon-epoch fence and could terminate a replacement generation. `/kill` must report unavailable; use Polytoken's local session controls to stop a session. `/stop` only cancels the active turn.
+Confirmed `/kill` verifies the live bound epoch, then uses the fixed native CLI to reap exactly that session ID in the configured registry root. Stale or unverifiable targets fail closed. The operator accepts the remaining restart race: the CLI has no atomic epoch fence, so a replacement generation of the same session could be terminated if it restarts between verification and reap. There is no all-session reap or PID fallback. `/stop` only cancels the active turn.
 
 ## Short manual smoke check
 
-Start a terminal session, run `/spawn` in an allowlisted project, send a prompt and answer a question, then test `/stop` during a turn. On a disposable session only, run `/kill` then `/kill confirm` and verify explicit unavailability; end it with local controls. This Linux delivery does not qualify actual Mac launchd or Discord behavior.
+Start a terminal session, run `/spawn` in an allowlisted project, send a prompt and answer a question, then test `/stop` during a turn. On a disposable session only, run `/kill` then `/kill confirm` and verify only that session exits and another session remains usable. Refusal or command failure is not successful termination. This Linux delivery does not qualify actual Mac launchd or Discord behavior.
 
 ## Offline checks
 
