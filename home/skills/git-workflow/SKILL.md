@@ -41,7 +41,8 @@ actual base and destination; do not silently replace them.
 
 Use explicit absolute paths and `git -C <worktree>` for Git commands. Verify the
 branch and working tree before staging or committing; never rely on a remembered
-cwd after tool calls or recovery. Keep one branch per worktree and use the
-repository's ignored worktree location. Do not reuse unknown workspaces or discard
+cwd after tool calls or recovery. Create worktrees in
+`<project-root>/.worktrees/` (verify it is ignored before first use), not inside
+`.git/` or the working tree. Keep one branch per worktree. Do not reuse unknown workspaces or discard
 unrelated work. Clean up only effort-owned state under the approved disposition;
 leave-unmerged retains the committed branch.
