@@ -1,91 +1,30 @@
-# Discord bridge host (claude-config side)
+# Discord bridge host (configuration repo)
 
-This directory wires the **Mac host side** of the Polytoken Discord bridge. The
-bridge code itself lives in the separate `discord-pt-stream` repo
-(`discord_bridge.*`); this directory owns everything *around* the host process:
+This directory installs the native macOS bridge host and its connector configuration. Runtime code lives in the separate `discord-pt-stream` repository.
 
-| File | Purpose |
-|---|---|
-| `setup-bridge-host.sh` | One-shot deploy: Mac venv + 0600 env file + launchd agent + smoke check |
-| `local.polytoken-discord-bridge.plist.example` | LaunchAgent template (KeepAlive, ThrottleInterval 10, PATH incl. podman) |
-| `scripts/test-setup-bridge-host.sh` | Offline fake-HOME harness for the setup script (no macOS required) |
+## Install and update
 
-## What it gives you
+Update both `claude-config` and `discord-pt-stream`, then run `bash discord-bridge/setup-bridge-host.sh` from this checkout. Restart the existing LaunchAgent and start/restart native sessions afterward; already running connectors need relaunch to load changed code/settings. The installer creates one shared environment at `~/.local/share/polytoken-discord/connector-venv` with the bridge host and connector extras; this is install-time provisioning, not startup pip. It installs the persistent headless launcher under `~/.config/polytoken/discord-bridge/`, writes the existing `local.polytoken-discord-bridge` LaunchAgent, and keeps checkout paths out of the installed plist except the explicitly configured runtime checkout.
 
-- **Reliable host startup.** `local.polytoken-discord-bridge` launchd agent runs
-  `/bin/bash ${BRIDGE_REPO_DIR}/scripts/bridge-host.sh` with KeepAlive +
-  ThrottleInterval, so the relay + Discord bot survives crashes without a tight
-  crash loop and restarts automatically on a Mac reboot.
-- **A dedicated 0600 env file** `~/.config/polytoken-discord.env` — not the
-  container `--env-file` — with the host variables the bridge needs
-  (`DISCORD_*`, `BRIDGE_RELAY_BIND`, `BRIDGE_RELAY_ADVERTISE`,
-  `BRIDGE_RELAY_TOKEN`, `BRIDGE_STATE_DB`, `BRIDGE_HOST_PYTHON`,
-  `BRIDGE_REPO_DIR`).
-- **Token seeding by grep-not-source.** `BRIDGE_RELAY_TOKEN` is copied from
-  `~/.config/polytoken-container.env` by `grep` (the file is data, never
-  sourced), so the container and host stay in sync without a manual copy.
-- **A Mac venv** at `~/.local/share/polytoken-discord/venv`, installed
-  fingerprint-keyed and editable from the bridge repo (`pip install -e
-  '…[live]'`), so code changes need no reinstall.
+Set `BRIDGE_REPO_DIR`, `BRIDGE_POLYTOKEN_BIN`, `BRIDGE_SESSIONS_DIR`, and (if needed) `BRIDGE_SETUP_PYTHON` when the defaults are not right. The host env file `~/.config/polytoken-discord.env` remains owner-only and keeps Discord secrets, guild/channel/operator IDs, and `BRIDGE_STATE_DB`. Installer reruns update obsolete relay advertisement and Python values to native absolute paths; they do not discard those identity or state values. The relay listener stays on loopback (default `127.0.0.1:8765`); a configured loopback port is preserved. Use lasting delivery checkouts for `BRIDGE_REPO_DIR`, not disposable effort worktrees. `BRIDGE_POLYTOKEN_CONFIG_DIR` / `BRIDGE_XDG_CONFIG_HOME` and `BRIDGE_XDG_DATA_HOME` select explicit native config/data roots.
 
-## Install / update
+Connector settings are separate in owner-only `~/.config/polytoken/discord-bridge/connector.json`, with `relay_address`, `relay_token`, `sessions_dir`, and `connector_python`. Existing relay token is reused from that JSON or the host env file. Do not copy Discord credentials to connector config. The installer writes an adjacent owner-only `connector.json.python` interpreter path so detached startup never discovers Python from PATH. Enable terminal-session attachment with `POLYTOKEN_BRIDGE_ENABLE=1` in the launching environment; `/spawn` enables its own hook. The session-start hook always immediately allows, starts detached only with opt-in and exact `POLYTOKEN_SESSION_ID`, and never scans for another session.
 
-```sh
-cd claude-config
-bash discord-bridge/setup-bridge-host.sh
-```
+The host uses `scripts/polytoken-native.sh` for headless `/spawn`. Headless mode skips shell profiles, requires explicit trusted absolute binary/workspace/session roots, sanitizes ambient environment, and preserves exact CLI output. Interactive launcher behavior remains unchanged.
 
-Then fill the env file (Discord secrets stay 0600):
+## Runtime operation
 
-```sh
-nano ~/.config/polytoken-discord.env     # DISCORD_BOT_TOKEN, guild/channel/user ids, …
-launchctl kickstart -k gui/$(id -u)/local.polytoken-discord-bridge
-```
+- Restart: `launchctl kickstart -k gui/$(id -u)/local.polytoken-discord-bridge`
+- Stop/start: `launchctl bootout gui/$(id -u)/local.polytoken-discord-bridge` / `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.polytoken-discord-bridge.plist`
+- Logs: `~/Library/Logs/discord-bridge.log` and `<sessions-root>/discord-bridge/<session-id>.log`
+- Rotate Discord token in `~/.config/polytoken-discord.env`; rotate relay token in both the host env and connector JSON, then restart the host and affected sessions.
 
-Other modes:
+Native session termination is unavailable: the installed `polytoken reap` accepts a session ID but has no daemon-epoch fence and could terminate a replacement generation. `/kill` must report unavailable; use Polytoken's local session controls to stop a session. `/stop` only cancels the active turn.
 
-```sh
-bash discord-bridge/setup-bridge-host.sh --dry-run     # print the plan, change nothing
-bash discord-bridge/setup-bridge-host.sh --uninstall   # unload + remove the agent/plist
-```
+## Short manual smoke check
 
-## Container side
+Start a terminal session, run `/spawn` in an allowlisted project, send a prompt and answer a question, then test `/stop` during a turn. On a disposable session only, run `/kill` then `/kill confirm` and verify explicit unavailability; end it with local controls. This Linux delivery does not qualify actual Mac launchd or Discord behavior.
 
-The connector auto-start inside polytoken-dev containers is a separate
-`session_start` hook (`polytoken/hooks/bridge-connector-autostart.sh`),
-registered in `polytoken/hooks.json`. It is fail-open and never blocks a
-session. See the bridge repo README's connector sections and
-`polytoken-container/.env.example` for the container-side variables
-(`BRIDGE_RELAY_TOKEN`, `BRIDGE_RELAY_ADDRESS`, optional `BRIDGE_CONNECTOR_*`
-overrides).
+## Offline checks
 
-## Rotation
-
-- **`DISCORD_BOT_TOKEN`**: edit `~/.config/polytoken-discord.env`, then
-  `launchctl kickstart -k gui/$(id -u)/local.polytoken-discord-bridge`.
-- **`BRIDGE_RELAY_TOKEN`**: edit **both** `~/.config/polytoken-discord.env`
-  and `~/.config/polytoken-container.env`, kickstart the agent, and relaunch a
-  container session (the container side only reads its env file at launch —
-  no hot path). Sync check one-liner:
-
-  ```sh
-  grep -c '^BRIDGE_RELAY_TOKEN=' ~/.config/polytoken-discord.env \
-    && grep -c '^BRIDGE_RELAY_TOKEN=' ~/.config/polytoken-container.env
-  ```
-
-## Toggle / logs
-
-- Stop: `launchctl bootout gui/$(id -u)/local.polytoken-discord-bridge`
-- Start: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.polytoken-discord-bridge.plist`
-- Logs: `~/Library/Logs/discord-bridge.log`
-
-## Test the setup script offline
-
-```sh
-bash scripts/test-setup-bridge-host.sh
-```
-
-Runs against a fake HOME with stubbed `podman`/`curl`/`launchctl` + a real
-python3 — no macOS, launchd, pip install, or podman required. Asserts plist XML
-well-formedness, cmp-idempotency across re-runs, `--dry-run`/`--uninstall`
-behavior, env-file 0600 mode, and grep-not-source token seeding.
+`bash scripts/test-setup-bridge-host.sh` and `bash scripts/test-bridge-connector-autostart.sh` run without launchd or a live relay. `python3 scripts/test-polytoken-native.py` covers headless and interactive startup behavior.
