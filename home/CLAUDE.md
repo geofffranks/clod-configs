@@ -16,6 +16,25 @@ pattern here?" and use that.
 
 Never add a fully-specified one-off command as an allow rule.
 
+## Native execution and MCP
+
+Use native filesystem/process tools and project-owned scripts from the intended
+worktree by default. Reads, Git, dependencies, builds and tests need no gateway
+discovery. On macOS use the user's configured shell/toolchain, not container
+launchers or hardcoded toolchain paths. Establish the actual OS; a Linux session
+or mounted Mac path is not Mac runtime access. Report unavailable native checks.
+
+Project instructions own preparation/build/test policy. Load
+`xcode-native-checks` for Apple native work and `appium` for automation. Native
+access does not bypass shared ownership, fresh operation admission or recovery;
+runtime/device mutations require task authority and coordination with owners.
+Actual MCP calls follow Ratatoskr discovery, schema inspection and execution
+when available; do not authenticate duplicate connections or guess retired tools.
+Load `mcp-development` for MCP code/build/deployment work. Before an authorized
+reconnect/reload, assess all pending config changes, eligible `NeedsLogin` peers
+and affected owners; if impact or host config cannot be established, defer for
+operator coordination. This grants no new authority to read-only roles.
+
 ## Shell discipline — cwd persists between Bash calls
 
 The Bash tool's working directory persists across separate tool calls, so a bare
