@@ -27,6 +27,10 @@ model calls.
   a retained session headlessly. `polytoken reap` only kills unattached
   daemons. The OpenAPI surface is `polytoken print openapi`.
 - Real session IDs only; never invent labels.
+- Trusted same-user model: any process running as the same user can read daemon
+  credential files (`chmod 600`) and control sessions. Writers of Jira plans and
+  replies, including the operator's readable queued plans, are trusted authority
+  inputs under this model; no additional gate is introduced here.
 
 ## Layout
 
@@ -47,8 +51,11 @@ scripts/test-jira-dispatcher.sh
 docs/jira-dispatcher.md
 ```
 
-State lives outside Git: `~/.local/share/polytoken/jira-dispatcher/`
-(`state.sqlite3`, `config.json`, per-effort log dir, pause/stop flag files).
+State lives outside Git: `~/.local/share/polytoken/jira-dispatcher/`.
+Runtime persistence is SQLite state (`state.sqlite3`, including effort records,
+controls and the journal) and captured spawn/output data, not per-effort log
+directories or pause/stop flag files. The directory also holds editable
+`config.json`; see `README.md` for current capture and recovery details.
 Installer copies runtime into `~/.local/share/polytoken/jira-dispatcher/lib/`
 and installs a reversible LaunchAgent (`launchctl bootstrap/unload` guarded),
 modeled on `scripts/install-session-watchdog.sh` conventions.
@@ -100,15 +107,18 @@ Eligibility for unattended launch (all must hold at poll time):
 
 Writes reconcile before retry: after every transition/comment, re-fetch and
 verify; on uncertain outcomes (timeout/gateway hiccup) verify actual state by
-key + comment search before any retry. No duplicate comments; answer delivery
-is considered - same user, same type, same key markers. Real session errand.
+key + comment search before any retry. No duplicate comments. Answer delivery
+uses state-serialized response content and verifies the daemon outcome before
+marking it delivered; uncertain responses stay pending for reconciliation.
+See `README.md` for the current response and recovery behavior.
 
 ## Worker delivery flow
 
 Launch sequence transactionality: insert effort row + pending transition →
-transition Ready → In Progress (reconcile) → spawn worker → mark running with
-Persist launch intent (state row staged as `launching` with session id once
-printed + log file) BEFORE the daemon spawn; reconcile uncertain response
+transition Ready → In Progress (reconcile) → spawn worker → mark running.
+Persist launch intent (state row staged as `launching`) BEFORE the daemon spawn;
+record the session id and captured spawn/output data when available, not a
+per-effort log file. Reconcile uncertain response
 against actual sessions (registry `polytoken sessions --all`) + credential
 file + /health before any retry launch. Reconcile is idempotent: an existing
 live session for the same ticket/effort is adopted as supervisor state and
@@ -174,16 +184,18 @@ observer counts; never loops on simple Ready moves without relevant reply.
   config `active: false` (installer default); `preflight` validates it
   without processing.
 - `status` — active/waiting/blocked/uncertain efforts, counters, process info.
-- `pause`/`resume` — hold admission but keep supervision (persisted flag).
+- `pause`/`resume` — hold admission but keep supervision (SQLite control rows).
 - `stop` — graceful; no new admission; marks supervision detached for running
   efforts, leaves daemons alive; `run` picks them up again idempotently.
 - `init-config` writes default config.json with editable mappings/limits.
-- Preflight verifies: python3/polytoken/git present; ratatoskr loopback
-  reachable (MCP initialize); Jira reachable; Atlassian resources; live
-  workflow metadata has the required named transitions for all four types
-  (missing = report pending, never proceed silently); repo mappings exist as
-  git repos/configured values; effective permissions/state dir writable;
-  models/auth few-shot check via `polytoken models` (non-exhaustive).
+- Preflight checks: python3/polytoken/git present; ratatoskr loopback
+  reachable (MCP initialize); Jira/Atlassian resource discovery; configured repo
+  paths exist as Git repos; state dir writable; `polytoken models`
+  (non-exhaustive). Live transitions are sampled from available tickets;
+  missing samples or paths remain pending outcomes, not proof of per-type
+  workflow coverage. Verify every required path for Story, Bug, Task and
+  AI Workflow separately, plus configured Project values and effective
+  permissions, before activation. See `README.md` for current sampling behavior.
 - Installer: `--print` renders plist; `--uninstall` unload+remove; checks
   dependencies fail-closed. Operate responsibly at the end.
 
@@ -195,9 +207,12 @@ observer counts; never loops on simple Ready moves without relevant reply.
   Plannable → In Progress at actual implementation start and hand off
   immediately to project-manager/quick-delivery without queue enrollment.
   No implementation of any kind. Validate with `polytoken validate facet`.
-- Update `polytoken/facets/product-design.md` routing: after accepted design,
-  choose queued (register + Ready) or interactive (direct In Progress actual
-  start) route explicitly; never fall through a Ready route into the other.
+- Update `polytoken/facets/product-design.md` routing: before native approval
+  handoff, choose queued (register + Ready) or interactive (direct In Progress
+  actual start) explicitly. Jira handoff targets queued-registration, carrying
+  the eventual delivery facet, source branch and approved workspace choices;
+  never fall through a Ready route into delivery. Without Jira, retain the
+  direct native delivery handoff.
 - Update `partials/workflow-common.j2` lifecycle line: include Awaiting
   Acceptance receipt (results + remaining manual checks, never Done).
 - Preserve existing useful lifecycle text; do not rewrite the file.

@@ -26,13 +26,16 @@ class StateStore:
             plan_excerpt TEXT, launch_attempts INTEGER NOT NULL DEFAULT 0, blocker_attempts INTEGER NOT NULL DEFAULT 0,
             launch_intent TEXT, pending_interrogative TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL,
             last_reconcile_notes TEXT, daemon_port INTEGER, launch_time REAL, blocker_comment_id TEXT,
-            blocker_comment_time REAL, completion_comment_id TEXT, last_completion_signature TEXT
+            blocker_comment_time REAL, completion_comment_id TEXT, last_completion_signature TEXT,
+            pending_operation TEXT, blocker_episode_id TEXT, blocker_epoch INTEGER NOT NULL DEFAULT 0,
+            resume_intent TEXT, event_cursor INTEGER NOT NULL DEFAULT 0,
+            consumed_reply_id TEXT, resume_reply_time REAL
           );
           CREATE TABLE IF NOT EXISTS journal (id INTEGER PRIMARY KEY AUTOINCREMENT, effort_id TEXT, event TEXT NOT NULL, detail TEXT, created_at REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS controls (name TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at REAL NOT NULL);
         """)
         columns={r[1] for r in self.db.execute("PRAGMA table_info(efforts)")}
-        for name,kind in (("daemon_port","INTEGER"),("launch_time","REAL"),("blocker_comment_id","TEXT"),("blocker_comment_time","REAL"),("completion_comment_id","TEXT"),("last_completion_signature","TEXT")):
+        for name,kind in (("daemon_port","INTEGER"),("launch_time","REAL"),("blocker_comment_id","TEXT"),("blocker_comment_time","REAL"),("completion_comment_id","TEXT"),("last_completion_signature","TEXT"),("pending_operation","TEXT"),("blocker_episode_id","TEXT"),("blocker_epoch","INTEGER NOT NULL DEFAULT 0"),("resume_intent","TEXT"),("event_cursor","INTEGER NOT NULL DEFAULT 0"),("consumed_reply_id","TEXT"),("resume_reply_time","REAL")):
             if name not in columns: self.db.execute("ALTER TABLE efforts ADD COLUMN %s %s"%(name,kind))
 
     def close(self): self.db.close()
@@ -78,7 +81,7 @@ class StateStore:
                 if fields:
                     cols=",".join("%s=?"%k for k in fields)
                     vals=[]
-                    for k, v in fields.items(): vals.append(json.dumps(v) if k in ("launch_intent", "pending_interrogative") and not isinstance(v,str) else v)
+                    for k, v in fields.items(): vals.append(json.dumps(v) if k in ("launch_intent", "pending_interrogative", "pending_operation", "resume_intent") and not isinstance(v,str) else v)
                     self.db.execute("UPDATE efforts SET %s WHERE key=?"%cols,vals+[key])
                 row=self.db.execute("SELECT id FROM efforts WHERE key=?",(key,)).fetchone()
                 if not row: raise KeyError(key)
@@ -103,6 +106,41 @@ class StateStore:
     def journal(self,key,event,detail=None):
         row=self.get(key)
         with self.lock: self.db.execute("INSERT INTO journal(effort_id,event,detail,created_at) VALUES(?,?,?,?)",(row["id"] if row else None,event,detail,time.time()))
+
+    def resume_claim(self,key,payload,repo=None,global_limit=1):
+        """Exclusive, idempotent resume claim; re-applies global + per-repo limits transactionally.
+
+        The claimed stage is `recovery_pending` (an ACTIVE stage) carrying the
+        resume operation, so concurrent claims on other tickets observe capacity.
+        """
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                row=self.db.execute("SELECT * FROM efforts WHERE key=?",(key,)).fetchone()
+                if not row: raise KeyError(key)
+                op=row["pending_operation"]
+                if isinstance(op,str):
+                    try: op=json.loads(op)
+                    except ValueError: op=None
+                if isinstance(op,dict) and op.get("operation")=="resume" and row["stage"] in ACTIVE_STAGES:
+                    self.db.execute("COMMIT"); return self.get(key)
+                if row["stage"] not in ("blocked","blocking","recovery_pending","awaiting"):
+                    raise RuntimeError("effort %s not resumable from stage %s"%(key,row["stage"]))
+                repo=repo or row["canonical_repo"]
+                active_rows=self.db.execute("SELECT key,canonical_repo,stage FROM efforts WHERE key!=? AND stage IN (%s)"%",".join("?"*len(ACTIVE_STAGES)),(key,)+ACTIVE_STAGES).fetchall()
+                if len(active_rows)>=global_limit:
+                    raise RuntimeError("global active limit reached")
+                for other in active_rows:
+                    if other["canonical_repo"]==repo:
+                        raise RuntimeError("repository %s already owned by %s"%(repo,other["key"]))
+                pending={"stage":"recovery_pending","operation":"resume","payload":payload}
+                now=time.time()
+                self.db.execute("UPDATE efforts SET stage='recovery_pending',pending_operation=?,updated_at=? WHERE key=?",(json.dumps(pending),now,key))
+                self.db.execute("INSERT INTO journal(effort_id,event,detail,created_at) VALUES((SELECT id FROM efforts WHERE key=?),'resume_claimed',?,?)",(key,str(payload),now))
+                self.db.execute("COMMIT")
+                return self.get(key)
+            except Exception:
+                self.db.execute("ROLLBACK"); raise
 
     def events(self,key=None):
         query="SELECT * FROM journal"; args=()

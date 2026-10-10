@@ -37,7 +37,8 @@ the approved plan names dependency tickets; otherwise omit it. After verifying
 publication, fetch live status/transitions, match both transition name and
 Ready destination, satisfy required fields, move Plannable → Ready and fetch to
 verify. Ready plus the uploaded readable plan is sufficient approval evidence;
-no extra gate, byte/hash verification or receipt machinery. End registration;
+no extra gate, byte/hash verification or receipt machinery.
+End registration at Ready without switching to delivery;
 the dispatcher owns queued admission, not this facet.
 
 Interactive route: publish the complete accepted plan with the same heading and

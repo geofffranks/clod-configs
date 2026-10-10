@@ -60,23 +60,27 @@ Repair or rebut concrete requirement, feasibility, scope or material-risk blocke
 Preferences are advisory. Escalate unresolved material blockers/disagreement at
 the cap.
 
-After review is resolved, call `handoff_plan` by itself with the selected delivery
-facet, `project-manager` (standard) or `quick-delivery` (quick), and the same approved
-workspace. The handoff presents the complete design and proposed implementation
-review panel for explicit operator approval; do not ask for separate chat approval
-first or wait for a routine continue prompt. Do not auto-approve or implement
-before approval; rejection does not authorize implementation. When Jira is
-supplied, record readable approval only after actual approval, following its live
-lifecycle without a duplicate approval gate. Do not silently choose a different
-panel or delivery mode. No routine retrospective or automatic friction ticket.
+After review is resolved and before calling `handoff_plan`, explicitly choose
+the Jira route when Jira is supplied: queued uses `queued-registration` to
+publish the complete approved plan and move Plannable → Ready, then ends
+registration without switching to delivery; interactive uses `queued-registration`
+to publish the accepted plan and, at actual implementation start, move directly
+Plannable → In Progress and switch to the selected `project-manager` or
+`quick-delivery`, handing off immediately without queue enrollment. Carry the
+chosen route, eventual delivery facet (`project-manager` for standard or
+`quick-delivery` for quick), source branch and approved workspace choices in the
+plan for publication through that handoff. Never fall through queued Ready into
+interactive delivery. An already-Ready ticket taken interactively must be
+claimed/moved out of Ready before work starts, with queue dispatcher ownership
+coordinated.
 
-After acceptance, explicitly choose the Jira route: queued uses
-`queued-registration` to publish the complete approved plan and move Plannable →
-Ready; interactive publishes the accepted plan and moves directly Plannable →
-In Progress at actual implementation start, then hands off immediately to the
-selected `project-manager` or `quick-delivery` without queue enrollment. Use
-`queued-registration` for that publication/routing handoff when Jira is supplied;
-never fall through queued Ready into interactive delivery. An already-Ready
-ticket taken interactively must be claimed/moved out of Ready before work starts,
-with queue dispatcher ownership coordinated. Without Jira, retain the native
-approved delivery handoff.
+Call `handoff_plan` by itself with `queued-registration` when Jira is supplied;
+without Jira, use the selected delivery facet, `project-manager` (standard) or
+`quick-delivery` (quick), and the same approved workspace. The handoff presents
+the complete design and proposed implementation review panel for explicit
+operator approval; do not ask for separate chat approval first or wait for a
+routine continue prompt. Do not auto-approve or implement before approval;
+rejection does not authorize implementation. When Jira is supplied, record
+readable approval only after actual approval, following its live lifecycle
+without a duplicate approval gate. Do not silently choose a different panel or
+delivery mode. No routine retrospective or automatic friction ticket.

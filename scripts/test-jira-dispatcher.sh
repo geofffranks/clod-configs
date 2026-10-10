@@ -125,7 +125,8 @@ class DispatcherTests(unittest.TestCase):
             def state(self): return {}
             def events(self): return {"events":[]}
         class FakeJira:
-            def __init__(self): self.comments_by_key={"LAP-9":[{"id":"done1","created":"2999-01-01T00:00:00Z","body":"Completion report\nBranch: feat/x\nWorktree: /tmp/work\nCommits: abc..def\nChecks: unit tests passed\nReview: approved\nRemaining manual checks: none"}]}; self.status="In Progress"; self.writes=[]
+            def __init__(self): self.comments_by_key={"LAP-9":[{"id":"done1","created":"2999-01-01T00:00:00Z","body":"## Delivery completion report\nWorker completion report\nBranch: feat/x\nWorktree: /tmp/work\nCommits: abc..def\nChecks: unit tests passed\nReview: approved\nRemaining manual checks: none"}]}; self.status="In Progress"; self.writes=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status},"comment":{"comments":self.comments_by_key.get("LAP-9",[])}}}
             def comments(self,key): return self.comments_by_key.get(key,[])
             def transitions(self,key): return {"transitions":[{"id":"7","name":"Implementation Complete","to":{"name":"Awaiting Acceptance"}}]}
             def transition_to(self,key,dest,names): self.writes.append(("transition",dest,names)); self.status=dest; return {"id":"7","name":"Implementation Complete"}
@@ -169,17 +170,30 @@ class DispatcherTests(unittest.TestCase):
         self.store.claim("LAP-12",self.tmp.name,self.tmp.name); self.store.update("LAP-12",stage="blocked")
         self.assertIn("blocked",__import__('state').STAGES)
         oldwhich=dispatcher.shutil.which; dispatcher.shutil.which=lambda x:None
+        import mcp_client
+        old_mcp=mcp_client.MCPClient
+        class IsolatedMCP:
+            def __init__(self,*a,**k): pass
+            def initialize(self): raise RuntimeError("isolated fake gateway unavailable")
+        mcp_client.MCPClient=IsolatedMCP
         try:
-            errors,warnings=preflight(c,self.tmp.name); self.assertTrue(errors)
-        finally: dispatcher.shutil.which=oldwhich
+            errors,warnings,verified=preflight(c,self.tmp.name); self.assertTrue(errors)
+        finally: dispatcher.shutil.which=oldwhich; mcp_client.MCPClient=old_mcp
 
     def test_resume_continue_failure_falls_back_with_preservation_and_attempts(self):
         class FakeJira:
-            def get_issue(self,key): return {"fields":{"status":{"name":"Ready"}}}
+            def __init__(self): self.status="Ready"
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
             def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: feat/keep\nDelivery mode: queued\nReview panel: review"},{"id":"r","created":"2021-01-01T00:00:00Z","body":"Proceed with the documented remaining tests."}]
+            def search(self,jql=""): return []
+            def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; return {"name":"Go"}
+            def verify_transition(self,key,dest): return self.status==dest
         self.store.claim("LAP-20",self.tmp.name,self.tmp.name,plan_excerpt="## Approved delivery plan\nGit: feat/keep\nDelivery mode: queued\nReview panel: review")
         self.store.increment("LAP-20","blocker_attempts"); self.store.update("LAP-20",stage="blocked",session_id="retained",blocker_comment_time=1)
-        old_continue=dispatcher.resume_via_continue; old_launch=dispatcher.launch; captured={}
+        old_continue=dispatcher.resume_via_continue; old_launch=dispatcher.launch; old_live=dispatcher.live_sessions
+        dispatcher.live_sessions=lambda *a,**k:[]
+        captured={}
         def fail_continue(*a,**k): raise RuntimeError("continue unavailable")
         def fake_launch(repo,facet,prompt,store,key,**kwargs): captured.update(repo=repo,facet=facet,prompt=prompt); return "fresh",object()
         dispatcher.resume_via_continue=fail_continue; dispatcher.launch=fake_launch
@@ -188,8 +202,8 @@ class DispatcherTests(unittest.TestCase):
             self.assertIn("Proceed with the documented remaining tests",captured["prompt"])
             self.assertIn("Current approved plan excerpt",captured["prompt"]); self.assertIn("Preservation:",captured["prompt"])
             self.assertEqual(self.store.get("LAP-20")["blocker_attempts"],1)
-            self.assertIn("after continue failed",self.store.events("LAP-20")[-1]["detail"])
-        finally: dispatcher.resume_via_continue=old_continue; dispatcher.launch=old_launch
+            self.assertIn("after continue failure",self.store.events("LAP-20")[-1]["detail"])
+        finally: dispatcher.resume_via_continue=old_continue; dispatcher.launch=old_launch; dispatcher.live_sessions=old_live
 
     def test_preserved_question_blocks_once_and_releases_repo_lane(self):
         import subprocess
@@ -205,6 +219,7 @@ class DispatcherTests(unittest.TestCase):
             def events(self): return {"events":[]}
         class FakeJira:
             def __init__(self): self.status="In Progress"; self.writes=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
             def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
             def transition_to(self,key,dest,names): self.writes.append(("transition",dest,names)); self.status=dest; return {"name":"Block"}
             def verify_transition(self,key,dest): return self.status==dest
@@ -250,7 +265,7 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(attempts,attempts_before+1)
         self.assertEqual(self.store.get("LAP-25")["launch_attempts"],attempts_before+1)
 
-    def test_blocker_attempt_cap_escalates_without_duplicate_jira_writes(self):
+    def test_blocker_attempt_cap_escalates_with_visible_jira_escalation(self):
         self.store.claim("LAP-24",self.tmp.name,self.tmp.name)
         self.store.update("LAP-24",stage="running",session_id="real",daemon_port=1)
         for _ in range(3): self.store.increment("LAP-24","blocker_attempts")
@@ -259,17 +274,24 @@ class DispatcherTests(unittest.TestCase):
             def state(self): return {"pending_interrogative":{"question":"Still unresolved?"}}
             def events(self): return {"events":[]}
         class FakeJira:
-            def __init__(self): self.transitions=[]; self.comments=[]
+            def __init__(self): self.status="In Progress"; self.transition_writes=[]; self.comments=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
             def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
-            def transition_to(self,key,dest,names): self.transitions.append(dest); return {"name":"Block"}
-            def verify_transition(self,key,dest): return True
-            def reconcile_comment(self,key,text,markers): self.comments.append(text); return {"id":"b"}
+            def transition_to(self,key,dest,names): self.status=dest; self.transition_writes.append(dest); return {"name":"Block"}
+            def verify_transition(self,key,dest): return self.status==dest
+            def reconcile_comment(self,key,text,markers): self.comments.append(text); return {"id":"esc","created":"2999-01-01T00:00:00Z","body":text}
         old_client=dispatcher.DaemonClient; old_cred=__import__('launch')._credential; old_pending=__import__('launch').pending_interrogative
         dispatcher.DaemonClient=lambda *a,**k:Daemon(); __import__('launch')._credential=lambda *a,**k:"token"; __import__('launch').pending_interrogative=lambda d:d.state()["pending_interrogative"]
         try:
             jira=FakeJira(); self.assertEqual(supervise_once(jira,self.store,self.config()),[("LAP-24","blocked")])
             self.assertEqual(self.store.get("LAP-24")["stage"],"blocked"); self.assertEqual(self.store.get("LAP-24")["blocker_attempts"],4)
-            self.assertEqual(jira.transitions,[]); self.assertEqual(jira.comments,[])
+            # The cap must be visible on Jira: Blocked transition + escalation comment, sent once.
+            self.assertEqual(jira.transition_writes,["Blocked"])
+            self.assertEqual(len(jira.comments),1)
+            self.assertIn("Dispatcher recovery escalation",jira.comments[0])
+            later=supervise_once(jira,self.store,self.config())
+            self.assertEqual(later,[])  # terminal blocked rows are not resupervised; still no duplicate writes
+            self.assertEqual(jira.transition_writes,["Blocked"]); self.assertEqual(len(jira.comments),1)
         finally: dispatcher.DaemonClient=old_client; __import__('launch')._credential=old_cred; __import__('launch').pending_interrogative=old_pending
 
     def test_state_restart_keeps_completion_idempotent(self):
@@ -280,7 +302,8 @@ class DispatcherTests(unittest.TestCase):
             def state(self): return {}
             def events(self): return {"events":[]}
         class FakeJira:
-            def __init__(self): self.status="In Progress"; self.writes=[]; self.cs=[{"id":"done","created":"2999-01-01T00:00:00Z","body":"Completion\nBranch: b\nWorktree: w\nCommits: c\nChecks: passed\nRemaining manual checks: none"}]
+            def __init__(self): self.status="In Progress"; self.writes=[]; self.cs=[{"id":"done","created":"2999-01-01T00:00:00Z","body":"## Delivery completion report\nWorker completion report\nBranch: b\nWorktree: w\nCommits: c\nChecks: passed\nReview: approved\nRemaining manual checks: none"}]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status},"comment":{"comments":self.cs}}}
             def comments(self,k): return self.cs
             def transitions(self,k): return {"transitions":[{"id":"a","name":"Implementation Complete","to":{"name":"Awaiting Acceptance"}}]}
             def transition_to(self,k,d,n): self.writes.append(("transition",d)); self.status=d; return {"name":"Implementation Complete"}
@@ -409,7 +432,7 @@ class DispatcherTests(unittest.TestCase):
                 self.assertEqual([w[1] for w in GW.writes if w[0]=="transition"],["t2"])
                 with open(os.path.join(self.tmp.name,"launch.log")) as f: new_count=f.read().count("new")
                 self.assertEqual(new_count,1)
-                GW.comments.append({"id":"done","created":"2999-01-01T00:00:05Z","body":"Completion report\nBranch: main\nWorktree: %s\nCommits: abc..def\nChecks: unit passed\nReview: approved\nRemaining manual checks: device run"%self.tmp.name})
+                GW.comments.append({"id":"done","created":"2999-01-01T00:00:05Z","body":"## Delivery completion report\nWorker completion report\nBranch: main\nWorktree: %s\nCommits: abc..def\nChecks: unit passed\nReview: approved\nRemaining manual checks: device run"%self.tmp.name})
                 out=supervise_once(jira,self.store,c,polytoken=shim,sessions_dir=sess_dir)
                 self.assertEqual(out,[("LAP-30","awaiting")]); self.assertEqual(GW.status,"Awaiting Acceptance")
                 notes=[w[1] for w in GW.writes if w[0]=="comment"]
@@ -447,14 +470,341 @@ class DispatcherTests(unittest.TestCase):
         try:
             c=dict(DEFAULTS); c["gateway_url"]="http://127.0.0.1:%d/mcp"%ps.server_address[1]; c["jira_project"]="LAP"; c["repo_mappings"]={"lappie":{"repo_path":repo}}
             old_run=dispatcher.subprocess.run; dispatcher.subprocess.run=lambda *a,**k: subprocess.CompletedProcess([],0)
-            try: errors,warnings=preflight(c,self.tmp.name)
+            try: errors,warnings,verified=preflight(c,self.tmp.name)
             finally: dispatcher.subprocess.run=old_run
             self.assertEqual(errors,[],errors)
-            self.assertEqual(len(warnings),3,warnings)
-            self.assertIn("pending: no ticket in state In Progress to sample"," | ".join(warnings))
+            self.assertEqual(len(warnings),12,warnings)
+            self.assertIn("pending: no Story ticket in state In Progress to sample"," | ".join(warnings))
             self.assertTrue(PH.calls)
-            for name in PH.calls: self.assertIn(name,("getAccessibleAtlassianResources","searchJiraIssuesUsingJql","getTransitionsForJiraIssue"),name)
+            for name in PH.calls: self.assertIn(name,("getAccessibleAtlassianResources","searchJiraIssuesUsingJql","getTransitionsForJiraIssue","getJiraProjectIssueTypesMetadata"),name)
         finally: ps.shutdown(); ps.server_close()
+
+    def test_adf_recursive_text_and_newest_plan_mode(self):
+        from workers import adf_text
+        adf={"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"## Approved delivery plan"}]},{"type":"paragraph","content":[{"type":"text","text":"Git: main"},{"type":"text","text":"\nDelivery mode: queued\nReview panel: review"}]}]}
+        self.assertIn("\nGit: main",adf_text(adf))
+        comments=[{"body":"## Approved delivery plan\nGit: old\nDelivery mode: queued\nReview panel: review"},{"body":"## Approved delivery plan\nGit: new\nDelivery mode: interactive\nReview panel: review"}]
+        self.assertIsNone(parse_approved_plan(comments))
+
+    def test_completion_requires_positive_structured_worker_report(self):
+        from workers import parse_completion_report
+        base="## Delivery completion report\nWorker completion report\nBranch: b\nWorktree: w\nCommits: c\nChecks: tests passed\nReview: panel approved\nRemaining manual checks: none"
+        def c(body): return {"id":"x","created":"2999-01-01T00:00:00Z","body":body}
+        self.assertIsNone(parse_completion_report([c("Operator asks what is required for completion?"+base)],1))
+        self.assertIsNone(parse_completion_report([c(base+"\ncompletion is not ready")],1))
+        parsed=parse_completion_report([c(base)],1)
+        self.assertEqual(parsed[1]["Checks"],"tests passed"); self.assertEqual(parsed[1]["Review"],"panel approved")
+
+    def test_exact_session_key_rejects_prefix_collision(self):
+        import launch
+        old=launch.DaemonClient
+        launch.DaemonClient=type("D",(),{"__init__":lambda self,*a:None,"health":lambda self:{}})
+        path=os.path.join(self.tmp.name,"sid","credential.json"); os.makedirs(os.path.dirname(path)); open(path,"w").write('{"token":"t"}')
+        try:
+            session={"session_id":"sid","project_path":self.tmp.name,"state":"running","last_user_message_preview":"Work on LAP-260","port":1}
+            self.assertIsNone(launch.reconcile_session("LAP-26",self.tmp.name,[session],self.tmp.name))
+        finally: launch.DaemonClient=old
+
+    def test_awaiting_human_done_retires_without_transition(self):
+        self.store.claim("LAP-40",self.tmp.name,self.tmp.name); self.store.update("LAP-40",stage="awaiting")
+        class J:
+            def get_issue(self,key): return {"fields":{"status":{"name":"Done"}}}
+            def transition_to(self,*a): raise AssertionError("must observe only")
+        self.assertEqual(supervise_once(J(),self.store,self.config()),[("LAP-40","done")])
+        self.assertEqual(self.store.get("LAP-40")["stage"],"done")
+
+    def test_pending_operation_survives_store_reopen(self):
+        self.store.claim("LAP-41",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-41",pending_operation={"stage":"launching","operation":"spawn","payload":{"facet":"quick-delivery"}})
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        self.assertIn('"operation": "spawn"',self.store.get("LAP-41")["pending_operation"])
+
+    def test_transition_admission_rechecked_before_jira_write(self):
+        class J:
+            writes=0
+            def transitions(self,key): self.writes+=1; return {"transitions":[]}
+        self.store.set_control("stop","true")
+        j=J()
+        with self.assertRaisesRegex(RuntimeError,"paused/stopped"):
+            dispatcher._transition(j,self.store,{"key":"LAP-50"},self.config(),"Blocked","block")
+        self.assertEqual(j.writes,0)
+
+    def test_reopen_ready_transition_pending_reconciles_then_spawns_once(self):
+        self.store.claim("LAP-52",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-52",stage="ready_to_inprogress",pending_operation={"stage":"ready_to_inprogress","operation":"ready_transition","payload":{"destination":"In Progress"}})
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        class J:
+            status="In Progress"; transitions_written=0
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
+            def verify_transition(self,key,dest): return self.status==dest
+        old_live=dispatcher.live_sessions; old_launch=dispatcher.launch
+        dispatcher.live_sessions=lambda *a,**k:[]
+        spawned=[]
+        def fake_launch(*a,**k):
+            spawned.append(a[4]); self.store.update(a[4],stage="running",session_id="sid",daemon_port=1234,pending_operation=None)
+        dispatcher.launch=fake_launch
+        try:
+            self.assertEqual(supervise_once(J(),self.store,self.config()),[("LAP-52","running")])
+            self.assertEqual(spawned,["LAP-52"])
+            self.assertEqual(self.store.get("LAP-52")["stage"],"running")
+        finally: dispatcher.live_sessions=old_live; dispatcher.launch=old_launch
+
+    def test_recovery_exhaustion_posts_visible_escalation_after_reopen(self):
+        self.store.claim("LAP-53",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-53",stage="ready_to_inprogress",pending_operation={"stage":"ready_to_inprogress","operation":"ready_transition","payload":{}})
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        self.store.increment("LAP-53","launch_attempts"); self.store.increment("LAP-53","launch_attempts")
+        class J:
+            status="Ready"; writes=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
+            def verify_transition(self,key,dest): return self.status==dest
+            def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; self.writes.append(("transition",dest)); return {"name":"Block"}
+            def reconcile_comment(self,key,text,markers): self.writes.append(("comment",text)); return {"id":"esc","body":text,"created":"2999-01-01T00:00:00Z"}
+        j=J(); old=dispatcher._transition
+        def transition(jira,store,row,config,dest,hint):
+            if dest=="In Progress": raise RuntimeError("temporary transition failure")
+            jira.status=dest; jira.writes.append(("transition",dest))
+        dispatcher._transition=transition
+        try:
+            out=supervise_once(j,self.store,self.config())
+            self.assertEqual(out,[("LAP-53","blocked")]); self.assertEqual(self.store.get("LAP-53")["stage"],"blocked")
+            self.assertEqual([w[0] for w in j.writes],["transition","comment"])
+            self.assertIn("Decision needed:",j.writes[-1][1])
+        finally: dispatcher._transition=old
+
+    def test_launch_rechecks_control_after_intent_before_spawn(self):
+        from launch import launch, LaunchError
+        self.store.claim("LAP-54",self.tmp.name,self.tmp.name); self.store.set_control("pause","true")
+        old=dispatcher.subprocess.run; called=[]; dispatcher.subprocess.run=lambda *a,**k:called.append(a)
+        try:
+            with self.assertRaisesRegex(LaunchError,"paused/stopped"): launch(self.tmp.name,"quick-delivery","prompt",self.store,"LAP-54")
+            self.assertEqual(called,[]); self.assertEqual(self.store.get("LAP-54")["pending_operation"] is not None,True)
+        finally: dispatcher.subprocess.run=old
+
+    def test_blocker_episode_persisted_before_comment_and_marked(self):
+        self.store.claim("LAP-51",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-51",stage="running")
+        episode_seen=[]
+        class J:
+            def get_issue(self,key): return {"fields":{"status":{"name":"Blocked"}}}
+            def reconcile_comment(self,key,text,markers):
+                row=self.store.get(key)
+                episode_seen.append(row["blocker_episode_id"])
+                episode_seen.append(row["blocker_episode_id"] in markers)
+                return {"id":"episode-comment","created":"2999-01-01T00:00:00Z"}
+        jira=J()
+        jira.store=self.store
+        row=self.store.get("LAP-51")
+        old=dispatcher._preservation
+        dispatcher._preservation=lambda _row:(True,"branch",self.tmp.name,"abc123")
+        try:
+            self.assertTrue(dispatcher._block(jira,self.store,row,self.config(),"reason","decision"))
+        finally: dispatcher._preservation=old
+        self.assertEqual(len(episode_seen),2)
+        self.assertEqual(episode_seen[0],self.store.get("LAP-51")["blocker_episode_id"])
+        self.assertTrue(episode_seen[1])
+
+    def test_reopen_after_block_write_occurs_exactly_once(self):
+        self.store.claim("LAP-60",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-60",stage="blocking",pending_operation={"stage":"blocking","operation":"block_transition","payload":{"episode":"ep1","reason":"Worker blocker report question","decision":"operator decision needed","worktree":self.tmp.name,"branch":"b","commits":"abc","checks":"passed","remaining":"rest"}},blocker_episode_id="ep1")
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        class J:
+            status="In Progress"; comments_written=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
+            def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; return {"name":"Block"}
+            def verify_transition(self,key,dest): return self.status==dest
+            def reconcile_comment(self,key,text,markers):
+                if any(t["body"]==text for t in J.comments_written): return next(t for t in J.comments_written if t["body"]==text)
+                c={"id":"c%d"%(len(J.comments_written)+1),"created":"2999-01-01T00:00:%02dZ"%(len(J.comments_written)+1),"body":text}
+                J.comments_written.append(c); return c
+        j=J()
+        out=supervise_once(j,self.store,self.config())
+        self.assertEqual(out,[("LAP-60","blocked")]); self.assertEqual(len(j.comments_written),1)
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        out=supervise_once(j,self.store,self.config())
+        self.assertEqual(out,[]); self.assertEqual(len(j.comments_written),1)
+
+    def test_reopen_after_acceptance_write_occurs_exactly_once(self):
+        self.store.claim("LAP-61",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-61",stage="recovery_pending",pending_operation={"stage":"recovery_pending","operation":"acceptance_report","payload":{"comment_id":"done9","destination":"Awaiting Acceptance","report":"Delivery report\nDispatcher-observed facts:\nChecks: tests passed\nReview: panel approved\nBranch: b\nWorktree: %s\nCommits: abc\nRemaining manual checks: none"%self.tmp.name,"facts":{}}})
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        class J:
+            status="In Progress"; comments_written=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
+            def transitions(self,key): return {"transitions":[{"id":"i","name":"Implementation Complete","to":{"name":"Awaiting Acceptance"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; return {"name":"Implementation Complete"}
+            def verify_transition(self,key,dest): return self.status==dest
+            def reconcile_comment(self,key,text,markers):
+                if any(t["body"]==text for t in J.comments_written): return next(t for t in J.comments_written if t["body"]==text)
+                c={"id":"c%d"%(len(J.comments_written)+1),"created":"2999-01-01T00:00:%02dZ"%(len(J.comments_written)+1),"body":text}
+                J.comments_written.append(c); return c
+        j=J()
+        self.assertEqual(supervise_once(j,self.store,self.config()),[("LAP-61","awaiting")])
+        self.assertEqual(len(j.comments_written),1)
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        self.assertEqual(supervise_once(j,self.store,self.config()),[])
+        self.assertEqual(len(j.comments_written),1)
+
+    def test_reopen_after_retirement_is_complete(self):
+        self.store.claim("LAP-62",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-62",stage="awaiting")
+        class J:
+            def get_issue(self,key): return {"fields":{"status":{"name":"Done"}}}
+        self.assertEqual(supervise_once(J(),self.store,self.config()),[("LAP-62","done")])
+        path=self.store.directory; self.store.close(); self.store=StateStore(path)
+        self.assertEqual(supervise_once(J(),self.store,self.config()),[])
+        self.assertEqual(self.store.get("LAP-62")["stage"],"done")
+
+    def test_stop_injected_before_block_transition(self):
+        class J:
+            status="In Progress"; comments=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
+            def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; return {"name":"Block"}
+            def verify_transition(self,key,dest): return self.status==dest
+            def reconcile_comment(self,key,text,markers):
+                c={"id":"c%d"%len(J.comments),"created":"2999-01-01T00:00:00Z","body":text}; J.comments.append(c); return c
+        self.store.claim("LAP-63",self.tmp.name,self.tmp.name)
+        # (a) stop before the block comment: pending op recorded, no Jira comment
+        self.store.update("LAP-63",stage="running",session_id="kept",daemon_port=1,launch_time=1)
+        self.store.set_control("stop","true")
+        class D:
+            def health(self): return {}
+            def state(self): return {"pending_interrogative":{"question":"q"}}
+            def events(self): return {"events":[]}
+        old_client=dispatcher.DaemonClient; old_cred=__import__('launch')._credential; old_pending=__import__('launch').pending_interrogative
+        dispatcher.DaemonClient=lambda *a,**k:D(); __import__('launch')._credential=lambda *a,**k:"t"; __import__('launch').pending_interrogative=lambda d:d.state()["pending_interrogative"]
+        try:
+            j=J()
+            results=supervise_once(j,self.store,self.config())
+            self.assertEqual(j.comments,[])
+            self.assertNotIn("stage blocked",json.dumps(self.store.get("LAP-63")))
+            self.store.set_control("stop","false")  # resume via operator semantics
+            self.store.set_control("pause","false")
+            self.assertEqual(supervise_once(j,self.store,self.config()),[("LAP-63","blocked")])
+            self.assertEqual(self.store.get("LAP-63")["blocker_attempts"],1)
+        finally:
+            dispatcher.DaemonClient=old_client; __import__('launch')._credential=old_cred; __import__('launch').pending_interrogative=old_pending
+
+    def test_two_blocker_episodes_each_require_their_own_reply(self):
+        class J:
+            status="In Progress"; ticket_comments=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
+            def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
+            def transition_to(self,key,dest,names): type(self).status=dest; return {"name":"Block"}
+            def verify_transition(self,key,dest): return self.status==dest
+            def comments(self,key): return J.ticket_comments
+            def search(self,jql=""): return []
+        real_preservation=dispatcher._preservation
+        old_resume_continue=dispatcher.resume_via_continue; old_launch=dispatcher.launch; old_live=dispatcher.live_sessions
+        dispatcher._preservation=lambda row: (True,"b",self.tmp.name,"committed abc")
+        def fresh_launch(*a,**k):
+            self.store.update(a[4],stage="running",session_id="fresh",daemon_port=7,launch_time=100.0,pending_operation=None)
+        def fail_continue(*a,**k): raise RuntimeError("continue unavailable")
+        dispatcher.launch=fresh_launch; dispatcher.resume_via_continue=fail_continue
+        dispatcher.live_sessions=lambda *a,**k:[{"session_id":"fresh","project_path":self.tmp.name,"termination_state":"running","port":7}]
+        class D:
+            def health(self): return {}
+            def state(self): return {}
+            def events(self): return {"events":[]}
+        old_client=dispatcher.DaemonClient; old_cred=__import__('launch')._credential; old_pending=__import__('launch').pending_interrogative
+        dispatcher.DaemonClient=lambda *a,**k:D(); __import__('launch')._credential=lambda *a,**k:"t"; __import__('launch').pending_interrogative=lambda d:None
+        try:
+            j=J()
+            # Episode 1: worker reports a blocker -> supervisor blocks.
+            self.store.claim("LAP-64",self.tmp.name,self.tmp.name,plan_excerpt="## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r")
+            self.store.update("LAP-64",stage="running",launch_time=1.0,session_id="fresh",daemon_port=7,pending_operation=None)
+            J.ticket_comments.append({"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"})
+            J.ticket_comments.append({"id":"b1","created":"2999-01-01T00:00:05Z","body":"Worker blocker report\nReason: choose retry budget\nDecision needed: option"})
+            def reconcile_comment(key,text,markers):
+                if any(t["body"]==text for t in J.ticket_comments): return next(t for t in J.ticket_comments if t["body"]==text)
+                c={"id":"c%d"%(len(J.ticket_comments)+1),"created":"2999-01-01T00:%02d:00Z"%(len(J.ticket_comments)+1),"body":text}
+                J.ticket_comments.append(c); return c
+            j.reconcile_comment=reconcile_comment
+            self.assertEqual(supervise_once(j,self.store,self.config()),[("LAP-64","blocked")])
+            row=self.store.get("LAP-64"); self.assertEqual(row["blocker_attempts"],1); ep1=row["blocker_episode_id"]; self.assertTrue(ep1)
+            # Operator replies and moves to Ready: the reply authorizes a resume (fresh launch stub).
+            J.ticket_comments.append({"id":"r1","created":"2999-01-01T00:05:00Z","body":"Answered: option A."})
+            J.status="Ready"
+            out=resume_candidates(j,self.store,dict(self.config(),max_global_active=2))
+            self.assertEqual(out,[("LAP-64","resumed")])
+            row=self.store.get("LAP-64"); self.assertEqual(row["stage"],"running"); self.assertEqual(row["blocker_attempts"],1)
+            J.status="In Progress"
+            # Episode 2: a NEW worker blocker after resume -> new episode; the old reply is already consumed.
+            J.ticket_comments.append({"id":"b2","created":"2999-01-01T00:06:00Z","body":"Worker blocker report\nReason: second distinct blocker\nDecision needed: new decision"})
+            self.assertEqual(supervise_once(j,self.store,self.config()),[("LAP-64","blocked")])
+            row=self.store.get("LAP-64"); self.assertEqual(row["blocker_attempts"],2)
+            self.assertNotEqual(row["blocker_episode_id"],ep1)
+            # The episode-2 blocker time is later than the consumed reply time: r1 must not re-authorize.
+            self.assertTrue(row["blocker_comment_time"] > dispatcher._when(next(c for c in J.ticket_comments if c["id"]=="r1")))
+        finally:
+            dispatcher._preservation=real_preservation; dispatcher.resume_via_continue=old_resume_continue; dispatcher.launch=old_launch; dispatcher.live_sessions=old_live
+            dispatcher.DaemonClient=old_client; __import__('launch')._credential=old_cred; __import__('launch').pending_interrogative=old_pending
+
+    def test_resume_claim_enforces_global_and_repo_limits(self):
+        self.store.claim("LAP-65",self.tmp.name,self.tmp.name,global_limit=2)
+        self.store.update("LAP-65",stage="running")  # occupies one of two slots
+        self.store.claim("LAP-66",self.tmp.name+"X",self.tmp.name+"X",global_limit=2)
+        self.store.update("LAP-66",stage="blocked")
+        with self.assertRaisesRegex(RuntimeError,"global active limit reached"):
+            self.store.resume_claim("LAP-66",{"reply_id":"r1"})
+        self.store.update("LAP-65",stage="done")  # release
+        # same-repo conflict: a running effort on the same repo blocks resumption
+        self.store.claim("LAP-68",self.tmp.name,self.tmp.name,global_limit=2)
+        self.store.update("LAP-68",stage="blocked")
+        self.store.claim("LAP-67",self.tmp.name,self.tmp.name,global_limit=2)
+        self.store.update("LAP-67",stage="running")
+        with self.assertRaisesRegex(RuntimeError,"already owned"):
+            self.store.resume_claim("LAP-68",{"reply_id":"r2"},repo=self.tmp.name,global_limit=2)
+        # valid: only blocked row itself, no active others
+        self.store.update("LAP-67",stage="done")
+        self.store.resume_claim("LAP-68",{"reply_id":"r3"},global_limit=2)
+        self.assertEqual(json.loads(self.store.get("LAP-68")["pending_operation"])["operation"],"resume")
+        with self.assertRaises(RuntimeError):  # a second resume cannot exceed the single global slot held by the resume itself
+            self.store.resume_claim("LAP-66",{"reply_id":"r4"},global_limit=1)
+
+    def test_uncertain_spawn_intent_facet_mismatch_not_adopted(self):
+        import launch
+        old=launch.DaemonClient
+        launch.DaemonClient=type("D",(),{"__init__":lambda self,*a:None,"health":lambda self:{}})
+        path=os.path.join(self.tmp.name,"sid","credential.json"); os.makedirs(os.path.dirname(path)); open(path,"w").write('{"token":"t"}')
+        try:
+            stranger=[{"session_id":"sid","project_path":self.tmp.name,"state":"running","first_user_message_preview":"Work on LAP-70","facet":"project-manager","port":5}]
+            self.assertIsNone(launch.reconcile_session("LAP-70",self.tmp.name,stranger,self.tmp.name,launch_intent={"facet":"quick-delivery","prompt":"x"}))
+            match=[dict(stranger[0],facet="quick-delivery")]
+            adopted=launch.reconcile_session("LAP-70",self.tmp.name,match,self.tmp.name,launch_intent={"facet":"quick-delivery","prompt":"x"})
+            self.assertIsNotNone(adopted); self.assertEqual(adopted[0],"sid")
+        finally: launch.DaemonClient=old
+
+    def test_interrogative_reducer_resolved_clears_pending(self):
+        import launch
+        class D:
+            def __init__(self): self.n=-1
+            def state(self): return {}
+            def events(self): return {"events":[{"type":"interrogative_pending","interrogative":{"id":"q1"}},{"type":"interrogative_answered","id":"q1"}]}
+        self.assertIsNone(launch.pending_interrogative(D()))
+        class D2(D):
+            def events(self): return {"events":[{"type":"interrogative_pending","interrogative":{"id":"q1"}}]}
+        self.assertIsNotNone(launch.pending_interrogative(D2()))
+
+    def test_verify_comment_reads_adf_bodies(self):
+        from workers import adf_text  # sanity: marker lives inside an ADF body
+        jira=Jira(object(),'LAP',"customfield_10043")
+        node={"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Dispatcher recovery escalation\nTicket: LAP-71\nDispatcher episode: ep9"}]}]}
+        def fake_get_issue(key):
+            return {"fields":{"comment":{"comments":[{"body":node}]}}}
+        jira.get_issue=fake_get_issue
+        self.assertTrue(jira.verify_comment("LAP-71",["Dispatcher recovery escalation","ep9"]))
+
+    def test_delivery_report_recorded_signature_prevents_second_transition(self):
+        self.store.claim("LAP-72",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-72",stage="awaiting")  # awaiting rows wait for human Done only
+        class J:
+            def get_issue(self,key): return {"fields":{"status":{"name":"Awaiting Acceptance"}}}
+            def transition_to(self,*a,**k): raise AssertionError("no extra transition")
+        self.assertEqual(supervise_once(J(),self.store,self.config()),[])
 
 suite=unittest.defaultTestLoader.loadTestsFromTestCase(DispatcherTests)
 result=unittest.TextTestRunner(verbosity=2).run(suite)

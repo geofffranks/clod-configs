@@ -6,6 +6,12 @@ Geoff still designs and approves the work. A readable approved plan plus Ready
 is the approval contract; there is no separate approval ledger, byte/hash check,
 extra approval gate or per-poll model call.
 
+The service assumes a trusted same-user model. Any process running as the same
+user can read daemon credential files (`chmod 600`) and control those sessions.
+Writers of Jira plans and replies, including the operator's readable queued
+plans, are trusted authority inputs under this model; no additional gate is
+introduced here.
+
 The dispatcher does not design products, create worktrees, adopt someone else's
 activity, terminate unrelated sessions, grant push/merge authority, or mark work
 Done/Canceled. Workers use the approved workspace, Git disposition and review
@@ -99,10 +105,14 @@ state, real sessions, workspace/branch and Jira before resuming admission. Lost
 acknowledgments retain the assigned slot until resolved. Restart, unblock or
 fresh worker selection must not reset attempt counters.
 
-Logs go to `~/Library/Logs/polytoken-jira-dispatcher.log`. Persistent state under
-`~/.local/share/polytoken/jira-dispatcher/` includes `config.json`, `state.sqlite3`,
-per-effort logs and persisted control flags; `lib/` holds the installed runtime.
-Treat state and logs as private operational data; do not commit them to Git.
+The LaunchAgent sends service output to
+`~/Library/Logs/polytoken-jira-dispatcher.log`. Runtime persistence is SQLite
+state (`state.sqlite3`), including effort records, controls and the journal,
+plus captured spawn/output data; there are no per-effort log directories or
+pause/stop flag files. `~/.local/share/polytoken/jira-dispatcher/` also holds the
+editable `config.json` and installed runtime in `lib/`. See the
+[maintainer notes](../jira-dispatcher/README.md) for capture and recovery details.
+Treat state and output as private operational data; do not commit them to Git.
 
 ## Configuration and admission
 
@@ -132,8 +142,12 @@ missing paths is rejected with a non-zero exit. Configure:
 - `transition_names`: candidate transition names per lifecycle path used to
   match live metadata; `ready_to_inprogress` ships empty as pending. Names may
   vary; live destination-status matching decides, and IDs are never hardcoded.
-- `gateway_url`: loopback MCP `http://127.0.0.1:8910/mcp`. This does not grant
-  gateway reconfiguration, reconnect or service-restart authority.
+- `gateway_url`: loopback MCP `http://127.0.0.1:8910/mcp`. The Ratatoskr gateway
+  exposes upstream tools behind its fixed `tool-details`/`execute` surface — the
+  dispatcher discovers the surface per session, calls upstream Atlassian tools
+  through `execute` scripts, and slices offloaded results; transition names may
+  still only be read via live metadata. This does not grant gateway
+  reconfiguration, reconnect or service-restart authority.
 
 Global CLI options: `--once` for a single run cycle, `--state-dir`, `--config`
 for a non-default config path, `--facet` for the worker delivery facet (default
@@ -157,8 +171,9 @@ project = LAP AND issuetype IN ("Story","Bug","Task","AI Workflow") ORDER BY Ran
 
 ## Jira workflow setup checklist
 
-Operator-owned workflow setup verification remains pending until preflight
-passes against live metadata. Verify **every path for each type separately**;
+Operator-owned workflow setup verification remains pending until each required
+path is verified against live metadata; passing sampled preflight alone does not
+establish per-type coverage. Verify **every path for each type separately**;
 a sampled Story path is not proof of Bug, Task or AI Workflow support. Transition
 names may vary. Discover live metadata, match both transition name and destination
 status, satisfy required fields, and never hardcode transition IDs. Global Done
@@ -207,7 +222,9 @@ for current accessible-resource and workflow discovery.
 
 ## Registration, blockers and acceptance
 
-After native design acceptance, choose one route explicitly:
+Before the native design approval handoff, choose one route explicitly. For
+Jira work, target `queued-registration` and carry the eventual delivery facet,
+source branch and approved workspace choices in the plan. After acceptance:
 
 - **Queued:** `queued-registration` publishes the complete readable plan under
   `## Approved delivery plan` with `Delivery mode: queued`, verifies publication,
@@ -234,10 +251,14 @@ Done. Done/Canceled and exceptional lifecycle moves remain human decisions.
 
 Local tests do not prove live workflow configuration, auth, effective permissions,
 model availability, device admission or successful unattended delivery. Preflight
-must check loopback MCP initialization, Jira/Atlassian resources, type-specific
-live transitions, configured Git repos/values, writable state/effective permissions
-and a non-exhaustive `polytoken models` check before activation. Missing metadata,
-auth or ownership stays pending, not fabricated success.
+checks local tools, configured Git repo paths, state writability, loopback MCP
+initialization, Jira/Atlassian resource discovery and a non-exhaustive
+`polytoken models` check, and samples live transitions from available tickets.
+It does not prove every path for every type without per-type tickets in the
+relevant states. Missing samples and paths remain pending outcomes; verify
+configured Project values, effective permissions and ownership before activation.
+See the [maintainer notes](../jira-dispatcher/README.md) for current preflight
+behavior. Missing metadata, auth or ownership stays pending, not fabricated success.
 
 Review the [implementation design](../jira-dispatcher/DESIGN.md) and
 [maintainer notes](../jira-dispatcher/README.md) for the runtime contract. From the

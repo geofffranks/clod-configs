@@ -38,9 +38,9 @@ class MCPClient:
                 parsed=[]
                 for frame in body.decode("utf-8","replace").replace("\r\n","\n").split("\n\n"):
                     lines=[line[5:].lstrip() for line in frame.splitlines() if line.startswith("data:")]
-                    if lines:
-                        text="\n".join(lines)
-                        if text!="[DONE]": parsed.append(json.loads(text))
+                    text="\n".join(line for line in lines if line.strip())
+                    if not text or text=="[DONE]": continue
+                    parsed.append(json.loads(text))
                 if not parsed: raise MCPError("empty MCP event stream")
                 message=next((p for p in parsed if p.get("id")==payload["id"]),parsed[-1])
             else: message=json.loads(body.decode("utf-8"))
