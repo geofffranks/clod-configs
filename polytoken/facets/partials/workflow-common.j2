@@ -16,9 +16,12 @@ fetch live type/status, attribute the actual session ID on each worked ticket,
 preserve shared fields and reconcile uncertain writes. Ticketed design requires
 Plannable/Ready/In Progress; implementation requires Ready/In Progress and actual
 implementation authority. Pause incompatible work and offer the live move.
-Approval-backed Ready and actual-start In Progress moves follow the skill. Scoped
-comments and preservative edits are routine. Ideas → Plannable and Done/Canceled
-require confirmation; workflow completion is not terminal Jira authority.
+Approval-backed queued Plannable → Ready and direct interactive Plannable →
+In Progress at actual start are distinct routes; follow the skill for reconciled
+publication and live transitions. Scoped comments and preservative edits are
+routine. Awaiting Acceptance is the delivery receipt: post results and remaining
+manual checks; Awaiting Acceptance is not Done. Ideas → Plannable and Done/Canceled
+require human confirmation; workflow completion is not terminal Jira authority.
 
 Correlate concurrent assignments by job ID to avoid duplicates. Wait on running
 or unknown jobs; retry only terminal failures. Retain useful context, not an

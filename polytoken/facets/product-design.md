@@ -69,3 +69,14 @@ before approval; rejection does not authorize implementation. When Jira is
 supplied, record readable approval only after actual approval, following its live
 lifecycle without a duplicate approval gate. Do not silently choose a different
 panel or delivery mode. No routine retrospective or automatic friction ticket.
+
+After acceptance, explicitly choose the Jira route: queued uses
+`queued-registration` to publish the complete approved plan and move Plannable →
+Ready; interactive publishes the accepted plan and moves directly Plannable →
+In Progress at actual implementation start, then hands off immediately to the
+selected `project-manager` or `quick-delivery` without queue enrollment. Use
+`queued-registration` for that publication/routing handoff when Jira is supplied;
+never fall through queued Ready into interactive delivery. An already-Ready
+ticket taken interactively must be claimed/moved out of Ready before work starts,
+with queue dispatcher ownership coordinated. Without Jira, retain the native
+approved delivery handoff.
