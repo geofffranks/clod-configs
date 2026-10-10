@@ -61,7 +61,13 @@ Preferences are advisory. Escalate unresolved material blockers/disagreement at
 the cap.
 
 After review is resolved and before calling `handoff_plan`, explicitly choose
-the Jira route when Jira is supplied: queued uses `queued-registration` to
+the Jira route when Jira is supplied by asking the operator a dedicated,
+clearly-worded fork question (do not bury it in the Git/delivery choice group,
+and never pick it silently): "How should this work be delivered — **queued**
+(unattended: the laptop dispatcher picks up the ticket in Jira rank order,
+delivers in an isolated worktree, posts blockers/comments on Jira, and lands in
+Awaiting Acceptance) or **interactive** (a design/delivery session works the
+ticket directly now)?" Queued uses `queued-registration` to
 publish the complete approved plan and move Plannable → Ready, then ends
 registration without switching to delivery; interactive uses `queued-registration`
 to publish the accepted plan and, at actual implementation start, move directly
