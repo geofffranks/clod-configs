@@ -102,8 +102,14 @@ def _preservation(row):
     return False,branch,workspace,"committed partial work not verified"
 
 def _blocker_since(row):
-    """Earliest timestamp a still-open worker blocker report can create a new episode."""
-    return max(row.get("launch_time") or 0, row.get("resume_reply_time") or 0)
+    """Earliest timestamp valid NEW blocker/completion evidence can exist.
+
+    After a resume, the durable reply epoch (persisted before delivery) governs;
+    a post-delivery launch_time rewrite must never hide blockers posted while
+    the reply was being delivered.
+    """
+    if row.get("resume_reply_time"): return row["resume_reply_time"]
+    return row.get("launch_time") or 0
 
 def _recover_or_reconcile(jira,store,key,config,note):
     """Bounded transient recovery; certain failures retry, uncertainty holds."""
@@ -396,13 +402,16 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
     return results
 
 def _owned_repos(jira,store,config,polytoken="polytoken",exclude_key=None):
-    """Canonical repos currently owned; an effort's own retained session never counts against itself."""
+    """Canonical repos currently owned; a resumed effort's own retained session never counts against itself."""
     efforts=store.list_efforts()
+    own_session=None
+    for e in efforts:
+        if exclude_key and e["key"]==exclude_key: own_session=e.get("session_id")
     owned={e["canonical_repo"] for e in efforts if e["stage"] in ACTIVE_STAGES and e["key"]!=exclude_key}
-    recorded={e.get("session_id") for e in efforts if e.get("session_id") and e["key"]!=exclude_key}
+    recorded={e.get("session_id") for e in efforts if e.get("session_id")}
     for s in live_sessions(polytoken):
         sid=s.get("session_id") or s.get("id")
-        if sid and sid in recorded: continue
+        if sid and (sid in recorded or sid==own_session): continue
         path=s.get("project_path") or s.get("working_dir")
         if path and is_live_session(s): owned.add(os.path.realpath(path))
     for issue in jira.search('status = "In Progress"'):
@@ -411,15 +420,19 @@ def _owned_repos(jira,store,config,polytoken="polytoken",exclude_key=None):
     return owned
 
 def _resume_ready(jira,store,row,config,plan,reply,polytoken=None,sessions_dir=None):
-    """Claim + persist intent + verify Ready->In Progress for a replayed or fresh resume."""
+    """Claim + persist intent (with the durable reply epoch) + verify Ready->In Progress."""
     key=row["key"]
+    reply_time=None
+    try: reply_time=_when(reply) if isinstance(reply,dict) else None
+    except Exception: reply_time=None
     try:
         if not _admitted(store): return row,"paused"
         store.resume_claim(key,{"reply_id":str(reply.get("id") or ""),},repo=row.get("canonical_repo"),global_limit=config["max_global_active"])
         row=store.get(key)
         prompt=build_resume_prompt(key,plan["excerpt"],_text(reply.get("body")),reply.get("id") or "",row.get("blocker_attempts",0))
-        # Persist the exact prompt and reply BEFORE the external transition.
-        store.update(key,resume_intent={"prompt":prompt,"reply_id":str(reply.get("id") or ""),"reply_text":_text(reply.get("body"))},event="resume_intent_persisted",detail=str(reply.get("id") or ""))
+        # Persist the exact prompt, reply text and the DURABLE reply epoch before any
+        # external transition; delivery later must not move this epoch.
+        store.update(key,resume_intent={"prompt":prompt,"reply_id":str(reply.get("id") or ""),"reply_text":_text(reply.get("body")),"reply_time":reply_time},event="resume_intent_persisted",detail=str(reply.get("id") or ""))
         if not _admitted(store): return store.get(key),"paused"
         _transition(jira,store,store.get(key),config,"In Progress","ready_to_inprogress")
         return store.get(key),None
@@ -477,6 +490,18 @@ def resume_candidates(jira,store,config,polytoken="polytoken",sessions_dir=None,
             if not _admitted(store): outcomes.append((key,"paused")); continue
             row,outcome=_resume_ready(jira,store,row,config,plan,reply)
             if outcome: outcomes.append((key,outcome)); continue
+        else:
+            # A persisted resume with Jira still Ready must reconcile the
+            # Ready->In Progress transition (verify/complete) before executing;
+            # the durable resume_intent is preserved untouched.
+            if status_name=="Ready":
+                try:
+                    if not _admitted(store): outcomes.append((key,"paused")); continue
+                    _transition(jira,store,store.get(key),config,"In Progress","ready_to_inprogress")
+                except UncertainOutcome as exc:
+                    _recover_or_reconcile(jira,store,key,config,"resume transition uncertain: %s"%exc); outcomes.append((key,store.get(key)["stage"])); continue
+                except Exception as exc:
+                    _recover_or_reconcile(jira,store,key,config,"resume transition failed: %s"%exc); outcomes.append((key,store.get(key)["stage"])); continue
         row=store.get(key)
         outcomes.append(_resume_execute(jira,store,row,config,sessions_dir,polytoken,facet))
     return outcomes
@@ -496,7 +521,7 @@ def _resume_execute(jira,store,row,config,sessions_dir,polytoken,facet):
         except ValueError: pending=None
     if pending is not None and not isinstance(pending,dict): pending={"id":str(pending)}
     reply_time=intent.get("reply_time")
-    consume={"consumed_reply_id":str(intent.get("reply_id") or ""), "resume_reply_time":reply_time or time.time(), "pending_interrogative":None}
+    consume={"consumed_reply_id":str(intent.get("reply_id") or ""), "resume_reply_time":reply_time, "pending_interrogative":None}
     retained_sid=row.get("session_id")
     # A retained question is answered through the respond endpoint; resolution must
     # be verified against the daemon state, not assumed.
@@ -531,7 +556,7 @@ def _resume_execute(jira,store,row,config,sessions_dir,polytoken,facet):
             daemon=DaemonClient(port,_credential(sid,root))
             if not _admitted(store): return (key,"paused")
             daemon.prompt(prompt or "")
-            store.update(key,stage="running",session_id=sid,daemon_port=port,pending_operation=None,launch_time=time.time(),**consume,event="effort_resumed",detail="continued original session")
+            store.update(key,stage="running",session_id=sid,daemon_port=port,pending_operation=None,**consume,event="effort_resumed",detail="continued original session")
             return (key,"resumed")
         except (ContinueUncertain,TimeoutError,OSError,UncertainOutcome) as exc:
             return (key,_reconcile_retained(jira,store,key,retained_sid,polytoken,sessions_dir,consume,prompt))
@@ -553,7 +578,7 @@ def _reconcile_retained(jira,store,key,sid,polytoken,sessions_dir,consume,prompt
             if not (state.get("pending_interrogative") or state.get("interrogative")):
                 if not _admitted(store): return "paused"
                 daemon.prompt(prompt or "")
-                store.update(key,stage="running",session_id=sid,daemon_port=s.get("port"),pending_operation=None,launch_time=time.time(),**consume,event="effort_resumed",detail="retained session reconciled; reply re-sent")
+                store.update(key,stage="running",session_id=sid,daemon_port=s.get("port"),pending_operation=None,**consume,event="effort_resumed",detail="retained session reconciled; reply re-sent")
                 return "resumed"
     except (TimeoutError,OSError,LaunchError):
         pass

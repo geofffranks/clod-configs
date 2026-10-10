@@ -59,7 +59,7 @@ def parse_completion_report(comments, launch_time=0):
     Negative completion evidence (failed checks, rejected review, "not ready"
     outcomes) never authorizes acceptance; it is screened out explicitly.
     """
-    negative=r"(?:\bfail(?:ed|s|ure)?\b|\brejected?\b|\bnot\s+passing\b|\bnot\s+complete\b|\bcrash(?:ed)?\b)"
+    negative=r"(?:\bfail(?:ed|s|ure)?\b|\breject(?:ed)?\b|\bnot\s+approved\b|\bchanges?\s+requested\b|\bnot\s+passing\b|\bnot\s+complete\b|\bincomplete\b|\bunresolved\b|\bcrash(?:ed)?\b)"
     for comment in sorted(comments or [], key=lambda c: str(c.get("created", c.get("updated", ""))), reverse=True):
         body=adf_text(comment.get("body", ""))
         if COMPLETION_HEADER not in body or "Worker completion report" not in body: continue

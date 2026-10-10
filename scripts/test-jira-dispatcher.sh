@@ -988,6 +988,128 @@ class DispatcherTests(unittest.TestCase):
             self.assertEqual(self.store.get("LAP-86")["stage"],"recovery_pending")
         finally: dispatcher.live_sessions=old_live; dispatcher.launch=old_launch
 
+    def test_resume_replay_with_jira_ready_verifies_transition_first(self):
+        class FakeJira:
+            def __init__(self): self.status="Ready"
+            def get_issue(self,key): return {"fields":{"status":{"name":self.status},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"}]
+            def search(self,jql=""): return []
+            def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; return {"name":"Go"}
+            def verify_transition(self,key,dest): return self.status==dest
+        self.store.claim("LAP-87",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-87",stage="recovery_pending",session_id="retained",daemon_port=852,
+                          resume_intent={"prompt":"Prompt text.","reply_id":"r1","reply_text":"Answer.","reply_time":1234.0},
+                          pending_operation={"stage":"recovery_pending","operation":"resume","payload":{"reply_id":"r1"}})
+        delivered=[]
+        old_live=dispatcher.live_sessions; old_spawn=dispatcher.resume_via_continue; old_launch=dispatcher.launch; old_deliver=dispatcher.daemon_prompt if hasattr(dispatcher,"daemon_prompt") else None
+        dispatcher.live_sessions=lambda *a,**k:[]
+        def fake_continue(*a,**k):
+            assert j.status=="In Progress","prompt must not be sent before the transition verifies"
+            delivered.append("sent"); return ("sid",4444)
+        dispatcher.resume_via_continue=fake_continue
+        def no_launch(*a,**k): raise AssertionError("dual delivery")
+        dispatcher.launch=no_launch
+        old_client=dispatcher.DaemonClient; old_cred=__import__('launch')._credential; old_pending=dispatcher.pending_interrogative
+        class D:
+            def __init__(self,*a,**k): pass
+            def health(self): return {}
+            def state(self): return {}
+            def prompt(self,text): delivered.append("prompted")
+        dispatcher.DaemonClient=D; __import__('launch')._credential=lambda *a,**k:"t"; dispatcher.pending_interrogative=lambda d:None
+        try:
+            j=FakeJira()
+            out=resume_candidates(j,self.store,self.config())
+            self.assertEqual(out,[("LAP-87","resumed")])
+            self.assertEqual(j.status,"In Progress")
+            self.assertEqual(delivered,["sent","prompted"])
+            row=self.store.get("LAP-87"); self.assertEqual(row["resume_reply_time"],1234.0)
+        finally:
+            dispatcher.live_sessions=old_live; dispatcher.resume_via_continue=old_spawn; dispatcher.launch=old_launch
+            dispatcher.DaemonClient=old_client; __import__('launch')._credential=old_cred; dispatcher.pending_interrogative=old_pending
+
+    def test_resume_scan_with_own_retained_session_still_resumes(self):
+        class FakeJira:
+            def get_issue(self,key): return {"fields":{"status":{"name":"Ready"},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"Reply."}]
+            def search(self,jql=""): return []
+            def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; return {"name":"Go"}
+            def verify_transition(self,key,dest): return self.status==dest
+        self.store.claim("LAP-88",self.tmp.name,self.tmp.name)
+        self.store.increment("LAP-88","blocker_attempts")
+        self.store.update("LAP-88",stage="blocked",session_id="retained",daemon_port=21,blocker_comment_time=100.0)
+        plan=[{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"}]
+        j=FakeJira()
+        # The registry contains this very effort's retained session plus a stranger in the same repo.
+        old_live=dispatcher.live_sessions; old_spawn=dispatcher.resume_via_continue; old_launch=dispatcher.launch
+        dispatcher.live_sessions=lambda *a,**k:[
+            {"session_id":"retained","project_path":self.tmp.name,"termination_state":"running","port":21},
+            {"session_id":"stranger","project_path":self.tmp.name,"termination_state":"running","port":22},
+        ]
+        dispatcher.resume_via_continue=lambda *a,**k: ("sid",4244)
+        def fresh_fail(*a,**k): raise AssertionError("should continue retained session")
+        dispatcher.launch=fresh_fail
+        old_client=dispatcher.DaemonClient; old_cred=__import__('launch')._credential; old_pending=dispatcher.pending_interrogative
+        class D:
+            def __init__(self,*a,**k): pass
+            def health(self): return {}
+            def state(self): return {}
+            def prompt(self,text): return {}
+        dispatcher.DaemonClient=D; __import__('launch')._credential=lambda *a,**k:"t"; dispatcher.pending_interrogative=lambda d:None
+        try:
+            out=resume_candidates(j,self.store,self.config())
+            self.assertNotIn(("LAP-88","held"),out)
+            self.assertEqual(out,[("LAP-88","resumed")],out)
+        finally:
+            dispatcher.live_sessions=old_live; dispatcher.resume_via_continue=old_spawn; dispatcher.launch=old_launch
+            dispatcher.DaemonClient=old_client; __import__('launch')._credential=old_cred; dispatcher.pending_interrogative=old_pending
+
+    def test_completion_rejects_unapproved_review(self):
+        from workers import parse_completion_report
+        base="## Delivery completion report\nWorker completion report\nBranch: b\nWorktree: w\nCommits: c\nChecks: tests passed\nReview: %s\nRemaining manual checks: none"
+        def c(body): return {"id":"x","created":"2999-01-01T00:00:00Z","body":body}
+        self.assertIsNone(parse_completion_report([c(base%"not approved")],1))
+        self.assertIsNone(parse_completion_report([c(base%"changes requested")],1))
+        self.assertIsNotNone(parse_completion_report([c(base%"panel approved")],1))
+
+    def test_blocker_during_resume_delivery_is_honored(self):
+        # A worker blocker posted while the reply was being delivered (after the
+        # durable reply epoch) must still create a new episode.
+        self.store.claim("LAP-89",self.tmp.name,self.tmp.name)
+        self.store.update("LAP-89",stage="running",session_id="s",daemon_port=1,resume_reply_time=500.0)
+        import datetime
+        stamp="2999-01-01T00:00:00Z"
+        blocker_time=600.0
+        class J:
+            status="In Progress"; comments=[]; commented=[]
+            def get_issue(self,key): return {"fields":{"status":{"name":"In Progress"}}}
+            def comments(self,key): return [{"id":"bW","created":stamp,"body":"Worker blocker report\nReason: new problem\nDecision needed: choose"}]
+            def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
+            def transition_to(self,key,dest,names): self.status=dest; self.commented.append(("transition",dest)); return {"name":"Block"}
+            def verify_transition(self,key,dest): return self.status==dest
+            def reconcile_comment(self,key,text,markers): self.commented.append(("comment",text)); return {"id":"bb","created":stamp,"body":text}
+        j=J()
+        real_when=dispatcher._when
+        dispatcher._when=lambda c: blocker_time if c.get("id")=="bW" else blocker_time
+        old_pres=dispatcher._preservation
+        dispatcher._preservation=lambda row:(True,"b",self.tmp.name,"committed")
+        old_cred=__import__('launch')._credential; old_pending=dispatcher.pending_interrogative; old_client=dispatcher.DaemonClient
+        class D:
+            def health(self): return {}
+            def state(self): return {}
+            def events(self): return {"events":[]}
+        dispatcher.DaemonClient=lambda *a,**k:D(); __import__('launch')._credential=lambda *a,**k:"t"; dispatcher.pending_interrogative=lambda d:None
+        try:
+            out=supervise_once(j,self.store,self.config())
+            self.assertEqual(out,[("LAP-89","blocked")])
+            self.assertIn(("transition","Blocked"),j.commented)
+            self.assertEqual(len([w for w in j.commented if w[0]=="comment"]),1)
+            self.assertEqual(self.store.get("LAP-89")["blocker_attempts"],1)
+        finally:
+            dispatcher._when=real_when; dispatcher._preservation=old_pres
+            __import__('launch')._credential=old_cred; dispatcher.pending_interrogative=old_pending; dispatcher.DaemonClient=old_client
+
 suite=unittest.defaultTestLoader.loadTestsFromTestCase(DispatcherTests)
 result=unittest.TextTestRunner(verbosity=2).run(suite)
 sys.exit(0 if result.wasSuccessful() else 1)
