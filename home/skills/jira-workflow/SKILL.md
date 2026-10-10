@@ -32,10 +32,10 @@ friction creation do not need a second permission ceremony.
 
 | Type | Put in summary/description | Custom fields and observed path |
 |---|---|---|
-| Story | User capability, impact, acceptance criteria | Agent Sessions (array); Ideas: Accept for Planning → Plannable. In Progress: Implementation Complete → Done observed. |
-| Bug | Expected/actual behavior, reproduction, environment/evidence | Agent Sessions (array); Ideas: Accept for Planning → Plannable observed. |
-| AI Workflow | Agent behavior, workflow boundary, authority and validation | Agent Sessions (array); Plannable: Approve Plan → Ready observed. |
-| Process Friction | Stable friction-key/root symptom, impact, reproduction/evidence, bounded remedy; say “Tracking this friction does not authorize implementation.” | Agent Sessions (array), Count (number). Earlier Plannable: Plan Complete → Done; later sample had only global Done/Canceled. No proven Ready/In Progress route. |
+| Story | User capability, impact, acceptance criteria | Agent Sessions (comma-separated text); Ideas: Accept for Planning → Plannable. |
+| Bug | Expected/actual behavior, reproduction, environment/evidence | Agent Sessions (comma-separated text); Ideas: Accept for Planning → Plannable observed. |
+| AI Workflow | Agent behavior, workflow boundary, authority and validation | Agent Sessions (comma-separated text); Plannable: Approve Plan → Ready observed. |
+| Process Friction | Stable friction-key/root symptom, impact, reproduction/evidence, bounded remedy; say “Tracking this friction does not authorize implementation.” | Agent Sessions (comma-separated text), Count (number). Earlier Plannable: Plan Complete → Done; later sample had only global Done/Canceled. No proven Ready/In Progress route. |
 
 All types use project LAP, issue type, summary and description. Priority,
 labels, components and custom Project depend on live metadata; custom Project
@@ -52,21 +52,24 @@ move. Ask for Ideas → Plannable or exceptional/terminal moves; do not ask agai
 for a routine Plannable → Ready backed by approval or Ready → In Progress backed
 by actual start. Do not force a standard implementation path onto friction.
 
-Approval-fork rule: before executing any approval-gated transition, fetch the
-live transition list. If it contains MORE THAN ONE approval-gate transition
-(same current gate, competing destinations — e.g. `Approve Plan` → Ready
-alongside `Approve + Start Interactive Implementation` → In Progress), present
-the operator the real fork: every gate transition by name → destination, the
-route named in the approved plan, and a dedicated selection ask; record the
-operator's selection before transitioning. Selection must match the approved
-plan's named route; a route change at this point is a scope/authority change
-needing the operator's explicit confirmation (which the selection ask is).
-This fires exactly when competing same-gate transitions exist; when only one
-approval-gate transition exists, proceed with it and no second ceremony.
+Approval route: choose queued versus interactive once with the operator during
+design and retain the actual answer in the readable decision context and accepted
+plan/handoff. Reuse that unchanged choice without another question even when live
+Jira offers both `Approve Plan` → Ready and `Approve + Start Interactive
+Implementation` → In Progress. An agent-written route is not operator selection.
+Missing acceptance/selection, conflicting choices, or a missing matching live
+transition holds only the affected registration with the exact needed decision.
+Do not guess from a lone opposite-destination transition or repeatedly call an
+unavailable question tool. A material route change requires operator confirmation.
+Queued publication is verified before Plannable → Ready and registration ends
+there. Interactive publication precedes direct Plannable → In Progress at actual
+implementation start, then the selected delivery facet/workspace; never enqueue
+it via Ready. Coordinate dispatcher ownership for already-Ready interactive work.
 
-After plan approval, add a readable plan and approval record to Jira and move
-Plannable → Ready when the current type supports it. At actual PM start, move
-Ready → In Progress. Immediately before transitioning, fetch current status
+For queued delivery after plan approval, add a readable plan and approval record
+to Jira and move Plannable → Ready when the current type supports it. At actual
+queued PM start, move Ready → In Progress. Interactive delivery follows the direct
+Plannable → In Progress route above. Immediately before transitioning, fetch current status
 and transitions, match BOTH name and destination, and satisfy required fields.
 Afterward fetch and verify status. Never use exposed global Done as a shortcut.
 Delivery validation and acceptance precede terminal confirmation; follow the
@@ -95,8 +98,26 @@ result(decoded(atlassian.getJiraIssue({cloudId=cloud, issueIdOrKey=key,
   fields={"*all"}, expand="names", responseContentFormat="markdown"})))
 ```
 
-Check errors before using fields; do not assume every response has this shape.
-A default fetch omits custom fields and comments. Request them explicitly.
+Check tool/API errors before and after unwrapping; do not assume every response
+has this shape or JSON-decode plain prose. Normalize plain-string/ADF bodies to
+readable text, not a byte-identical roundtrip. A default fetch omits custom fields
+and comments: explicitly request them. Issue comments are at
+`fields.comment.comments`. Missing/omitted fields are unknown, not empty.
+Validate complete coverage from total/startAt/maxResults and returned unique
+records, or a supported complete read. Reliable chronological order controls the
+newest plan; partial/unknown coverage cannot authorize older-plan fallback or a
+retry. Positive matching evidence can verify a landed write in partial history.
+If complete coverage is unavailable, keep reconciliation pending and report that
+limit without duplicate authentication or unapproved gateway changes.
+
+Every write script calls `result(response)` (or returns the upstream response via
+`result(...)`). Timeout, missing result, lost acknowledgment or post-write decode
+failure is an uncertain side effect. Retain returned IDs and ordered-part progress;
+reconcile by ID when supported, otherwise stable association/publication markers
+for the same readable revision, never a shared heading alone. A complete negative
+read still does not prove the original request cannot later commit. Keep pending
+unless the original request is known to have ended without committing; only then
+may it be retried. Polling and reposting is not reconciliation.
 
 Search using JQL across OPEN AND RESOLVED issues, then inspect plausible matches.
 Follow `nextPageToken`; a partial/inconclusive search is not absence of duplicates.
@@ -171,21 +192,43 @@ uncertainty. API errors never mean success.
 
 ## Actual session attribution on every worked ticket
 
-For EVERY ticket worked, regardless of type, get the actual current agent session
-ID from trustworthy harness context/session information, not a job ID or invented
-label. Preserve existing Agent Sessions and add that ID only if absent. Use a
-verified additive/conditional mechanism or demonstrated serialization covering
-all writers. Read-modify-write plus readback is NOT atomic.
+For EVERY actually worked ticket use the documented current Polytoken `session_id`
+from shared context or a supported identity interface, never a job/MCP/effort/parent
+ID. Capture identity at confirmed launch/continue/adoption before health/readback
+failure can hide it. Designer → registration → interactive delivery and original
+resumes keep one ID but distinct stage associations. Fresh dispatched recovery has
+its actual different ID and preserves predecessor history; no unrelated backfill.
 
-If payload support, complete current data or concurrency safety is missing,
-record the actual session ID in a nonduplicative evidence comment and mark
-`Agent Sessions update pending`; continue unrelated work. Check complete relevant
-comment history/retained receipts before adding another attribution comment.
-If history is incomplete or a previous write is uncertain, reconcile first and
-report pending rather than duplicate. If identity itself is unavailable, disclose
-that limitation and obtain it from a supported session interface; never substitute
-an example. Useful comment: “Agent session: <actual ID>. Evidence: <observation>.
-Agent Sessions field update pending: no verified safe additive mechanism.”
+One owner per issue/session/stage: interactive sessions own their designer,
+registration and delivery associations; dispatcher owns queued delivery/recovery
+and tells workers not to duplicate them. Embed `Stage:` and `Session id:` plus a
+stable `Agent session association: <issue> / <actual ID> / <stage>` marker in
+already-required readable evidence when reliable, otherwise append a clearly
+marked `## Agent session attribution` comment. Never merge stages by updating a
+shared existing comment. Markers correlate retries, not approval provenance.
+Persist stage IDs/history/pending comments independently of replaceable current
+session and lifecycle state. Attribution failure never authorizes another launch;
+attribution comments never count as human unblock replies. Missing identity stays
+pending, not fabricated. Follow coverage/uncertain-write rules above.
+
+Agent Sessions is `customfield_10048`, a standard single-line textfield. Address by
+numeric field ID, never display name; do not write retired `customfield_10026`.
+The operator accepts non-atomic best-effort read-union-set and possible concurrent
+lost additions. Immediately fetch the latest explicit value before each edit.
+Recognize only validated empty semantics (explicit string empty or supported null
+for this textfield); omission, errors or an unrecognized encoding are unknown.
+Preserve existing text/tokens and ordering; skip if the own ID is already a
+comma-separated token, otherwise append `, <actual ID>` (no leading comma when
+empty). Edit only this field. Explicitly request/read it back after every outcome;
+report own ID observed at readback, not atomicity, completeness or permanent presence.
+
+At most two aggregate edits per attribution event. After any response or uncertain
+outcome re-read first; if own ID appears, stop. Any allowed retry merges with the
+newly fetched value, never a stale snapshot. An unresolved remote request remains
+pending even after negative complete read unless known ended without commit.
+Do not continuously restore IDs from cached history. Comments are canonical stage
+evidence and aggregate is an independent convenient index; report each outcome
+separately and continue unrelated work. Keep original operation IDs/progress.
 
 For a fresh friction encounter search open and resolved similar issues BEFORE
 creating. Relevant existing issues get nonduplicative evidence and session

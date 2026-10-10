@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from workers import adf_text
+from workers import adf_text, comment_history
 
 SAFE_INSPECT_TOOLS = {
     "getAccessibleAtlassianResources",
@@ -25,6 +25,7 @@ OFFLOAD_PROJECTIONS = {
 }
 
 class UncertainOutcome(RuntimeError): pass
+class WriteNotStarted(RuntimeError): pass
 
 def _lua_escape(s):
     return '"%s"'%s.replace("\\","\\\\").replace('"','\\"').replace("\n","\\n").replace("\r","\\r")
@@ -41,9 +42,10 @@ def _lua(value):
     raise TypeError("cannot encode %r as Lua"%type(value))
 
 class Jira:
-    def __init__(self, client, project="LAP", custom_project_field="customfield_10043", upstream="atlassian", page_size=10):
+    def __init__(self, client, project="LAP", custom_project_field="customfield_10043", upstream="atlassian", page_size=10, agent_sessions_field="customfield_10048", store=None):
         self.client=client; self.project=project; self.custom_project_field=custom_project_field; self.upstream=upstream
         self.cloud_id=None; self.surface=None; self._inspected=set(); self.page_size=page_size
+        self.agent_sessions_field=agent_sessions_field; self.store=store; self._comment_ops={}
 
     def _detect_surface(self):
         """Ratatoskr exposes upstream tools behind tool-details/execute; direct names otherwise."""
@@ -57,10 +59,8 @@ class Jira:
 
     def _ensure_inspected(self,name):
         if name in self._inspected: return
-        try:
-            self.client.tools_call("tool-details",{"luaServerName":self.upstream,"luaToolName":name})
-        except (MCPError,MCPRPCError):
-            pass  # inspection is advisory; execute surfaces a NotInspected error otherwise
+        response=self.client.tools_call("tool-details",{"luaServerName":self.upstream,"luaToolName":name})
+        self._payload(response)  # tool/API errors do not count as successful inspection
         self._inspected.add(name)
 
     @staticmethod
@@ -78,7 +78,9 @@ class Jira:
                 detail="; ".join(b.get("text","") for b in blocks if isinstance(b,dict)) or "MCP tool error"
                 raise MCPError("gateway tool error: %s"%detail[:500])
             structured=result.get("structuredContent")
-            if structured is not None: return structured
+            if structured is not None: return self._payload(structured)
+            if result.get("error") or result.get("errors") or result.get("errorMessages"):
+                raise MCPError("Jira API error: %s"%str(result)[:500])
             for block in result.get("content",[]) or []:
                 if isinstance(block,dict) and block.get("type")=="text":
                     text=block.get("text","")
@@ -89,7 +91,7 @@ class Jira:
                             return self.tools_execute_script(follow)
                         if identifier:
                             raise MCPError("offloaded gateway result is too large to project; page_size or fields need reduction")
-                    try: return json.loads(text)
+                    try: return self._payload(json.loads(text))
                     except ValueError: return text
         return result
 
@@ -101,14 +103,27 @@ class Jira:
 
     def _gateway_execute(self,name,args):
         self._ensure_inspected(name)
+        writes={"transitionJiraIssue","addCommentToJiraIssue","editJiraIssue"}
+        if name in writes:
+            script="local response=%s.%s(%s)\nresult(response)"%(self.upstream,name,_lua(args))
+            self._write_admitted()
+            try:
+                response=self._payload(self.client.tools_call("execute",{"script":script}))
+                if response is None or isinstance(response,dict) and response.get("content")==[]:
+                    raise UncertainOutcome("write script returned no result")
+                return response
+            except Exception as exc:
+                raise UncertainOutcome("write request outcome unknown: %s"%exc) from exc
         script=(
-            "local v=_gateway.unwrap_content(%s.%s(%s))\n"
+            "local response=%s.%s(%s)\n"
+            "if type(response) == \"table\" and response.isError then result(response) else\n"
+            "local v=_gateway.unwrap_content(response)\n"
             "if type(v) == \"string\" and string.match(v,\"Execution ID:\") then\n"
             "  local ident=string.match(v,\"Execution ID: ([%%w%%-]+)\")\n"
             "  v=_gateway.get_result({id=ident})\n"
             "end\n"
-            "if type(v) == \"string\" then v=_gateway.json_decode(v) end\n"
-            "result(v)"
+            "if type(v) == \"string\" and string.match(v,\"^%%s*[%%{%%[]\") then v=_gateway.json_decode(v) end\n"
+            "result(v) end"
         )%(self.upstream,name,_lua(args))
         projection=OFFLOAD_PROJECTIONS.get(name)
         if name=="getJiraIssue":
@@ -116,7 +131,7 @@ class Jira:
             field=self.custom_project_field
             projection=('result({key=d.key, fields={status={name=d.fields.status.name}, '
                         'comment=d.fields.comment, issuetype=d.fields.issuetype, summary=d.fields.summary, '
-                        'description=d.fields.description, ["%s"]=d.fields["%s"]}})')%(field,field)
+                        'description=d.fields.description, ["%s"]=d.fields["%s"], ["%s"]=d.fields["%s"]}})')%(field,field,self.agent_sessions_field,self.agent_sessions_field)
         if self.surface is None: self._detect_surface()
         result=self.client.tools_call("execute",{"script":script})
         return self._payload(result,projection=projection)
@@ -137,13 +152,13 @@ class Jira:
                         if "NotInspected" not in str(exc): raise
                 raise
         else:
+            if name in ("transitionJiraIssue","addCommentToJiraIssue","editJiraIssue"): self._write_admitted()
             try:
                 result=self.client.tools_call(name,args)
             except (MCPError, OSError, TimeoutError) as exc:
-                if name in ("transitionJiraIssue","addCommentToJiraIssue"): raise UncertainOutcome(str(exc)) from exc
+                if name in ("transitionJiraIssue","addCommentToJiraIssue","editJiraIssue"): raise UncertainOutcome(str(exc)) from exc
                 raise
-            if isinstance(result,dict) and result.get("isError"): raise MCPRPCError(result)
-            return result.get("structuredContent",result) if isinstance(result,dict) else result
+            return self._payload(result)
 
     def discover_cloud_id(self):
         resources=self._tool("getAccessibleAtlassianResources",{})
@@ -171,7 +186,7 @@ class Jira:
 
     def get_issue(self,key):
         if not self.cloud_id: self.discover_cloud_id()
-        return self._tool("getJiraIssue",{"cloudId":self.cloud_id,"issueIdOrKey":key,"fields":["summary","description","issuetype","status",self.custom_project_field,"comment"]})
+        return self._tool("getJiraIssue",{"cloudId":self.cloud_id,"issueIdOrKey":key,"fields":["summary","description","issuetype","status",self.custom_project_field,self.agent_sessions_field,"comment"],"responseContentFormat":"markdown"})
 
     def transitions(self,key):
         if not self.cloud_id: self.discover_cloud_id()
@@ -208,14 +223,14 @@ class Jira:
 
     def comment(self,key,text):
         if not self.cloud_id: self.discover_cloud_id()
-        return self._tool("addCommentToJiraIssue",{"cloudId":self.cloud_id,"issueIdOrKey":key,"comment":{"body":text}})
+        return self._tool("addCommentToJiraIssue",{"cloudId":self.cloud_id,"issueIdOrKey":key,"commentBody":text,"contentFormat":"markdown","responseContentFormat":"markdown"})
 
     def verify_transition(self,key,status):
         issue=self.get_issue(key); fields=issue.get("fields",{})
         return (fields.get("status") or {}).get("name")==status
 
     def verify_comment(self,key,markers):
-        issue=self.get_issue(key); comments=((issue.get("fields",{}).get("comment") or {}).get("comments") or [])
+        comments=self.comments(key)
         return [c for c in comments if all(m in adf_text(c.get("body")) for m in markers)]
 
     def issue_types(self):
@@ -233,20 +248,97 @@ class Jira:
         if not self.verify_transition(key,destination): raise UncertainOutcome("transition response received but status not verified")
         return True
 
+    def _preflight_write(self,name):
+        if self.surface is None: self._detect_surface()
+        if self.surface=="execute": self._ensure_inspected(name)
+
+    def _write_admitted(self):
+        if self.store and (self.store.get_control("pause","false")=="true" or self.store.get_control("stop","false")=="true"):
+            raise WriteNotStarted("dispatcher paused/stopped before new Jira write")
+
+    def _comment_operation(self,key,markers,text=None,state=None,comment_id=None):
+        if self.store: return self.store.comment_operation(key,markers,text,state,comment_id)
+        token=(key,tuple(markers))
+        if state: self._comment_ops[token]={"state":state,"comment_id":comment_id,"body":text}
+        return self._comment_ops.get(token)
+
     def reconcile_comment(self,key,text,markers):
-        """Look for same-type/key markers before adding, including after a lost acknowledgment."""
+        """Positive evidence reconciles; even complete absence cannot settle an in-flight write."""
+        # Retain compatibility with caller-owned adapters that already prove positive evidence.
         existing=self.verify_comment(key,markers)
-        if existing: return existing[0]
+        if existing:
+            if hasattr(self,"_comment_operation"):
+                self._comment_operation(key,markers,text,"observed",str(existing[0].get("id","")))
+            return existing[0]
+        op=self._comment_operation(key,markers)
+        if op and op["state"]!="not_committed":
+            raise UncertainOutcome("original comment request remains pending; negative read does not prove non-commit")
+        history=self.comments(key)
+        if not history.complete: raise UncertainOutcome("comment coverage unknown/incomplete; no write authorized")
+        self._preflight_write("addCommentToJiraIssue")  # failure here proves no request was dispatched
+        self._write_admitted()
+        self._comment_operation(key,markers,text,"pending")  # persist before remote side effect
         try:
-            self.comment(key,text)
-        except UncertainOutcome:
+            response=self.comment(key,text)
+            cid=response.get("id") if isinstance(response,dict) else None
+            self._comment_operation(key,markers,text,"pending",str(cid) if cid else None)
+        except WriteNotStarted:
+            self._comment_operation(key,markers,text,"not_committed")
+            raise
+        except Exception:
             existing=self.verify_comment(key,markers)
-            if existing: return existing[0]
+            if existing:
+                self._comment_operation(key,markers,text,"observed",str(existing[0].get("id","")))
+                return existing[0]
             raise
         existing=self.verify_comment(key,markers)
-        if existing: return existing[0]
-        raise UncertainOutcome("comment response received but marker not verified")
+        if existing:
+            self._comment_operation(key,markers,text,"observed",str(existing[0].get("id","")))
+            return existing[0]
+        raise UncertainOutcome("comment acknowledgment received but publication not observed")
 
     def comments(self,key):
-        issue=self.get_issue(key)
-        return ((issue.get("fields",{}).get("comment") or {}).get("comments") or [])
+        return comment_history(self.get_issue(key))
+
+    def sync_attribution(self,store):
+        """Independent best-effort sync; failures never alter lifecycle or launch authority."""
+        self.store=store
+        for event in store.associations():
+            key=event["key"]; sid=event["session_id"]; stage=event["stage"]
+            marker="Agent session association: %s / %s / %s"%(key,sid,stage)
+            body="## Agent session attribution\n%s\nStage: %s\nSession id: %s"%(marker,stage,sid)
+            if event.get("predecessor"): body+="\nPredecessor session: "+event["predecessor"]
+            if not event.get("comment_id"):
+                try:
+                    comment=self.reconcile_comment(key,body,[marker])
+                    store.association_update(key,sid,stage,comment_id=str(comment["id"]))
+                except Exception as exc: store.journal(key,"attribution_comment_pending",str(exc))
+            if event["aggregate_observed"]: continue
+            try:
+                fields=self.get_issue(key).get("fields",{})
+                if self.agent_sessions_field not in fields: raise UncertainOutcome("Agent Sessions omitted; value unknown")
+                value=fields[self.agent_sessions_field]
+                # Null/omission semantics have not been demonstrated by the live field test.
+                if not isinstance(value,str): raise UncertainOutcome("Agent Sessions is not a text value")
+                if sid in [x.strip() for x in value.split(",")]:
+                    store.association_update(key,sid,stage,aggregate_observed=1,aggregate_pending=None)
+                    continue
+                if event["aggregate_pending"]=="uncertain":
+                    raise UncertainOutcome("original field request unresolved; no replacement write")
+                if event["aggregate_attempts"]>=2: raise UncertainOutcome("two aggregate edit attempts exhausted")
+                merged=value+("" if not value else ", ")+sid
+                self._preflight_write("editJiraIssue")
+                self._write_admitted()
+                store.association_update(key,sid,stage,aggregate_attempts=event["aggregate_attempts"]+1,aggregate_pending="uncertain")
+                try:
+                    self._tool("editJiraIssue",{"cloudId":self.cloud_id,"issueIdOrKey":key,"fields":{self.agent_sessions_field:merged},"contentFormat":"markdown"})
+                    store.association_update(key,sid,stage,aggregate_pending="readback")
+                except WriteNotStarted:
+                    store.association_update(key,sid,stage,aggregate_attempts=event["aggregate_attempts"],aggregate_pending=event["aggregate_pending"])
+                    raise
+                finally:
+                    fields=self.get_issue(key).get("fields",{})
+                    seen=fields.get(self.agent_sessions_field)
+                    if isinstance(seen,str) and sid in [x.strip() for x in seen.split(",")]:
+                        store.association_update(key,sid,stage,aggregate_observed=1,aggregate_pending=None)
+            except Exception as exc: store.journal(key,"attribution_aggregate_pending",str(exc))

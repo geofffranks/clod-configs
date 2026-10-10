@@ -61,9 +61,11 @@ Preferences are advisory. Escalate unresolved material blockers/disagreement at
 the cap.
 
 After review is resolved and before calling `handoff_plan`, explicitly choose
-the Jira route when Jira is supplied by asking the operator a dedicated,
-clearly-worded fork question (do not bury it in the Git/delivery choice group,
-and never pick it silently): "How should this work be delivered — **queued**
+the Jira route when Jira is supplied. Reuse an unchanged prior actual operator
+choice and preserve its answer/context in the plan and handoff; an agent-written
+route is not a selection. Ask only when no unambiguous prior choice exists or a
+material route change is proposed, using a dedicated clearly-worded fork question
+(do not bury it in the Git/delivery choice group or pick it silently): "How should this work be delivered — **queued**
 (unattended: the laptop dispatcher picks up the ticket in Jira rank order,
 delivers in an isolated worktree, posts blockers/comments on Jira, and lands in
 Awaiting Acceptance) or **interactive** (a design/delivery session works the

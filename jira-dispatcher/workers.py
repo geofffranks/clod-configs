@@ -13,6 +13,8 @@ DISPATCH_AUTHORED_MARKERS=(
     "Delivery report\n",
     COMPLETION_HEADER,
     PLAN_HEADER,
+    "## Agent session attribution",
+    "Agent session association:",
 )
 
 
@@ -33,26 +35,61 @@ def adf_text(value):
     content=value.get("content")
     if isinstance(content,list):
         text="".join(adf_text(child) for child in content)
+        if node_type=="heading":
+            level=(value.get("attrs") or {}).get("level",2)
+            if isinstance(level,int) and 1<=level<=6: text="#"*level+" "+text
         return text + ("\n" if node_type in ("paragraph","heading","blockquote","listItem") and text and not text.endswith("\n") else "")
     return str(value.get("text", ""))
 
 
+class CommentHistory(list):
+    """Returned records plus proven coverage; omission is never an empty history."""
+    def __init__(self, records=(), complete=False):
+        super().__init__(records)
+        self.complete=complete
+
+
+def comment_history(issue):
+    page=(issue.get("fields") or {}).get("comment") if isinstance(issue,dict) else None
+    if not isinstance(page,dict) or not isinstance(page.get("comments"),list):
+        return CommentHistory()
+    records=page["comments"]
+    total=page.get("total"); start=page.get("startAt",0); maximum=page.get("maxResults")
+    complete=(isinstance(total,int) and not isinstance(total,bool) and total>=0
+              and start==0 and len(records)==total
+              and (maximum is None or isinstance(maximum,int) and maximum>=len(records))
+              and all(isinstance(c,dict) and c.get("id") for c in records)
+              and len({str(c["id"]) for c in records})==len(records))
+    return CommentHistory(records,complete)
+
+
 def parse_approved_plan(comments):
-    # Jira may return comments oldest-first; newest matching plan controls the route.
-    for comment in reversed(comments or []):
-        body=adf_text(comment.get("body", ""))
-        if PLAN_HEADER not in body: continue
-        section=body[body.find(PLAN_HEADER):]
-        values={}
-        for label in ("Git", "Delivery mode", "Review panel", "Source branch", "Effort branch/workspace", "Depends on"):
-            match=re.search(r"^%s:\s*(.*)$"%re.escape(label),section,re.M|re.I)
-            if match: values[label]=match.group(1).strip()
-        mode=(values.get("Delivery mode","") or "").strip().lower()
-        if not re.match(r"^(?:queued|interactive)\b",mode): return None  # newest-plan-wins: a non-queued newest plan supersedes older queued text
-        if not mode.startswith("queued"): return None  # interactive (or a rewritten route) never enqueues
-        if not values.get("Git") or not values.get("Review panel"): return None
-        return {"comment":comment,"excerpt":section.strip(),"values":values}
-    return None
+    # Plain lists are complete caller-owned snapshots; adapter histories carry coverage.
+    if not getattr(comments,"complete",True): return None
+    plans=[c for c in comments or [] if PLAN_HEADER in adf_text(c.get("body",""))]
+    if not plans: return None
+    import datetime
+    try:
+        stamps=[datetime.datetime.fromisoformat(c["created"].replace("Z","+00:00")).timestamp() for c in plans]
+    except (KeyError,ValueError,TypeError):
+        if len(plans)!=1: return None
+        stamps=[0]
+    newest=max(stamps)
+    if stamps.count(newest)!=1: return None
+    comment=plans[stamps.index(newest)]
+    body=adf_text(comment.get("body","")); section=body[body.find(PLAN_HEADER):]
+    values={}
+    for label in ("Git", "Delivery mode", "Review panel", "Source branch", "Effort branch/workspace", "Depends on"):
+        matches=re.findall(r"^%s:[ \t]*(.*)$"%re.escape(label),section,re.M|re.I)
+        if len({m.strip().lower() for m in matches})>1: return None
+        if matches: values[label]=matches[0].strip()
+    mode=values.get("Delivery mode","").lower()
+    if not re.match(r"^queued\b",mode): return None
+    # Explanatory prose may mention the unselected route; alternatives are ambiguous.
+    if re.search(r"(?:/|\|)\s*interactive\b",mode): return None
+    if re.search(r"\b(?:or|and|alternatively)\s+interactive\b(?!\s+(?:delivery\s+)?(?:is\s+)?not\b)",mode): return None
+    if not all(values.get(x) for x in ("Git","Review panel","Source branch","Effort branch/workspace")): return None
+    return {"comment":comment,"excerpt":section.strip(),"values":values}
 
 
 def parse_completion_report(comments, launch_time=0):
@@ -105,6 +142,8 @@ def build_worker_prompt(key,plan_excerpt,blocker_attempts=0):
 
 Approved delivery plan:
 %s
+
+The dispatcher owns this session's delivery/recovery attribution comment and Agent Sessions update. Do not duplicate those associations; include actual results in the required worker evidence comments. Do not use attribution comments as operator decisions.
 
 Work only in the approved effort workspace and follow the approved plan. Commit partial intended work regularly to the approved branch. Never push or merge without explicit authority in the plan. Do not create a worktree or change the plan's repository/branch choices. Use the established lappie/appium-mcp project procedures for device and integration resources. If a resource conflicts or an admission prerequisite is unsatisfied, stop and report a blocker rather than proceeding.
 

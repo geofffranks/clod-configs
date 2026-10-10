@@ -28,6 +28,37 @@ Each poll supervises active nonterminal efforts, re-fetching Jira state/comments
 
 `preflight` checks `polytoken models` presence and performs read-only gateway/Jira discovery and transition sampling when reachable. Per allowed issue type it verifies type metadata, and per required path it samples one ticket in each state — an outcome line is printed per check as OK/pending, and absent tickets produce pending warnings, never passes. Translation between sampling and operator setup readiness is the checklist below.
 
+## Session attribution and pending writes
+
+`agent_sessions_field` defaults to `customfield_10048`, the LAP single-line Agent
+Sessions textfield. The dispatcher retains actual delivery/recovery session IDs,
+stages and predecessors separately from the current session and lifecycle intent.
+Identity is stored before post-spawn credential/health reads. Workers must not
+repeat dispatcher-owned associations; attribution comments cannot unblock delivery.
+
+Stage comments and field updates sync independently. Each field event allows at
+most two edits, fetching the latest explicit string first, preserving its text
+and ordering, then appending an absent ID with a comma separator. Explicit
+readback records only whether the own ID was observed. Omitted, null or unexpected
+values stay pending; null empty semantics have not been validated. Concurrent
+read-union-set writers can lose additions; this is best-effort, not atomic or a
+complete history guarantee. Observed events do not continuously restore cached IDs.
+
+Comments are read at `fields.comment.comments`. Coverage requires total/startAt/
+maxResults and all unique records. Unknown/partial coverage holds admission and
+new comment publication; positive matching evidence can reconcile a landed write.
+The current complete plan needs Git, delivery mode, review panel, source branch and
+workspace choices. Reliable creation chronology selects the newest plan; newer
+interactive, contradictory or incomplete plans cannot fall back to older queued
+text. When tools cannot supply complete coverage, report pending reconciliation.
+
+Comment requests persist before execution, with stable event markers and returned
+IDs. A timeout, lost response or decoding failure stays pending across restart.
+Even a complete negative read does not prove the original request cannot still
+commit. Do not clear pending operations or repost without authoritative non-commit
+evidence. Attribution sync failures do not alter lifecycle state or launch workers.
+Source edits, isolated installer tests, installation and activation remain separate.
+
 ## Intentional limits
 
 This is not runtime verification against LAP Jira or a real gateway. No distributed scheduling, approval ledger, byte/hash verification, automatic Done transition, automatic worktree creation, automatic termination of sessions, push/merge authority, or deployment is implemented. Operator activation still requires reviewing the generated configuration, workflow transition metadata, credentials/session retention, repository mappings, and recovery behavior against the real LAP environment.

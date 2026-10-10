@@ -56,6 +56,216 @@ class DispatcherTests(unittest.TestCase):
     def tearDown(self): self.store.close(); self.tmp.cleanup()
     def config(self):
         c=dict(DEFAULTS); c['repo_mappings']={'lappie':{'repo_path':self.tmp.name},'appium-mcp':{'repo_path':self.tmp.name+'/appium'}}; c['max_global_active']=1; return c
+    def test_adf_heading_plans_and_friendly_route_prose(self):
+        body='## Approved delivery plan\nGit: main\nDelivery mode: queued\nReview panel: review\nSource branch: main\nEffort branch/workspace: /work'
+        def adf(text):
+            lines=text.splitlines()
+            return {'type':'doc','content':[{'type':'heading','attrs':{'level':2},'content':[{'type':'text','text':lines[0][3:]}]}]+[{'type':'paragraph','content':[{'type':'text','text':x}]} for x in lines[1:]]}
+        old={'id':'old','created':'2020-01-01T00:00:00Z','body':body}
+        queued={'id':'new','created':'2021-01-01T00:00:00Z','body':adf(body)}
+        self.assertIsNotNone(parse_approved_plan([queued]))
+        for text in (body.replace('mode: queued','mode: interactive'),body.replace('Source branch: main','')):
+            self.assertIsNone(parse_approved_plan([old,dict(queued,body=adf(text))]))
+        for mode in (
+            'queued (unattended dispatcher; interactive delivery is not selected)',
+            'queued (unattended; unlike interactive delivery, no operator session is needed)',
+            'queued (unattended) and interactive delivery is not selected',
+            'queued (unattended) and interactive is not selected',
+        ):
+            text=body.replace('mode: queued','mode: '+mode)
+            with self.subTest(accepted_mode=mode):
+                for content in (text,adf(text)):
+                    self.assertIsNotNone(parse_approved_plan([dict(old,body=content)]))
+        for suffix in ('', ' (unattended)'):
+            for separator in (' / ', ' | ', ' and ', ' or ', ' alternatively '):
+                mode='queued'+suffix+separator+'interactive'
+                text=body.replace('mode: queued','mode: '+mode)
+                with self.subTest(rejected_mode=mode):
+                    for content in (text,adf(text)):
+                        self.assertIsNone(parse_approved_plan([dict(old,body=content)]))
+        self.assertIsNone(parse_approved_plan([dict(old,body=adf(body+'\nDelivery mode: interactive'))]))
+
+    def test_lost_spawn_id_registry_failure_or_inadequate_rows_never_relaunches(self):
+        from unittest.mock import patch
+        import launch
+        self.store.claim('LAP-9',self.tmp.name,self.tmp.name)
+        self.store.update('LAP-9',stage='recovery_pending',pending_operation={'operation':'spawn','payload':{}},launch_intent={'repo':self.tmp.name,'facet':'quick-delivery','prompt':'LAP-9','dispatch_started':True})
+        class J:
+            def get_issue(self,key): return {'fields':{'status':{'name':'In Progress'}}}
+            def comments(self,key): return [{'id':'p','body':'## Approved delivery plan\nGit: main\nDelivery mode: queued\nReview panel: review\nSource branch: main\nEffort branch/workspace: /work'}]
+        process=type('P',(),{'returncode':0,'stderr':'','stdout':'SESSION_ID STATUS TITLE LAST_ACTIVITY PROJECT_PATH\n0abcde-xyz running LAP-9 2026-10-01T00:00:00Z '+self.tmp.name})()
+        with patch.object(launch.subprocess,'run',return_value=process): rows=launch.live_sessions()
+        self.assertEqual(rows[0]['session_id'],'0abcde-xyz')
+        self.assertNotIn('facet',rows[0]); self.assertNotIn('first_user_message_preview',rows[0])
+        for scan in (rows,[]):
+            with patch.object(dispatcher,'live_sessions',return_value=scan), patch.object(dispatcher,'launch') as spawn:
+                supervise_once(J(),self.store,self.config()); spawn.assert_not_called()
+        with patch.object(dispatcher,'live_sessions',side_effect=RuntimeError('registry failed')), patch.object(dispatcher,'launch') as spawn:
+            supervise_once(J(),self.store,self.config()); spawn.assert_not_called()
+        self.assertEqual(self.store.get('LAP-9')['stage'],'recovery_pending')
+        self.store.update('LAP-9',launch_intent=None)
+        with patch.object(dispatcher,'live_sessions',return_value=[]), patch.object(dispatcher,'launch') as spawn:
+            supervise_once(J(),self.store,self.config()); spawn.assert_not_called()
+
+    def test_comment_and_aggregate_inspection_failure_recover_without_uncertainty(self):
+        class J(Jira):
+            fail=True; writes=[]; records=[]; value='prior'
+            def get_issue(self,key): return {'fields':{'comment':{'comments':self.records,'total':len(self.records)},'customfield_10048':self.value}}
+            def _preflight_write(self,name):
+                if self.fail: raise RuntimeError('inspection failed before dispatch')
+            def comment(self,key,text):
+                self.writes.append('comment'); self.records.append({'id':'c','body':text}); return self.records[-1]
+            def _tool(self,name,args): self.writes.append('edit'); self.value=args['fields']['customfield_10048']; return {'ok':True}
+        j=J(None,store=self.store)
+        with self.assertRaises(RuntimeError): j.reconcile_comment('LAP-9','evidence',['evidence'])
+        self.assertIsNone(self.store.comment_operation('LAP-9',['evidence']))
+        j.fail=False; j.reconcile_comment('LAP-9','evidence',['evidence']); self.assertEqual(j.writes,['comment'])
+        self.store.claim('LAP-9',self.tmp.name,self.tmp.name); self.store.update('LAP-9',session_id='actual')
+        j.fail=True; j.sync_attribution(self.store)
+        event=self.store.associations()[0]; self.assertEqual(event['aggregate_attempts'],0); self.assertIsNone(event['aggregate_pending'])
+        j.fail=False; j.sync_attribution(self.store); self.assertEqual(j.writes.count('edit'),1)
+        self.assertEqual(self.store.associations()[0]['aggregate_observed'],1)
+
+    def test_attribution_controls_change_mid_loop_hold_each_new_write(self):
+        for flag in ('pause','stop'):
+            with self.subTest(flag=flag):
+                self.store.set_control(flag,'false')
+                key='LAP-'+('91' if flag=='pause' else '92')
+                self.store.associate(key,'actual-'+flag,'delivery')
+                self.store.associate(key,'fresh-'+flag,'recovery')
+                class J(Jira):
+                    records=[]; writes=[]; value='prior'
+                    def get_issue(self,key): return {'fields':{'comment':{'comments':self.records,'total':len(self.records)},'customfield_10048':self.value}}
+                    def comment(j,key,text):
+                        j.writes.append('comment'); j.records.append({'id':'c','body':text}); self.store.set_control(flag,'true'); return j.records[-1]
+                    def _tool(j,name,args): j.writes.append('edit'); return {'ok':True}
+                j=J(None,store=self.store); j.sync_attribution(self.store)
+                self.assertEqual(j.writes,['comment'])
+                self.assertTrue(all(e['aggregate_attempts']==0 for e in self.store.associations(key)))
+                # A positive readback remains reconcilable while new writes are held.
+                marker='Agent session association: %s / fresh-%s / recovery'%(key,flag)
+                j.records.append({'id':'landed','body':marker}); j.value='prior, fresh-'+flag
+                j.sync_attribution(self.store)
+                self.assertEqual(j.writes,['comment'])
+                self.assertEqual(self.store.associations(key)[1]['aggregate_observed'],1)
+                self.store.set_control(flag,'false')
+                # Isolate subsequent subtests from the prior pending event.
+                for e in self.store.associations(key): self.store.association_update(key,e['session_id'],e['stage'],comment_id='observed',aggregate_observed=1)
+
+    def test_attribution_control_during_edit_preflight_does_not_consume_attempt(self):
+        for flag in ('pause','stop'):
+            key='LAP-'+flag
+            self.store.associate(key,'actual','delivery')
+            self.store.association_update(key,'actual','delivery',comment_id='already-observed')
+            class J(Jira):
+                writes=[]
+                def get_issue(self,key): return {'fields':{'customfield_10048':'prior'}}
+                def _preflight_write(j,name): self.store.set_control(flag,'true')
+                def _tool(j,name,args): j.writes.append(args)
+            j=J(None,store=self.store); j.sync_attribution(self.store)
+            self.assertEqual(j.writes,[])
+            event=self.store.associations(key)[0]
+            self.assertEqual(event['aggregate_attempts'],0); self.assertIsNone(event['aggregate_pending'])
+            self.store.association_update(key,'actual','delivery',aggregate_observed=1)
+            self.store.set_control(flag,'false')
+
+    def test_current_plan_coverage_order_and_conflicts(self):
+        from workers import CommentHistory, comment_history
+        body='## Approved delivery plan\nGit: main\nDelivery mode: queued (unattended)\nReview panel: review\nSource branch: main\nEffort branch/workspace: /work'
+        old={'id':'1','created':'2020-01-01T00:00:00Z','body':body}
+        new={'id':'2','created':'2021-01-01T00:00:00Z','body':body.replace('queued (unattended)','interactive')}
+        for records in ([old,new],[new,old]): self.assertIsNone(parse_approved_plan(CommentHistory(records,True)))
+        self.assertIsNone(parse_approved_plan(CommentHistory([old],False)))
+        self.assertIsNotNone(parse_approved_plan(CommentHistory([old],True)))
+        for bad in (body.replace('queued (unattended)','queued or interactive'),body+'\nDelivery mode: interactive',body.replace('Source branch: main','')):
+            self.assertIsNone(parse_approved_plan([dict(old,body=bad)]))
+        self.assertFalse(comment_history({'fields':{}}).complete)
+        self.assertFalse(comment_history({'fields':{'comment':{'comments':[old],'total':2}}}).complete)
+        self.assertTrue(comment_history({'fields':{'comment':{'comments':[old],'total':1,'startAt':0,'maxResults':1}}}).complete)
+
+    def test_uncertain_comment_negative_read_survives_restart(self):
+        class J(Jira):
+            writes=0
+            def get_issue(self,key): return {'fields':{'comment':{'comments':[],'total':0}}}
+            def comment(self,key,text): self.writes+=1; raise UncertainOutcome('request may commit later')
+        j=J(None,store=self.store)
+        for i in range(2):
+            with self.assertRaises(UncertainOutcome): j.reconcile_comment('LAP-9','text',['stable-event'])
+            if i==0:
+                self.store.close(); self.store=StateStore(self.tmp.name); j.store=self.store
+        self.assertEqual(j.writes,1)
+        self.assertEqual(self.store.comment_operation('LAP-9',['stable-event'])['state'],'pending')
+
+    def test_positive_partial_comment_normalized_envelope(self):
+        j=Jira(None)
+        issue={'fields':{'comment':{'comments':[{'id':'c','body':{'type':'doc','content':[{'type':'paragraph','content':[{'type':'text','text':'stable-event'}]}]}}],'total':99}}}
+        normalized=j._payload({'content':[{'type':'text','text':json.dumps(issue)}]})
+        j.get_issue=lambda key:normalized
+        self.assertEqual(j.reconcile_comment('LAP-9','text',['stable-event'])['id'],'c')
+        with self.assertRaises(Exception): j._payload({'content':[{'type':'text','text':json.dumps({'errorMessages':['denied']})}]})
+
+    def test_aggregate_preserves_latest_and_uncertainty(self):
+        self.store.claim('LAP-9',self.tmp.name,self.tmp.name)
+        self.store.update('LAP-9',session_id='actual')
+        class J(Jira):
+            value='prior, other'; writes=[]; uncertain=False
+            def get_issue(self,key): return {'fields':{'customfield_10048':self.value,'comment':{'comments':[],'total':0}}}
+            def reconcile_comment(self,*a): return {'id':'assoc'}
+            def _tool(self,name,args):
+                self.writes.append(args)
+                if self.uncertain: raise UncertainOutcome('remote may commit')
+                self.value=args['fields']['customfield_10048']; return {'ok':True}
+        j=J(None); j.sync_attribution(self.store)
+        self.assertEqual(j.value,'prior, other, actual'); self.assertEqual(set(j.writes[0]['fields']),{'customfield_10048'})
+        j.sync_attribution(self.store); self.assertEqual(len(j.writes),1)
+        self.store.update('LAP-9',session_id='fresh'); j.uncertain=True
+        j.sync_attribution(self.store); j.sync_attribution(self.store)
+        self.assertEqual(len(j.writes),2)
+        history=self.store.associations('LAP-9'); self.assertEqual([x['session_id'] for x in history],['actual','fresh'])
+        self.assertEqual(history[1]['predecessor'],'actual'); self.assertEqual(history[1]['aggregate_pending'],'uncertain')
+        from workers import dispatcher_authored
+        self.assertTrue(dispatcher_authored('## Agent session attribution\nStage: recovery'))
+
+    def test_inspection_failure_and_write_result_contract(self):
+        class Client:
+            calls=[]; fail=True; missing=False
+            def tools_call(self,name,args,**kw):
+                self.calls.append((name,args))
+                if name=='tool-details' and self.fail: raise RuntimeError('schema unavailable')
+                if name=='execute': return None if self.missing else {'content':[{'type':'text','text':'{"id":"landed"}'}]}
+                return {'inputSchema':{'type':'object'}}
+        c=Client(); j=Jira(c); j.surface='execute'; j.cloud_id='cloud'
+        with self.assertRaises(RuntimeError): j.comment('LAP-9','evidence')
+        self.assertNotIn('addCommentToJiraIssue',j._inspected)
+        c.fail=False; self.assertEqual(j.comment('LAP-9','evidence')['id'],'landed')
+        script=c.calls[-1][1]['script']; self.assertIn('commentBody',script); self.assertIn('result(response)',script)
+        c.missing=True
+        with self.assertRaises(UncertainOutcome): j.comment('LAP-9','evidence')
+
+    def test_aggregate_second_edit_merges_latest_and_is_bounded(self):
+        self.store.claim('LAP-9',self.tmp.name,self.tmp.name); self.store.update('LAP-9',session_id='actual')
+        class J(Jira):
+            value='prior'; writes=[]
+            def get_issue(self,key): return {'fields':{'customfield_10048':self.value}}
+            def reconcile_comment(self,*a): return {'id':'assoc'}
+            def _tool(self,name,args): self.writes.append(args); self.value='prior, concurrent'; return {'ok':True}
+        j=J(None)
+        for _ in range(4): j.sync_attribution(self.store)
+        self.assertEqual([x['fields']['customfield_10048'] for x in j.writes],['prior, actual','prior, concurrent, actual'])
+        self.assertEqual(self.store.associations()[0]['aggregate_attempts'],2)
+        self.store.update('LAP-9',session_id='fresh'); j.get_issue=lambda key:{'fields':{}}
+        j.sync_attribution(self.store); self.assertEqual(len(j.writes),2)
+
+    def test_spawn_identity_survives_health_failure(self):
+        import launch
+        from unittest.mock import patch
+        self.store.claim('LAP-9',self.tmp.name,self.tmp.name)
+        process=type('P',(),{'returncode':0,'stdout':'session_id=actual port=1234','stderr':''})()
+        with patch.object(launch.subprocess,'run',return_value=process), patch.object(launch,'_credential',side_effect=OSError('health unavailable')):
+            with self.assertRaises(OSError): launch.launch(self.tmp.name,'quick-delivery','LAP-9',self.store,'LAP-9')
+        row=self.store.get('LAP-9'); self.assertEqual(row['session_id'],'actual'); self.assertIsNone(row['pending_operation'])
+        self.assertEqual(self.store.associations('LAP-9')[0]['session_id'],'actual')
+
     def test_mcp_happy_path_session(self):
         client=MCPClient(self.url); client.initialize(); self.assertEqual(client.session_id,'fake-session'); self.assertEqual(client.tools_list(),{'tools':[]})
     def test_sse_envelope(self):
@@ -66,7 +276,7 @@ class DispatcherTests(unittest.TestCase):
     def test_jira_pagination_rank(self):
         FakeHandler.page=0; j=Jira(MCPClient(self.url),'LAP'); issues=list(j.search()); self.assertEqual([i['key'] for i in issues],['LAP-1','LAP-2'])
     def test_plan_queued_label(self):
-        plan=parse_approved_plan([{'id':'c1','body':'## Approved delivery plan\nGit: branch\nDelivery mode: queued\nReview panel: panel\nDepends on: LAP-1'}]); self.assertIsNotNone(plan); self.assertEqual(plan['values']['Delivery mode'],'queued')
+        plan=parse_approved_plan([{'id':'c1','body':'## Approved delivery plan\nGit: branch\nDelivery mode: queued\nReview panel: panel\nSource branch: main\nEffort branch/workspace: /work\nDepends on: LAP-1'}]); self.assertIsNotNone(plan); self.assertEqual(plan['values']['Delivery mode'],'queued')
     def test_plan_interactive_rejected(self):
         self.assertIsNone(parse_approved_plan([{'body':'## Approved delivery plan\nGit: branch\nDelivery mode: interactive\nReview panel: panel'}]))
     def test_admission_unsupported_and_process_friction(self):
@@ -160,7 +370,7 @@ class DispatcherTests(unittest.TestCase):
             def comments(self,key): return self.cs
         self.store.claim("LAP-11",self.tmp.name,self.tmp.name,plan_excerpt="## Approved delivery plan\nGit: branch\nDelivery mode: queued\nReview panel: panel")
         self.store.increment("LAP-11","blocker_attempts"); self.store.update("LAP-11",stage="blocked",blocker_comment_time=100)
-        plan={"id":"p","body":"## Approved delivery plan\nGit: branch\nDelivery mode: queued\nReview panel: panel"}
+        plan={"id":"p","body":"## Approved delivery plan\nGit: branch\nDelivery mode: queued\nReview panel: panel\nSource branch: main\nEffort branch/workspace: /work"}
         j=FakeJira([plan]); self.assertEqual(resume_candidates(j,self.store,self.config()),[("LAP-11","skipped")]); self.assertEqual(self.store.get("LAP-11")["blocker_attempts"],1)
         self.assertIn("not speculating",self.store.events("LAP-11")[-1]["detail"])
 
@@ -184,7 +394,7 @@ class DispatcherTests(unittest.TestCase):
         class FakeJira:
             def __init__(self): self.status="Ready"
             def get_issue(self,key): return {"fields":{"status":{"name":self.status},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: feat/keep\nDelivery mode: queued\nReview panel: review"},{"id":"r","created":"2021-01-01T00:00:00Z","body":"Proceed with the documented remaining tests."}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: feat/keep\nDelivery mode: queued\nReview panel: review\nSource branch: main\nEffort branch/workspace: /work"},{"id":"r","created":"2021-01-01T00:00:00Z","body":"Proceed with the documented remaining tests."}]
             def search(self,jql=""): return []
             def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
             def transition_to(self,key,dest,names): self.status=dest; return {"name":"Go"}
@@ -361,7 +571,7 @@ class DispatcherTests(unittest.TestCase):
         daemon_holder={}; gw_holder={}
         class GW(http.server.BaseHTTPRequestHandler):
             issue={"key":"LAP-30","fields":{"issuetype":{"name":"Story"},"status":{"name":"Ready"},"customfield_10043":{"value":"lappie"}}}
-            comments=[{"id":"plan","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: main\nDelivery mode: queued\nReview panel: review panel\nDepends on: none"}]
+            comments=[{"id":"plan","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: main\nDelivery mode: queued\nReview panel: review panel\nSource branch: main\nEffort branch/workspace: /work\nDepends on: none"}]
             status="Ready"; comment_id=0; writes=[]
             def log_message(self,*a): pass
             def do_POST(self):
@@ -377,7 +587,7 @@ class DispatcherTests(unittest.TestCase):
                         issues=[dict(cls.issue,fields=dict(cls.issue["fields"],status={"name":cls.status}))] if (status=="any" or cls.status=="In Progress") else []
                         result={"issues":issues,"nextPageToken":None}
                     elif name=="getJiraIssue":
-                        result={"key":args.get("issueIdOrKey"),"fields":{"status":{"name":cls.status},"comment":{"comments":cls.comments}}}
+                        result={"key":args.get("issueIdOrKey"),"fields":{"status":{"name":cls.status},"comment":{"comments":cls.comments,"total":len(cls.comments),"startAt":0,"maxResults":len(cls.comments)}}}
                     elif name=="getTransitionsForJiraIssue":
                         result={"transitions":[{"id":"t1","name":"Start Progress","to":{"name":"Review"}},{"id":"t2","name":"Go","to":{"name":"In Progress"}},{"id":"t3","name":"Implementation Complete","to":{"name":"Awaiting Acceptance"}},{"id":"t4","name":"Block","to":{"name":"Blocked"}}]}
                     elif name=="transitionJiraIssue":
@@ -385,7 +595,7 @@ class DispatcherTests(unittest.TestCase):
                         cls.status=dest; cls.writes.append(("transition",tid,dest))
                     elif name=="addCommentToJiraIssue":
                         cls.comment_id+=1
-                        comment={"id":"c%d"%cls.comment_id,"created":"2999-01-01T00:00:%02dZ"%(cls.comment_id+9),"body":args["comment"]["body"]}
+                        comment={"id":"c%d"%cls.comment_id,"created":"2999-01-01T00:00:%02dZ"%(cls.comment_id+9),"body":args["commentBody"]}
                         cls.comments.append(comment); cls.writes.append(("comment",comment["body"]))
                 data=json.dumps({"jsonrpc":"2.0","id":rid,"result":result}).encode()
                 self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(data))); self.send_header("Mcp-Session-Id","fake-session"); self.end_headers(); self.wfile.write(data)
@@ -536,7 +746,7 @@ class DispatcherTests(unittest.TestCase):
         class J:
             status="In Progress"; transitions_written=0
             def get_issue(self,key): return {"fields":{"status":{"name":self.status}}}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r\nSource branch: main\nEffort branch/workspace: /work"}]
             def verify_transition(self,key,dest): return self.status==dest
         old_live=dispatcher.live_sessions; old_launch=dispatcher.launch
         dispatcher.live_sessions=lambda *a,**k:[]
@@ -562,7 +772,7 @@ class DispatcherTests(unittest.TestCase):
             def transitions(self,key): return {"transitions":[{"id":"b","name":"Block","to":{"name":"Blocked"}}]}
             def transition_to(self,key,dest,names): self.status=dest; self.writes.append(("transition",dest)); return {"name":"Block"}
             def reconcile_comment(self,key,text,markers): self.writes.append(("comment",text)); return {"id":"esc","body":text,"created":"2999-01-01T00:00:00Z"}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r\nSource branch: main\nEffort branch/workspace: /work"}]
         j=J(); old=dispatcher._transition
         def transition(jira,store,row,config,dest,hint):
             if dest=="In Progress" and (jira.status=="Ready"):
@@ -720,7 +930,7 @@ class DispatcherTests(unittest.TestCase):
             # Episode 1: worker reports a blocker -> supervisor blocks.
             self.store.claim("LAP-64",self.tmp.name,self.tmp.name,plan_excerpt="## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r")
             self.store.update("LAP-64",stage="running",launch_time=1.0,session_id="fresh",daemon_port=7,pending_operation=None)
-            J.ticket_comments.append({"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"})
+            J.ticket_comments.append({"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r\nSource branch: main\nEffort branch/workspace: /work"})
             J.ticket_comments.append({"id":"b1","created":"2999-01-01T00:00:05Z","body":"Worker blocker report\nReason: choose retry budget\nDecision needed: option"})
             def reconcile_comment(key,text,markers):
                 if any(t["body"]==text for t in J.ticket_comments): return next(t for t in J.ticket_comments if t["body"]==text)
@@ -816,7 +1026,7 @@ class DispatcherTests(unittest.TestCase):
         class FakeJira:
             def __init__(self): self.status="In Progress"
             def get_issue(self,key): return {"fields":{"status":{"name":self.status},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: feat/keep\nDelivery mode: queued\nReview panel: review"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"Reply text."}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: feat/keep\nDelivery mode: queued\nReview panel: review\nSource branch: main\nEffort branch/workspace: /work"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"Reply text."}]
             def search(self,jql=""): return []
             def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
             def transition_to(self,key,dest,names): self.status=dest; return {"name":"Go"}
@@ -855,7 +1065,7 @@ class DispatcherTests(unittest.TestCase):
     def test_uncertain_continue_defers_fresh_launch(self):
         class FakeJira:
             def get_issue(self,key): return {"fields":{"status":{"name":"In Progress"},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"Reply."}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r\nSource branch: main\nEffort branch/workspace: /work"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"Reply."}]
             def search(self,jql=""): return []
         self.store.claim("LAP-81",self.tmp.name,self.tmp.name)
         self.store.update("LAP-81",stage="recovery_pending",session_id="retained",daemon_port=11,resume_intent={"prompt":"p","reply_id":"r","reply_text":"Reply."},pending_operation={"stage":"recovery_pending","operation":"resume","payload":{}})
@@ -906,7 +1116,7 @@ class DispatcherTests(unittest.TestCase):
     def test_persisted_interrogative_answered_via_respond(self):
         class FakeJira:
             def get_issue(self,key): return {"fields":{"status":{"name":"Ready"},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"The answer."}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r\nSource branch: main\nEffort branch/workspace: /work"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"The answer."}]
             def search(self,jql=""): return []
             def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
             def transition_to(self,key,dest,names): self.status=dest if hasattr(self,"status") else dest; return {"name":"Go"}
@@ -992,7 +1202,7 @@ class DispatcherTests(unittest.TestCase):
         class FakeJira:
             def __init__(self): self.status="Ready"
             def get_issue(self,key): return {"fields":{"status":{"name":self.status},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r\nSource branch: main\nEffort branch/workspace: /work"}]
             def search(self,jql=""): return []
             def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
             def transition_to(self,key,dest,names): self.status=dest; return {"name":"Go"}
@@ -1031,7 +1241,7 @@ class DispatcherTests(unittest.TestCase):
     def test_resume_scan_with_own_retained_session_still_resumes(self):
         class FakeJira:
             def get_issue(self,key): return {"fields":{"status":{"name":"Ready"},"issuetype":{"name":"Story"},"customfield_10043":"lappie"}}
-            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"Reply."}]
+            def comments(self,key): return [{"id":"p","created":"2020-01-01T00:00:00Z","body":"## Approved delivery plan\nGit: b\nDelivery mode: queued\nReview panel: r\nSource branch: main\nEffort branch/workspace: /work"},{"id":"r","created":"2999-01-01T00:06:00Z","body":"Reply."}]
             def search(self,jql=""): return []
             def transitions(self,key): return {"transitions":[{"id":"g","name":"Go","to":{"name":"In Progress"}}]}
             def transition_to(self,key,dest,names): self.status=dest; return {"name":"Go"}

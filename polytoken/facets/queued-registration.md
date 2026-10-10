@@ -20,20 +20,27 @@ no implementation authority: no repository changes, builds, dependency installs,
 service launches or delegated delivery. Keep the approved scope, Git choices,
 workspace and review panel; ask only for a missing material route decision.
 
-Load `jira-workflow` and follow its rules, including the Approval-fork rule:
-before any approval-gated move, if the live transition list contains competing
-same-gate transitions, present the operator every gate transition by
-name → destination plus the route pinned in the approved plan, and record the
-operator's selection before transitioning; a route change at this point is an
-operator-confirmed change, not a silent re-pin. Read the
+Load `jira-workflow` and reuse the unchanged actual operator-selected route in
+the accepted plan/decision context, including unattended goals and competing live
+approval transitions. Do not ask again merely because both destinations exist.
+An agent-written route alone is not operator selection. Missing acceptance or
+selection, contradictory routes, or an unavailable matching live transition holds
+only this registration with the exact needed decision; do not repeat unavailable
+question calls or choose the opposite route. A material route change needs operator
+confirmation. Read the
 complete saved plan with full/paginated `file_read` calls through EOF; never post
 an outline or truncated page. Strip only tool line-number wrappers. Inspect
 `tool_flow` before using composition; otherwise read sequentially and publish
 with a separate inspected ratatoskr execute comment call. Preserve readable
-content in Jira formatting, label ordered parts if necessary, and never replace
-unrelated descriptions. Fetch comments after publication; reconcile uncertain
-writes by key/comment before retrying so there are no duplicates. Outages leave
-publication pending, not successful registration.
+content in Jira formatting, label ordered parts if necessary, retain returned IDs
+and ordered progress, and never replace unrelated descriptions. Include actual
+registration `Stage:`/`Session id:` and its association marker in required evidence;
+retain the designer association and operator choice context without rewriting a
+shared comment. Use a stable publication/revision marker, not a heading alone.
+Fetch explicitly requested comments after publication and follow the skill's
+coverage and uncertainty rules. Positive evidence can verify a landed write;
+even complete negative readback cannot authorize reposting an unresolved request.
+Outages leave publication pending, not successful registration.
 
 Queued route: publish the complete approved plan under `## Approved delivery plan`
 with labeled lines `Git:`, `Delivery mode: queued`, `Review panel:`,

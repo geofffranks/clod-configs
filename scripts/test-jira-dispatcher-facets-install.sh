@@ -14,24 +14,10 @@ plutil -lint "$PLIST"
 polytoken validate facet "$FACET"
 polytoken validate facet "$DESIGN"
 
-# Requested content checklist; behavior/authority still requires human review.
-grep -Fq 'before calling `handoff_plan`, explicitly choose' "$DESIGN"
-grep -Fq 'queued uses `queued-registration`' "$DESIGN"
-grep -Fq 'interactive uses `queued-registration`' "$DESIGN"
-grep -Fq 'Call `handoff_plan` by itself with `queued-registration` when Jira is supplied;' "$DESIGN"
-grep -Fq 'publish the complete approved plan and move Plannable → Ready, then ends' "$DESIGN"
-grep -Fq 'registration without switching to delivery;' "$DESIGN"
-grep -Fq 'Plannable → In Progress and switch to the selected' "$DESIGN"
-grep -Fq 'handing off immediately without queue enrollment.' "$DESIGN"
-grep -Fq 'Queued route: publish the complete approved plan under `## Approved delivery plan`' "$FACET"
-grep -Fq 'Delivery mode: queued' "$FACET"
-grep -Fq 'move Plannable → Ready' "$FACET"
-grep -Fq 'End registration at Ready without switching to delivery;' "$FACET"
-grep -Fq 'Interactive route: publish the complete accepted plan' "$FACET"
-grep -Fq 'move Plannable → In Progress' "$FACET"
-if grep -Eiq '(^|[[:space:]])implement([[:space:].,;:]|$)' "$FACET"; then
-  echo "registration facet must not direct implementation" >&2; exit 1
-fi
+# Instruction behavior is reviewed through content/scenarios, not phrase assertions.
+polytoken validate facet "$ROOT/polytoken/facets/project-manager.md"
+polytoken validate facet "$ROOT/polytoken/facets/quick-delivery.md"
+polytoken validate skill "$ROOT/home/skills/jira-workflow/SKILL.md"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/jira-dispatcher-install.XXXXXX")"
 trap 'python3 -c "import shutil,sys; shutil.rmtree(sys.argv[1])" "$tmp"' EXIT

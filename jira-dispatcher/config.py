@@ -8,6 +8,7 @@ DEFAULTS = {
     "gateway_url": "http://127.0.0.1:8910/mcp",
     "jira_project": "LAP",
     "custom_project_field": "customfield_10043",
+    "agent_sessions_field": "customfield_10048",
     "repo_mappings": {
         "lappie": {"repo_path": "/Users/gfranks/workspace/lappie"},
         "appium-mcp": {"repo_path": "/Users/gfranks/workspace/appium-mcp"},
@@ -41,7 +42,7 @@ def validate(config, check_paths=True):
         if not isinstance(config["transition_names"], dict): raise ConfigError("transition_names must be an object")
         result["transition_names"].update(config["transition_names"])
     if not isinstance(result["active"], bool): raise ConfigError("active must be boolean")
-    for key in ("gateway_url", "jira_project", "custom_project_field"):
+    for key in ("gateway_url", "jira_project", "custom_project_field", "agent_sessions_field"):
         if not isinstance(result[key], str) or not result[key]: raise ConfigError("%s must be a non-empty string" % key)
     for key in ("max_global_active", "launch_poll_interval_seconds", "launch_timeout_seconds", "transient_retry_cap", "max_blocker_attempts"):
         if not isinstance(result[key], int) or isinstance(result[key], bool) or result[key] < 1: raise ConfigError("%s must be a positive integer" % key)

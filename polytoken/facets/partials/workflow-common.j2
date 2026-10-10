@@ -1,3 +1,12 @@
+## Current session
+
+Actual Polytoken session ID: {{ session_id }}
+Use this identity, not a job/MCP/effort/parent ID. Facet switches and original
+resumes retain it; a fresh delivery/recovery session uses its own actual ID.
+Preserve stage history on worked tickets under `jira-workflow`. Interactive
+sessions own their designer/registration/delivery associations; dispatcher-owned
+queued workers do not duplicate the dispatcher's delivery/recovery association.
+
 ## Shared authority
 
 Use job-relevant tools/skills within the authorized scope; broad access does not

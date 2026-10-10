@@ -45,11 +45,14 @@ def _credential(session_id,sessions_dir=None):
     return data.get("token") or data.get("bearer_token") or data.get("credential")
 
 def launch(repo,facet,prompt,store,key,polytoken="polytoken",sessions_dir=None,timeout=3600):
-    store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{"repo":repo,"facet":facet,"prompt":prompt}},launch_intent={"repo":repo,"facet":facet,"prompt":prompt},event="launch_intent_persisted")
+    store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{"repo":repo,"facet":facet,"prompt":prompt}},launch_intent={"repo":repo,"facet":facet,"prompt":prompt,"dispatch_started":False},event="launch_intent_persisted")
     if store.get_control("pause","false")=="true" or store.get_control("stop","false")=="true": raise LaunchError("dispatcher paused/stopped before worker spawn")
+    # Once the subprocess starts, registry absence cannot prove it never spawned.
+    store.update(key,launch_intent={"repo":repo,"facet":facet,"prompt":prompt,"dispatch_started":True},event="spawn_dispatch_started")
     completed=subprocess.run([polytoken,"--working-dir",repo,"new","--no-attach","--facet",facet,"--prompt",prompt],capture_output=True,text=True,timeout=timeout,check=False)
     if completed.returncode: raise LaunchError(completed.stderr or "polytoken new failed")
     sid,port=_parse_spawn(completed.stdout)
+    store.update(key,stage="running",session_id=sid,daemon_port=port,launch_time=__import__("time").time(),pending_operation=None,event="worker_identity_captured",detail="port=%d"%port)
     token=_credential(sid,sessions_dir)
     if not token: raise LaunchError("credential file has no bearer token")
     daemon=DaemonClient(port,token)
@@ -118,7 +121,7 @@ def live_sessions(polytoken="polytoken",timeout=15):
         rows.append({"session_id":sid,"termination_state":kind,"project_path":project_path})
     return rows
 
-def reconcile_session(key,repo,sessions,credential_root=None,launch_intent=None,launch_time=None):
+def reconcile_session(key,repo,sessions,credential_root=None,launch_intent=None,launch_time=None,identity_confirmed=None):
     """Return one exact correlated live session; never adopts a substring match."""
     matches=[]
     for session in sessions:
@@ -137,6 +140,7 @@ def reconcile_session(key,repo,sessions,credential_root=None,launch_intent=None,
     if len(matches)!=1: return None
     s=matches[0]; sid=s.get("session_id") or s.get("id")
     if not sid: return None
+    if identity_confirmed: identity_confirmed(sid,s.get("port"))
     try:
         token=_credential(sid,credential_root); port=s.get("port")
         if not token or not port: return None

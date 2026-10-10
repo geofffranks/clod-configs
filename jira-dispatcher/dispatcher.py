@@ -221,9 +221,10 @@ def _acceptance_write(jira,store,row,config,payload):
     if status!="Awaiting Acceptance":
         store.update(key,stage="recovery_pending",last_reconcile_notes="unexpected status during delivery write: "+str(status),event="acceptance_report_held",detail=str(status))
         return False
-    report=payload.get("report","")+"\nTicket: "+key
+    revision=str(payload.get("comment_id") or row.get("session_id") or row["id"])
+    report=payload.get("report","")+"\nTicket: "+key+"\nDelivery evidence: "+revision
     if not _admitted(store): return False
-    comment=jira.reconcile_comment(key,report,["Delivery report",key])
+    comment=jira.reconcile_comment(key,report,["Delivery report",key,"Delivery evidence: "+revision])
     store.update(key,stage="awaiting",pending_operation=None,completion_comment_id=payload.get("comment_id",""),
                  last_completion_signature=payload.get("comment_id",""),last_reconcile_notes="delivery report written",
                  event="delivery_verified",detail="structured worker report reconciled")
@@ -263,7 +264,7 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
             try:
                 issue=jira.get_issue(key); status=(issue.get("fields",{}).get("status") or {}).get("name")
                 if status=="In Progress":
-                    store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{}},event="ready_transition_reconciled",detail="status already In Progress")
+                    store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{"not_spawned":True}},event="ready_transition_reconciled",detail="status already In Progress")
                 elif status=="Ready":
                     if not _admitted(store): results.append((key,"ready_to_inprogress")); continue
                     if not _plan_currency_holds(jira,store,key):
@@ -271,7 +272,7 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
                         results.append((key,"recovery_pending")); continue
                     store.update(key,stage="ready_to_inprogress",pending_operation={"stage":"ready_to_inprogress","operation":"ready_transition","payload":{"destination":"In Progress"}},event="ready_transition_retry")
                     _transition(jira,store,row,config,"In Progress","ready_to_inprogress")
-                    store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{}},event="ready_transition_verified")
+                    store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{"not_spawned":True}},event="ready_transition_verified")
                 else:
                     store.update(key,stage="recovery_pending",last_reconcile_notes="unexpected status during launch recovery: "+str(status),event="ready_transition_held",detail=str(status)); results.append((key,"recovery_pending")); continue
             except UncertainOutcome as exc:
@@ -321,12 +322,19 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
                     store.update(key,stage="recovery_pending",last_reconcile_notes="plan currency re-check failed before spawn",event="spawn_held_plan",detail="plan not current queued approval")
                     results.append((key,"recovery_pending")); continue
                 try: sessions=live_sessions(polytoken)
-                except Exception: sessions=[]
+                except Exception as exc:
+                    store.update(key,stage="recovery_pending",last_reconcile_notes="spawn registry scan failed; no relaunch: "+str(exc),event="spawn_registry_pending")
+                    results.append((key,"recovery_pending")); continue
                 intent=_parse_op(row.get("launch_intent")) or {}
-                adopted=reconcile_session(key,row["repo"],sessions,sessions_dir,launch_intent=intent or None,launch_time=row.get("launch_time"))
+                adopted=reconcile_session(key,row["repo"],sessions,sessions_dir,launch_intent=intent or None,launch_time=row.get("launch_time"),identity_confirmed=lambda sid,port:store.update(key,session_id=sid,daemon_port=port,pending_operation=None,stage="running",event="adopted_identity_captured"))
                 if adopted:
                     sid,daemon=adopted; session=next((s for s in sessions if (s.get("session_id") or s.get("id"))==sid),{})
                     store.update(key,stage="running",session_id=sid,daemon_port=session.get("port"),pending_operation=None,event="spawn_reconciled",detail="unique live session")
+                elif store.get(key).get("session_id"):
+                    store.update(key,stage="recovery_pending",last_reconcile_notes="confirmed identity unhealthy; no duplicate spawn",event="adopted_health_pending")
+                elif not (intent.get("dispatch_started") is False or not intent and (operation.get("payload") or {}).get("not_spawned") is True):
+                    # Legacy/lost acknowledgments are uncertain, even after an empty scan.
+                    store.update(key,stage="recovery_pending",last_reconcile_notes="original spawn not proven absent; registry cannot authorize relaunch",event="spawn_uncertain_held")
                 elif not _admitted(store): results.append((key,"launching")); continue
                 else:
                     payload=(operation.get("payload") or {}) if isinstance(operation,dict) else {}
@@ -353,10 +361,10 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
                 results.append((key,"recovery_pending")); continue
             recorded=row.get("session_id")
             if recorded:
-                adopted=reconcile_session(key,row["repo"],[s for s in sessions if (s.get("session_id") or s.get("id"))==recorded],sessions_dir)
+                adopted=reconcile_session(key,row["repo"],[s for s in sessions if (s.get("session_id") or s.get("id"))==recorded],sessions_dir,identity_confirmed=lambda sid,port:store.update(key,session_id=sid,daemon_port=port,event="retained_identity_captured"))
             else:
                 intent=_parse_op(row.get("launch_intent"))
-                adopted=reconcile_session(key,row["repo"],sessions,sessions_dir,launch_intent=intent,launch_time=row.get("launch_time"))
+                adopted=reconcile_session(key,row["repo"],sessions,sessions_dir,launch_intent=intent,launch_time=row.get("launch_time"),identity_confirmed=lambda sid,port:store.update(key,session_id=sid,daemon_port=port,event="adopted_identity_captured"))
             if adopted:
                 sid,daemon=adopted; session=next((s for s in sessions if (s.get("session_id") or s.get("id"))==sid),{})
                 store.update(key,stage="running",session_id=sid,daemon_port=session.get("port"),event="session_adopted",detail="exact unique live match")
@@ -547,9 +555,12 @@ def _resume_execute(jira,store,row,config,sessions_dir,polytoken,facet):
         store.journal(key,"resume_interrogative_no_session","retained question without a retained session; holding")
         return (key,"held")
     if retained_sid:
+        confirmed_sid=None
         try:
             if not _admitted(store): return (key,"paused")
             sid,port=resume_via_continue(retained_sid,polytoken)
+            confirmed_sid=sid
+            store.update(key,session_id=sid,daemon_port=port,event="continued_identity_captured")
             if not _admitted(store): return (key,"paused")
             root=sessions_dir or os.path.expanduser("~/.local/share/polytoken/sessions-v1")
             from launch import _credential
@@ -559,8 +570,11 @@ def _resume_execute(jira,store,row,config,sessions_dir,polytoken,facet):
             store.update(key,stage="running",session_id=sid,daemon_port=port,pending_operation=None,**consume,event="effort_resumed",detail="continued original session")
             return (key,"resumed")
         except (ContinueUncertain,TimeoutError,OSError,UncertainOutcome) as exc:
-            return (key,_reconcile_retained(jira,store,key,retained_sid,polytoken,sessions_dir,consume,prompt))
+            return (key,_reconcile_retained(jira,store,key,confirmed_sid or retained_sid,polytoken,sessions_dir,consume,prompt))
         except Exception as exc:
+            if confirmed_sid:
+                store.update(key,stage="recovery_pending",last_reconcile_notes="confirmed continuation needs reconciliation: "+str(exc),event="resume_identity_retained")
+                return (key,"recovery_pending")
             return (key,_resume_fresh(jira,store,store.get(key),config,sessions_dir,polytoken,facet,reason=str(exc)))
     return (key,_resume_fresh(jira,store,store.get(key),config,sessions_dir,polytoken,facet,reason=None))
 
@@ -655,7 +669,7 @@ def status(store):
         elif stage=="blocking": counts["blocked-recovery"]+=1
         elif stage=="recovery_pending": counts["uncertain(recovery_pending)"]+=1
         elif stage=="done": counts["done"]+=1
-    print(json.dumps({"paused":store.get_control("pause","false")=="true","stopped":store.get_control("stop","false")=="true","summary":counts,"efforts":efforts},indent=2,default=str))
+    print(json.dumps({"paused":store.get_control("pause","false")=="true","stopped":store.get_control("stop","false")=="true","summary":counts,"efforts":efforts,"session_associations":store.associations()},indent=2,default=str))
 
 def preflight(config,store_dir):
     """Read-only runtime checks; per-type/per-path outcomes; pending is a warning, not a pass."""
@@ -715,7 +729,7 @@ def preflight(config,store_dir):
 def run_once(args,config,store):
     if not config["active"]: raise ConfigError("dispatcher config active is false; refusing ticket processing")
     from mcp_client import MCPClient
-    client=MCPClient(config["gateway_url"]); client.initialize(); jira=Jira(client,config["jira_project"],config["custom_project_field"])
+    client=MCPClient(config["gateway_url"]); client.initialize(); jira=Jira(client,config["jira_project"],config["custom_project_field"],agent_sessions_field=config["agent_sessions_field"],store=store)
     if store.get_control("stop","false")=="true":
         for e in store.list_efforts():
             if e["stage"] in ("launching","running"): store.journal(e["key"],"supervision detached","daemon left alive; no new admission")
@@ -723,7 +737,9 @@ def run_once(args,config,store):
     supervise_once(jira,store,config,polytoken=args.polytoken,sessions_dir=getattr(args,"sessions_dir",None))
     resume_candidates(jira,store,config,polytoken=args.polytoken,sessions_dir=getattr(args,"sessions_dir",None),facet=args.facet)
     if store.get_control("pause","false")=="true": return []
-    return process_candidates(jira,store,config,facet=args.facet,polytoken=args.polytoken)
+    results=process_candidates(jira,store,config,facet=args.facet,polytoken=args.polytoken)
+    jira.sync_attribution(store)
+    return results
 
 def main(argv=None):
     parser=argparse.ArgumentParser(); parser.add_argument("command",choices=("run","status","pause","resume","stop","preflight","init-config")); parser.add_argument("--once",action="store_true"); parser.add_argument("--state-dir",default=DEFAULT_STATE); parser.add_argument("--config"); parser.add_argument("--facet",default="quick-delivery"); parser.add_argument("--polytoken",default="polytoken"); parser.add_argument("--sessions-dir",default=None)
