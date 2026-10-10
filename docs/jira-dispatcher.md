@@ -108,7 +108,9 @@ fresh worker selection must not reset attempt counters.
 The LaunchAgent sends service output to
 `~/Library/Logs/polytoken-jira-dispatcher.log`. Runtime persistence is SQLite
 state (`state.sqlite3`), including effort records, controls and the journal,
-plus captured spawn/output data; there are no per-effort log directories or
+plus SQLite-persisted launch intent (prompt/reply text); spawn output itself is
+transient subprocess capture that is not retained (worker session data lives in
+the polytoken sessions tree). There are no per-effort log directories or
 pause/stop flag files. `~/.local/share/polytoken/jira-dispatcher/` also holds the
 editable `config.json` and installed runtime in `lib/`. See the
 [maintainer notes](../jira-dispatcher/README.md) for capture and recovery details.
@@ -127,7 +129,8 @@ missing paths is rejected with a non-zero exit. Configure:
   Jira's system project. Its observed API shape is `{id, self, value}`; match the
   option's value, not the object or option ID.
 - `repo_mappings`: `lappie` → `repo_path`
-  `/Users/gfranks/workspace/track-data-collection` and `appium-mcp` →
+  `/Users/gfranks/workspace/lappie` (local repo renamed from
+  `track-data-collection` to `lappie` on 2026-10-10) and `appium-mcp` →
   `/Users/gfranks/workspace/appium-mcp`. Validate configured values and canonical
   Git-repository paths before activation. Other values and untagged tickets are
   ineligible and are left alone with a status explanation.
@@ -211,7 +214,10 @@ for current accessible-resource and workflow discovery.
 - There were no tickets in Ready, Blocked or Awaiting Acceptance. Ready →
   In Progress and Blocked → Ready (`Unblock`) are operator-confirmed but not
   runtime-inspected; verify them through preflight when tickets reach those
-  states. Awaiting Acceptance → Done also remains uninspected. Workflow setup
+  states. Awaiting Acceptance → Done also remains uninspected. Live transition
+  samples cover the Story workflow only: Bug, Task and AI Workflow were NOT
+  sampled at all (no tickets existed in their pre-terminal states), so their
+  required paths remain unverified pending operator setup. Workflow setup
   for all four supported types is not yet established by these samples.
 - The rank query was accepted. Across the four allowed types, the supplied
   status counts were Ideas 24, Plannable 10, In Progress 3, Done 32, Canceled 2.

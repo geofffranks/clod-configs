@@ -11,13 +11,13 @@ import time
 import uuid
 from config import DEFAULTS, ConfigError, load, write_default
 from jira import Jira, UncertainOutcome
-from launch import launch, live_sessions, reconcile_session, pending_interrogative, LaunchError, DaemonClient, resume_via_continue
+from launch import launch, live_sessions, reconcile_session, pending_interrogative, LaunchError, ContinueUncertain, DaemonClient, resume_via_continue, is_live_session
 from state import StateStore, ACTIVE_STAGES
 from workers import PLAN_HEADER, COMPLETION_HEADER, WORKER_BLOCKER_HEADER, parse_approved_plan, parse_completion_report, adf_text, build_worker_prompt, build_resume_prompt, blocker_comment, delivery_report, dispatcher_authored
 
 DEFAULT_STATE=os.path.expanduser("~/.local/share/polytoken/jira-dispatcher")
 
-# Destinations (sampled) required by the approved lifecycle contract, per state.
+# Destinations required by the approved lifecycle contract, per state (sampled live).
 REQUIRED_DESTINATIONS = {
     "Plannable": ("Ready", "In Progress"),
     "Ready": ("In Progress",),
@@ -55,6 +55,12 @@ def _admitted(store):
 def _pending(store,key,stage,operation,payload):
     return store.update(key,stage=stage,pending_operation={"stage":stage,"operation":operation,"payload":payload},event="operation_pending",detail=operation)
 
+def _parse_op(value):
+    if isinstance(value,str):
+        try: return json.loads(value)
+        except ValueError: return None
+    return value if isinstance(value,dict) else None
+
 def _comments(jira,key):
     return sorted(jira.comments(key),key=lambda c: str(c.get("created",c.get("updated",""))),reverse=True)
 
@@ -77,7 +83,6 @@ def _transition(jira,store,row,config,destination,hint_path):
 
 def _preservation(row):
     sid=row.get("session_id"); port=row.get("daemon_port")
-    # The daemon must be responding; the caller has already queried it where possible.
     healthy=bool(sid and port and row.get("_healthy"))
     excerpt=row.get("plan_excerpt") or ""
     values={}
@@ -101,7 +106,7 @@ def _blocker_since(row):
     return max(row.get("launch_time") or 0, row.get("resume_reply_time") or 0)
 
 def _recover_or_reconcile(jira,store,key,config,note):
-    """Bounded transient recovery; records the bounded retry, holds on uncertainty."""
+    """Bounded transient recovery; certain failures retry, uncertainty holds."""
     attempts=store.increment(key,"launch_attempts",event="recovery_retry",detail=str(note))
     if attempts>=config["transient_retry_cap"]:
         row=store.get(key)
@@ -111,25 +116,39 @@ def _recover_or_reconcile(jira,store,key,config,note):
     return store.get(key)
 
 def _escalate_recovery(jira,store,row,config,reason):
-    """Turn exhausted mechanical recovery into a visible Jira blocker."""
+    """Visible escalation after exhausted mechanical recovery.
+
+    From In Progress or Blocked it transitions to Blocked (authorized source
+    statuses). From any other status the ticket is NOT transitioned: the
+    escalation comment alone makes the stuck effort visible and the lane is
+    released for independent work.
+    """
+    key=row["key"]
     try:
-        key=row["key"]
         current=jira.get_issue(key)
         status=(current.get("fields",{}).get("status") or {}).get("name")
-        if status not in ("Blocked",) and _admitted(store):
-            _transition(jira,store,row,config,"Blocked","block")
         episode=row.get("blocker_episode_id") or uuid.uuid4().hex
         store.update(key,blocker_episode_id=episode,event="recovery_escalation_started",detail=reason)
         body=("Dispatcher recovery escalation\nTicket: %s\nDispatcher episode: %s\n"
               "Reason: transient recovery attempts exhausted\nDetails: %s\n"
               "Decision needed: inspect the retained effort and choose the next action."%(key,episode,reason))
-        if not _admitted(store): return False
+        if not _admitted(store):
+            store.update(key,stage="recovery_pending",pending_operation={"stage":"recovery_pending","operation":"escalation","payload":{"reason":str(reason)}},event="recovery_escalation_pending",detail="paused")
+            return False
+        if status=="In Progress":
+            _transition(jira,store,row,config,"Blocked","block")
+        elif status not in ("Blocked",):
+            # Unauthorized to transition from this status: comment-only escalation.
+            comment=jira.reconcile_comment(key,body,["Dispatcher recovery escalation",key,episode])
+            store.update(key,stage="blocked",pending_operation=None,blocker_comment_id=str(comment.get("id","")),blocker_comment_time=_when(comment),blocker_episode_id=episode,last_reconcile_notes=reason,event="recovery_escalated_comment_only",detail="status %s; no unauthorized transition"%status)
+            return True
         comment=jira.reconcile_comment(key,body,["Dispatcher recovery escalation",key,episode])
-        store.update(key,stage="blocked",pending_operation=None,blocker_comment_id=str(comment.get("id","")),blocker_comment_time=_when(comment),last_reconcile_notes=reason,event="recovery_escalated",detail=reason)
+        store.update(key,stage="blocked",pending_operation=None,blocker_comment_id=str(comment.get("id","")),blocker_comment_time=_when(comment),blocker_episode_id=episode,last_reconcile_notes=reason,event="recovery_escalated",detail=reason)
         return True
     except Exception as exc:
-        try: store.update(row["key"],stage="recovery_pending",last_reconcile_notes="escalation write pending: "+str(exc),event="recovery_escalation_pending",detail=str(exc))
-        except KeyError: pass
+        # Retain the escalation as its own durable operation so the write replays.
+        try: store.update(key,stage="recovery_pending",pending_operation={"stage":"recovery_pending","operation":"escalation","payload":{"reason":str(reason)}},last_reconcile_notes="escalation write pending: "+str(exc),event="recovery_escalation_pending",detail=str(exc))
+        except Exception: pass
         return False
 
 def _block_write(jira,store,row,config,payload):
@@ -139,6 +158,10 @@ def _block_write(jira,store,row,config,payload):
     current=jira.get_issue(key)
     status=(current.get("fields",{}).get("status") or {}).get("name")
     if status!="Blocked":
+        # Blockers may only ever be entered from the dispatcher-owned In Progress state.
+        if status!="In Progress":
+            store.journal(key,"block_write_invalid_source_status","blocker write held: Jira status is %s"%status)
+            return False
         _transition(jira,store,row,config,"Blocked","block")
     report=blocker_comment(payload.get("reason",""),payload.get("decision",""),row.get("session_id"),
                            payload.get("worktree"),payload.get("branch"),payload.get("commits"),
@@ -151,7 +174,7 @@ def _block_write(jira,store,row,config,payload):
     return True
 
 def _block(jira,store,row,config,reason,decision,checks="not verified",remaining="not verified",healthy=False):
-    """Verify preservation first; recover work must precede any blocker posting."""
+    """Verify preservation first; recoverable work must precede any blocker posting."""
     row=dict(row); row["_healthy"]=healthy
     preserved,branch,worktree,preservation_note=_preservation(row)
     if not preserved:
@@ -159,8 +182,6 @@ def _block(jira,store,row,config,reason,decision,checks="not verified",remaining
         return False
     attempts=store.increment(row["key"],"blocker_attempts",event="blocker_attempt_recorded",detail=reason)
     if attempts>config.get("max_blocker_attempts",3):
-        # Visible escalation instead of an inert local slot: the ticket must show
-        # the unresolved state on Jira even after the human-decision cap.
         return _escalate_recovery(jira,store,store.get(row["key"]),config,"blocker attempt cap exceeded: "+reason)
     episode=uuid.uuid4().hex
     payload={"episode":episode,"reason":reason,"decision":decision,"worktree":worktree,"branch":branch,
@@ -202,18 +223,25 @@ def _acceptance_write(jira,store,row,config,payload):
                  event="delivery_verified",detail="structured worker report reconciled")
     return True
 
+def _plan_currency_holds(jira,store,key):
+    """Re-check that the ticket's newest approved plan is still a complete queued plan."""
+    try:
+        plan=parse_approved_plan(jira.comments(key))
+    except Exception as exc:
+        store.journal(key,"replay_plan_fetch_failed","could not re-read the plan; holding: %s"%exc); return False
+    if not plan:
+        store.journal(key,"replay_held_plan_not_queued","newest approved plan is not a complete queued plan; replay held")
+        return False
+    return True
+
 def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
     results=[]
     for original in store.list_efforts():
         stage=original["stage"]
         if stage not in ("selected","ready_to_inprogress","launching","running","recovery_pending","blocking","awaiting"): continue
-        if stage=="done": continue
         key=original["key"]
-        raw_pending=original.get("pending_operation")
-        if isinstance(raw_pending,str):
-            try: original["pending_operation"]=json.loads(raw_pending)
-            except ValueError: original["pending_operation"]=None
-        row=original
+        operation=_parse_op(original.get("pending_operation"))
+        op_name=operation.get("operation") if isinstance(operation,dict) else None
         if stage=="awaiting":
             try:
                 current=jira.get_issue(key)
@@ -224,12 +252,7 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
             except Exception as exc:
                 store.journal(key,"terminal_status_reconcile_failed",str(exc))
             continue
-        operation=row.get("pending_operation") or {}
-        if isinstance(operation,str):
-            try: operation=json.loads(operation)
-            except ValueError: operation={}
-        op_name=operation.get("operation") if isinstance(operation,dict) else None
-        # Pending-operation replay drivers (durable stages survive restarts).
+        row=original
         if row["stage"] in ("selected","ready_to_inprogress") or op_name=="ready_transition":
             try:
                 issue=jira.get_issue(key); status=(issue.get("fields",{}).get("status") or {}).get("name")
@@ -237,6 +260,9 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
                     store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{}},event="ready_transition_reconciled",detail="status already In Progress")
                 elif status=="Ready":
                     if not _admitted(store): results.append((key,"ready_to_inprogress")); continue
+                    if not _plan_currency_holds(jira,store,key):
+                        store.update(key,stage="recovery_pending",last_reconcile_notes="plan currency re-check failed",event="ready_transition_held_plan",detail="plan not current queued approval")
+                        results.append((key,"recovery_pending")); continue
                     store.update(key,stage="ready_to_inprogress",pending_operation={"stage":"ready_to_inprogress","operation":"ready_transition","payload":{"destination":"In Progress"}},event="ready_transition_retry")
                     _transition(jira,store,row,config,"In Progress","ready_to_inprogress")
                     store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{}},event="ready_transition_verified")
@@ -248,10 +274,7 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
             except Exception as exc:
                 _recover_or_reconcile(jira,store,key,config,"ready transition failed: %s"%exc)
                 results.append((key,store.get(key)["stage"])); continue
-            row=store.get(key); operation=row.get("pending_operation") or {}
-            if isinstance(operation,str):
-                try: operation=json.loads(operation)
-                except ValueError: operation={}
+            row=store.get(key); operation=_parse_op(row.get("pending_operation"))
             op_name=operation.get("operation") if isinstance(operation,dict) else None
         if op_name=="block_transition":
             try:
@@ -271,20 +294,29 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
             except UncertainOutcome as exc: _recover_or_reconcile(jira,store,key,config,"delivery write uncertain: %s"%exc); results.append((key,store.get(key)["stage"]))
             except Exception as exc: _recover_or_reconcile(jira,store,key,config,"delivery write failed: %s"%exc); results.append((key,store.get(key)["stage"]))
             continue
+        if op_name=="escalation":
+            try:
+                row=store.get(key)
+                if _escalate_recovery(jira,store,row,config,operation.get("payload",{}).get("reason","recovery exhausted")):
+                    results.append((key,"blocked"))
+                else: results.append((key,store.get(key)["stage"]))
+            except Exception as exc: _recover_or_reconcile(jira,store,key,config,"escalation retry failed: %s"%exc); results.append((key,store.get(key)["stage"]))
+            continue
         if op_name=="resume":
-            # Driven by resume_candidates on this and later cycles.
+            # Persisted resume operations are driven by resume_candidates, which
+            # replays them even when Jira is already In Progress.
             results.append((key,"resume")); continue
         if op_name=="spawn" and row["stage"] in ("launching","recovery_pending"):
             try:
                 issue=jira.get_issue(key); status=(issue.get("fields",{}).get("status") or {}).get("name")
                 if status!="In Progress":
                     store.update(key,stage="recovery_pending",last_reconcile_notes="spawn held because Jira is "+str(status),event="spawn_recovery_held",detail=str(status)); results.append((key,"recovery_pending")); continue
+                if not _plan_currency_holds(jira,store,key):
+                    store.update(key,stage="recovery_pending",last_reconcile_notes="plan currency re-check failed before spawn",event="spawn_held_plan",detail="plan not current queued approval")
+                    results.append((key,"recovery_pending")); continue
                 try: sessions=live_sessions(polytoken)
                 except Exception: sessions=[]
-                intent=row.get("launch_intent") or {}
-                if isinstance(intent,str):
-                    try: intent=json.loads(intent)
-                    except ValueError: intent={}
+                intent=_parse_op(row.get("launch_intent")) or {}
                 adopted=reconcile_session(key,row["repo"],sessions,sessions_dir,launch_intent=intent or None,launch_time=row.get("launch_time"))
                 if adopted:
                     sid,daemon=adopted; session=next((s for s in sessions if (s.get("session_id") or s.get("id"))==sid),{})
@@ -300,7 +332,7 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
             except Exception as exc:
                 _recover_or_reconcile(jira,store,key,config,"spawn failed: %s"%exc)
                 results.append((key,store.get(key)["stage"])); continue
-        # Healthy-session supervision flow (running rows).
+        # Healthy-session supervision (running rows).
         healthy=False; state={}
         try:
             if row.get("session_id") and row.get("daemon_port"):
@@ -311,17 +343,13 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
         if not healthy:
             try: sessions=live_sessions(polytoken)
             except Exception as exc:
-                attempt_note="live-session ownership scan failed: %s"%exc
-                store.update(key,stage="recovery_pending",last_reconcile_notes=attempt_note,event="recovery_pending",detail=str(store.get(key)["launch_attempts"]))
+                store.update(key,stage="recovery_pending",last_reconcile_notes="live-session ownership scan failed: %s"%exc,event="recovery_pending")
                 results.append((key,"recovery_pending")); continue
             recorded=row.get("session_id")
             if recorded:
                 adopted=reconcile_session(key,row["repo"],[s for s in sessions if (s.get("session_id") or s.get("id"))==recorded],sessions_dir)
             else:
-                intent=row.get("launch_intent")
-                if isinstance(intent,str):
-                    try: intent=json.loads(intent)
-                    except ValueError: intent={}
+                intent=_parse_op(row.get("launch_intent"))
                 adopted=reconcile_session(key,row["repo"],sessions,sessions_dir,launch_intent=intent,launch_time=row.get("launch_time"))
             if adopted:
                 sid,daemon=adopted; session=next((s for s in sessions if (s.get("session_id") or s.get("id"))==sid),{})
@@ -335,14 +363,12 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
                     store.update(key,stage="recovery_pending",last_reconcile_notes="session missing/unhealthy; no exact match",event="session_reconcile_pending",detail=str(attempts))
                 results.append((key,store.get(key)["stage"])); continue
         row=dict(row); row["_healthy"]=healthy
-        # Pending daemon question: Jira is the decision channel; the dispatcher never answers.
         pending=pending_interrogative(daemon)
         recorded_pending=row.get("pending_interrogative")
         if not pending and recorded_pending:
             store.update(key,pending_interrogative=None,event="interrogative_cleared",detail="daemon reports no pending question")
             row=store.get(key)
         if pending:
-            pending_id=json.dumps(pending) if not isinstance(pending,str) else pending
             store.update(key,pending_interrogative=pending,event="pending_interrogative",detail=str(pending))
             _block(jira,store,row,config,"Worker has a pending question: "+_text(pending),"Operator answer in Jira is required",healthy=healthy)
             results.append((key,store.get(key)["stage"])); continue
@@ -369,10 +395,11 @@ def supervise_once(jira,store,config,polytoken="polytoken",sessions_dir=None):
         results.append((key,"running"))
     return results
 
-def _owned_repos(jira,store,config,polytoken="polytoken"):
-    from launch import is_live_session
-    owned={e["canonical_repo"] for e in store.list_efforts() if e["stage"] in ACTIVE_STAGES}
-    recorded={e.get("session_id") for e in store.list_efforts() if e.get("session_id")}
+def _owned_repos(jira,store,config,polytoken="polytoken",exclude_key=None):
+    """Canonical repos currently owned; an effort's own retained session never counts against itself."""
+    efforts=store.list_efforts()
+    owned={e["canonical_repo"] for e in efforts if e["stage"] in ACTIVE_STAGES and e["key"]!=exclude_key}
+    recorded={e.get("session_id") for e in efforts if e.get("session_id") and e["key"]!=exclude_key}
     for s in live_sessions(polytoken):
         sid=s.get("session_id") or s.get("id")
         if sid and sid in recorded: continue
@@ -383,111 +410,137 @@ def _owned_repos(jira,store,config,polytoken="polytoken"):
         if pv in config["repo_mappings"]: owned.add(config["repo_mappings"][pv]["repo_path"])
     return owned
 
+def _resume_ready(jira,store,row,config,plan,reply,polytoken=None,sessions_dir=None):
+    """Claim + persist intent + verify Ready->In Progress for a replayed or fresh resume."""
+    key=row["key"]
+    try:
+        if not _admitted(store): return row,"paused"
+        store.resume_claim(key,{"reply_id":str(reply.get("id") or ""),},repo=row.get("canonical_repo"),global_limit=config["max_global_active"])
+        row=store.get(key)
+        prompt=build_resume_prompt(key,plan["excerpt"],_text(reply.get("body")),reply.get("id") or "",row.get("blocker_attempts",0))
+        # Persist the exact prompt and reply BEFORE the external transition.
+        store.update(key,resume_intent={"prompt":prompt,"reply_id":str(reply.get("id") or ""),"reply_text":_text(reply.get("body"))},event="resume_intent_persisted",detail=str(reply.get("id") or ""))
+        if not _admitted(store): return store.get(key),"paused"
+        _transition(jira,store,store.get(key),config,"In Progress","ready_to_inprogress")
+        return store.get(key),None
+    except UncertainOutcome as exc:
+        _recover_or_reconcile(jira,store,key,config,"resume transition uncertain: %s"%exc); return store.get(key),"held"
+    except Exception as exc:
+        _recover_or_reconcile(jira,store,key,config,"resume transition failed: %s"%exc); return store.get(key),"held"
+
 def resume_candidates(jira,store,config,polytoken="polytoken",sessions_dir=None,facet="quick-delivery"):
-    """Resume human-unblocked efforts: reply required, coordinated admission, verified start."""
+    """Resume human-unblocked efforts; replays persisted resume operations too."""
     outcomes=[]
     for row in store.list_efforts():
         if row["stage"] not in ("blocked","blocking","recovery_pending","awaiting"): continue
         key=row["key"]
-        operation=row.get("pending_operation")
+        operation=_parse_op(row.get("pending_operation"))
+        resuming=bool(operation and operation.get("operation")=="resume")
         try:
             issue=jira.get_issue(key)
         except Exception:
             store.journal(key,"resume_status_fetch_failed","could not fetch ticket status; holding"); outcomes.append((key,"held")); continue
-        status_name=(issue.get("fields",{}).get("status") or {}).get("name")
+        fields=issue.get("fields",{})
+        status_name=(fields.get("status") or {}).get("name")
         if status_name in ("Done","Canceled","Cancelled") and row["stage"]=="awaiting":
             store.update(key,stage="done",pending_operation=None,event="human_terminal_observed",detail=status_name)
             outcomes.append((key,"done")); continue
-        if status_name!="Ready":
+        if status_name!="Ready" and not (resuming and status_name=="In Progress"):
             continue
-        try: comments=jira.comments(key)
+        try:
+            comments=jira.comments(key)
         except Exception:
             store.journal(key,"resume_comments_fetch_failed","could not fetch comments; holding"); outcomes.append((key,"held")); continue
         plan=parse_approved_plan(comments)
         if not plan:
-            store.journal(key,"resume_ineligible_plan","newest approved plan is not queued or has no complete approved plan"); outcomes.append((key,"skipped")); continue
-        blocker_time=row.get("blocker_comment_time") or 0
-        consumed=str(row.get("consumed_reply_id") or "")
-        reply=next((c for c in _comments(jira,key) if _when(c)>blocker_time and str(c.get("id") or "")!=consumed and not dispatcher_authored(_text(c.get("body")))),None)
-        if not reply:
-            store.journal(key,"ready_without_relevant_answer","ready without relevant answer; not speculating"); outcomes.append((key,"skipped")); continue
+            store.journal(key,"resume_ineligible_plan","newest approved plan is not a complete queued approved plan"); outcomes.append((key,"skipped")); continue
+        issue_type=(fields.get("issuetype") or {}).get("name")
+        project=fields.get(config["custom_project_field"]); project=project.get("value") or project.get("name") if isinstance(project,dict) else project
+        if issue_type not in config["allowed_types"] or project not in config["repo_mappings"]:
+            store.journal(key,"resume_ineligible_ticket","type/mapping no longer eligible: %s/%s"%(issue_type,project)); outcomes.append((key,"skipped")); continue
         if not dependencies_done(jira,plan):
             store.journal(key,"resume_dependency_unsatisfied","dependency is not Done"); outcomes.append((key,"skipped")); continue
-        try:
-            owned=_owned_repos(jira,store,config,polytoken)
-        except Exception as exc:
-            store.journal(key,"resume_ownership_scan_failed","could not verify repository ownership; not speculating: %s"%exc); outcomes.append((key,"held")); continue
-        if row.get("canonical_repo") in owned:
-            store.journal(key,"resume_repository_occupied","canonical repository is already owned; holding"); outcomes.append((key,"held")); continue
-        if not _admitted(store): outcomes.append((key,"paused")); continue
-        try:
-            store.resume_claim(key,{"reply_id":str(reply.get("id") or ""),"reply_time":reply.get("created") or reply.get("updated") or ""},repo=row.get("canonical_repo"),global_limit=config["max_global_active"])
-        except RuntimeError as exc:
-            store.journal(key,"resume_claim_declined",str(exc)); outcomes.append((key,"held")); continue
-        row=store.get(key)
-        try:
-            _transition(jira,store,row,config,"In Progress","ready_to_inprogress")
-        except UncertainOutcome as exc:
-            _recover_or_reconcile(jira,store,key,config,"resume transition uncertain: %s"%exc); outcomes.append((key,store.get(key)["stage"])); continue
-        except Exception as exc:
-            _recover_or_reconcile(jira,store,key,config,"resume transition failed: %s"%exc); outcomes.append((key,store.get(key)["stage"])); continue
-        row=store.get(key)
-        prompt=build_resume_prompt(key,plan["excerpt"],_text(reply.get("body")),reply.get("id") or "",row.get("blocker_attempts",0))
-        # Deliver a retained question's operator answer through the daemon, then resume.
-        pending=row.get("pending_interrogative")
-        retained_sid=row.get("session_id"); retained_ok=False; retained_port=None
-        if pending and retained_sid:
+        if not resuming:
+            blocker_time=row.get("blocker_comment_time") or 0
+            if not blocker_time:
+                store.journal(key,"resume_blocker_time_unverified","blocker comment time not verified; not authorizing replies"); outcomes.append((key,"skipped")); continue
+            consumed=str(row.get("consumed_reply_id") or "")
+            reply=next((c for c in _comments(jira,key) if _when(c)>blocker_time and str(c.get("id") or "")!=consumed and not dispatcher_authored(_text(c.get("body")))),None)
+            if not reply:
+                store.journal(key,"ready_without_relevant_answer","ready without relevant answer; not speculating"); outcomes.append((key,"skipped")); continue
             try:
-                root=sessions_dir or os.path.expanduser("~/.local/share/polytoken/sessions-v1")
-                from launch import _credential
-                requested=str(pending.get("id","")) if isinstance(pending,dict) else None
-                token=_credential(retained_sid,root); port=row.get("daemon_port")
-                if requested is None:
-                    outcomes.append((key,"held")); continue
-                daemon=DaemonClient(port,token); daemon.health()
-                if not _admitted(store): outcomes.append((key,"paused")); continue
-                daemon.respond(requested,_text(reply.get("body")))
-                verified=pending_interrogative(daemon) is None
-                store.update(key,pending_interrogative=None,event="interrogative_answered",detail=requested)
-                retained_ok=verified; retained_port=port
+                owned=_owned_repos(jira,store,config,polytoken,exclude_key=key)
             except Exception as exc:
-                store.journal(key,"resume_interrogative_respond_failed",str(exc)); retained_ok=False
-        consume={"consumed_reply_id":str(reply.get("id") or ""),"resume_reply_time":_when(reply),"pending_interrogative":None}
+                store.journal(key,"resume_ownership_scan_failed","could not verify repository ownership; not speculating: %s"%exc); outcomes.append((key,"held")); continue
+            if row.get("canonical_repo") in owned:
+                store.journal(key,"resume_repository_occupied","canonical repository is already owned; holding"); outcomes.append((key,"held")); continue
+            if not _admitted(store): outcomes.append((key,"paused")); continue
+            row,outcome=_resume_ready(jira,store,row,config,plan,reply)
+            if outcome: outcomes.append((key,outcome)); continue
         row=store.get(key)
-        if retained_sid and retained_ok:
-            store.update(key,stage="running",session_id=retained_sid,daemon_port=retained_port,pending_operation=None,launch_time=time.time(),**consume,event="effort_resumed",detail="retained session resumed")
-            outcomes.append((key,"resumed")); continue
-        if retained_sid:
-            try:
-                if not _admitted(store): outcomes.append((key,"paused")); continue
-                sid,port=resume_via_continue(retained_sid,polytoken)
-                if not _admitted(store): outcomes.append((key,"paused")); continue
-                root=sessions_dir or os.path.expanduser("~/.local/share/polytoken/sessions-v1")
-                from launch import _credential
-                daemon=DaemonClient(port,_credential(sid,root))
-                if pending_interrogative(daemon) is None:
-                    daemon.prompt(prompt)
-                else:
-                    store.journal(key,"resume_interrogative_still_pending","retained session still reports a pending question; holding")
-                    outcomes.append((key,"held")); continue
-                if pending_interrogative(daemon) is None:
-                    store.update(key,stage="running",session_id=sid,daemon_port=port,pending_operation=None,launch_time=time.time(),**consume,event="effort_resumed",detail="continued original session")
-                    outcomes.append((key,"resumed")); continue
-                raise UncertainOutcome("prompt acknowledgment could not be verified")
-            except (TimeoutError,OSError,UncertainOutcome) as exc:
-                # Uncertain continuation: reconcile the retained session before any fresh launch.
-                reconciled=_reconcile_retained(jira,store,key,retained_sid,polytoken,sessions_dir,consume,prompt)
-                outcomes.append((key,reconciled)); continue
-            except Exception as exc:
-                # Certain continue failure: fresh recovery launch with the same brief.
-                outcomes.append((key,_resume_fresh(jira,store,key,row,config,plan,prompt,consume,sessions_dir,polytoken,facet,reason=str(exc))))
-                continue
-        else:
-            outcomes.append((key,_resume_fresh(jira,store,key,row,config,plan,prompt,consume,sessions_dir,polytoken,facet,reason=None)))
+        outcomes.append(_resume_execute(jira,store,row,config,sessions_dir,polytoken,facet))
     return outcomes
 
+def _resume_execute(jira,store,row,config,sessions_dir,polytoken,facet):
+    """Deliver the persisted reply to the worker: retained question, continue, or fresh launch."""
+    key=row["key"]
+    intent=row.get("resume_intent")
+    if isinstance(intent,str):
+        try: intent=json.loads(intent)
+        except ValueError: intent={}
+    if not isinstance(intent,dict): intent={}
+    prompt=intent.get("prompt")
+    pending=row.get("pending_interrogative")
+    if isinstance(pending,str):
+        try: pending=json.loads(pending)
+        except ValueError: pending=None
+    if pending is not None and not isinstance(pending,dict): pending={"id":str(pending)}
+    reply_time=intent.get("reply_time")
+    consume={"consumed_reply_id":str(intent.get("reply_id") or ""), "resume_reply_time":reply_time or time.time(), "pending_interrogative":None}
+    retained_sid=row.get("session_id")
+    # A retained question is answered through the respond endpoint; resolution must
+    # be verified against the daemon state, not assumed.
+    if pending and pending.get("id") and retained_sid:
+        try:
+            root=sessions_dir or os.path.expanduser("~/.local/share/polytoken/sessions-v1")
+            from launch import _credential
+            token=_credential(retained_sid,root)
+            daemon=DaemonClient(row.get("daemon_port"),token); daemon.health()
+            if not _admitted(store): return (key,"paused")
+            daemon.respond(pending.get("id"),intent.get("reply_text") or "")
+            state=daemon.state()
+            if state.get("pending_interrogative") or state.get("interrogative"):
+                store.journal(key,"resume_interrogative_resolution_unverified","respond acknowledged but the question is still pending; holding")
+                return (key,"held")
+            store.update(key,pending_interrogative=None,event="interrogative_answered",detail=str(pending.get("id")))
+            row=store.get(key)
+        except Exception as exc:
+            store.journal(key,"resume_interrogative_respond_failed",str(exc))
+            _recover_or_reconcile(jira,store,key,config,"interrogative respond failed: %s"%exc)
+            return (key,store.get(key)["stage"])
+    elif pending and not retained_sid:
+        store.journal(key,"resume_interrogative_no_session","retained question without a retained session; holding")
+        return (key,"held")
+    if retained_sid:
+        try:
+            if not _admitted(store): return (key,"paused")
+            sid,port=resume_via_continue(retained_sid,polytoken)
+            if not _admitted(store): return (key,"paused")
+            root=sessions_dir or os.path.expanduser("~/.local/share/polytoken/sessions-v1")
+            from launch import _credential
+            daemon=DaemonClient(port,_credential(sid,root))
+            if not _admitted(store): return (key,"paused")
+            daemon.prompt(prompt or "")
+            store.update(key,stage="running",session_id=sid,daemon_port=port,pending_operation=None,launch_time=time.time(),**consume,event="effort_resumed",detail="continued original session")
+            return (key,"resumed")
+        except (ContinueUncertain,TimeoutError,OSError,UncertainOutcome) as exc:
+            return (key,_reconcile_retained(jira,store,key,retained_sid,polytoken,sessions_dir,consume,prompt))
+        except Exception as exc:
+            return (key,_resume_fresh(jira,store,store.get(key),config,sessions_dir,polytoken,facet,reason=str(exc)))
+    return (key,_resume_fresh(jira,store,store.get(key),config,sessions_dir,polytoken,facet,reason=None))
+
 def _reconcile_retained(jira,store,key,sid,polytoken,sessions_dir,consume,prompt):
-    """Uncertain continuation: verify the retained session accepted the prompt before acting."""
+    """Uncertain continuation: verify health, then (re)send the reply so it is never silently consumed."""
     try:
         sessions=live_sessions(polytoken)
         candidates=[s for s in sessions if (s.get("session_id") or s.get("id"))==sid]
@@ -496,28 +549,36 @@ def _reconcile_retained(jira,store,key,sid,polytoken,sessions_dir,consume,prompt
             from launch import _credential
             token=_credential(sid,root); daemon=DaemonClient(s.get("port"),token)
             daemon.health()
-            if pending_interrogative(daemon) is None:
-                store.update(key,stage="running",session_id=sid,daemon_port=s.get("port"),pending_operation=None,launch_time=time.time(),**consume,event="effort_resumed",detail="retained session reconciled after uncertain continuation")
+            state=daemon.state()
+            if not (state.get("pending_interrogative") or state.get("interrogative")):
+                if not _admitted(store): return "paused"
+                daemon.prompt(prompt or "")
+                store.update(key,stage="running",session_id=sid,daemon_port=s.get("port"),pending_operation=None,launch_time=time.time(),**consume,event="effort_resumed",detail="retained session reconciled; reply re-sent")
                 return "resumed"
     except (TimeoutError,OSError,LaunchError):
         pass
     store.update(key,stage="recovery_pending",last_reconcile_notes="uncertain continuation outcome; deferring fresh launch",event="resume_uncertain",detail=sid)
     return "recovery_pending"
 
-def _resume_fresh(jira,store,key,row,config,plan,prompt,consume,sessions_dir,polytoken,facet,reason):
+def _resume_fresh(jira,store,row,config,sessions_dir,polytoken,facet,reason):
+    key=row["key"]
+    intent=row.get("resume_intent")
+    if isinstance(intent,str):
+        try: intent=json.loads(intent)
+        except ValueError: intent={}
+    if not isinstance(intent,dict): intent={}
+    consume={"consumed_reply_id":str(intent.get("reply_id") or ""), "resume_reply_time":intent.get("reply_time") or time.time(), "pending_interrogative":None}
     try:
-        if not _admitted(store): store.update(key,resume_intent={"prompt":prompt,**consume},event="resume_intent_persisted",detail=reason or "fresh resume"); return "paused"
-        store.update(key,resume_intent={"prompt":prompt,**consume},event="resume_intent_persisted",detail=reason or "fresh resume")
-        launch(row.get("repo"),facet,prompt,store,key,polytoken=polytoken,sessions_dir=sessions_dir,timeout=config.get("launch_timeout_seconds",3600))
-        store.update(key,**consume,event="effort_resumed",detail=("fresh recovery launch"+(" after continue failure: "+reason if reason else "")))
+        if not _admitted(store): return "paused"
+        launch(row.get("repo"),facet,intent.get("prompt") or build_resume_prompt(key,"","","",row.get("blocker_attempts",0)),store,key,polytoken=polytoken,sessions_dir=sessions_dir,timeout=config.get("launch_timeout_seconds",3600))
+        store.update(key,**consume,event="effort_resumed",detail=("fresh recovery launch"+(" after continue failure: "+str(reason) if reason else "")))
         return "resumed"
     except Exception as exc:
         note="fresh launch failed: %s"%(str(exc))
-        store.update(key,stage="recovery_pending",last_reconcile_notes=note,event="resume_launch_failed",detail=note)
         _recover_or_reconcile(jira,store,key,config,note)
-    return "recovery_pending"
+        return "recovery_pending"
 
-def process_candidates(jira,store,config,facet="quick-delivery",sessions=None,polytoken="polytoken"):
+def process_candidates(jira,store,config,facet="quick-delivery",polytoken="polytoken"):
     report=[]
     try:
         owned=_owned_repos(jira,store,config,polytoken)
@@ -528,10 +589,21 @@ def process_candidates(jira,store,config,facet="quick-delivery",sessions=None,po
     except Exception as exc:
         return [{"key":None,"eligible":False,"reason":"Jira admission scan failed: %s"%exc}]
     for issue in issues:
-        key=issue.get("key"); fields=issue.get("fields",{}); plan=parse_approved_plan(((fields.get("comment") or {}).get("comments") or []))
+        key=issue.get("key"); fields=issue.get("fields",{})
         project=fields.get(config["custom_project_field"]); project=project.get("value") or project.get("name") if isinstance(project,dict) else project
-        repo=config["repo_mappings"].get(project,{}).get("repo_path"); dep_ok=dependencies_done(jira,plan) if plan else False
-        eligible,reason=admission(issue,config,plan,dep_ok,repo in owned if repo else False,store.active_count()); report.append({"key":key,"eligible":eligible,"reason":reason})
+        repo=config["repo_mappings"].get(project,{}).get("repo_path")
+        # Listing fetches are comment-free; the approved plan is read per candidate.
+        plan=None; dep_ok=False
+        if (issue.get("fields",{}).get("issuetype") or {}).get("name") in config["allowed_types"] and (fields.get("status") or {}).get("name")=="Ready" and repo:
+            try: plan=parse_approved_plan(jira.comments(key))
+            except Exception as exc:
+                report.append({"key":key,"eligible":False,"reason":"plan fetch failed: %s"%exc}); continue
+            dep_ok=dependencies_done(jira,plan) if plan else False
+        intended_stage=(fields.get("status") or {}).get("name")
+        stage_note="status is not Ready" if intended_stage!="Ready" else None
+        eligible,reason=admission(issue,config,plan,dep_ok,repo in owned if repo else False,store.active_count())
+        if stage_note and not eligible: reason=stage_note
+        report.append({"key":key,"eligible":eligible,"reason":reason})
         if not eligible: continue
         if not _admitted(store): break
         try: row=store.claim(key,repo,repo,config["max_global_active"],str(plan["comment"].get("id","")),plan["excerpt"])
@@ -545,8 +617,7 @@ def process_candidates(jira,store,config,facet="quick-delivery",sessions=None,po
             launch(repo,facet,prompt,store,key,polytoken=polytoken,timeout=config["launch_timeout_seconds"]); owned.add(repo)
         except UncertainOutcome as exc: store.update(key,stage="recovery_pending",last_reconcile_notes=str(exc),event="write_uncertain",detail=str(exc))
         except Exception as exc:
-            note=str(exc)
-            _recover_or_reconcile(jira,store,key,config,note)
+            _recover_or_reconcile(jira,store,key,config,str(exc))
     return report
 
 def status(store):
@@ -578,7 +649,8 @@ def preflight(config,store_dir):
     try:
         from mcp_client import MCPClient
         client=MCPClient(config["gateway_url"],timeout=5); client.initialize()
-        jira=Jira(client,config["jira_project"],config["custom_project_field"]); jira.discover_cloud_id()
+        jira=Jira(client,config["jira_project"],config["custom_project_field"])
+        jira.discover_cloud_id()
         present_types=set()
         try:
             metadata=jira.issue_types()
@@ -591,7 +663,7 @@ def preflight(config,store_dir):
             elif present_types:
                 verified.append("issue type %s present"%t)
         for t in config["allowed_types"]:
-            try: issues=[i for i in jira.search('issuetype = "%s"'%t) if True][:50]
+            try: issues=[i for i in jira.search('issuetype = "%s"'%t)][:50]
             except Exception as exc:
                 warnings.append("pending: could not sample tickets for type %s: %s"%(t,exc)); continue
             by_state={}

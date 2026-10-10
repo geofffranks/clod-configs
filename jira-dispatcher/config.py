@@ -9,7 +9,7 @@ DEFAULTS = {
     "jira_project": "LAP",
     "custom_project_field": "customfield_10043",
     "repo_mappings": {
-        "lappie": {"repo_path": "/Users/gfranks/workspace/track-data-collection"},
+        "lappie": {"repo_path": "/Users/gfranks/workspace/lappie"},
         "appium-mcp": {"repo_path": "/Users/gfranks/workspace/appium-mcp"},
     },
     "allowed_types": ["Story", "Bug", "Task", "AI Workflow"],

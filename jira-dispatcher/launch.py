@@ -8,6 +8,9 @@ import urllib.parse
 
 class LaunchError(RuntimeError): pass
 
+class ContinueUncertain(LaunchError):
+    """A continuation whose outcome cannot be proven; reconcile before fresh launch."""
+
 class DaemonClient:
     def __init__(self,port,token,timeout=10): self.port=int(port); self.token=token; self.timeout=timeout
     def request(self,method,path,payload=None):
@@ -55,9 +58,16 @@ def launch(repo,facet,prompt,store,key,polytoken="polytoken",sessions_dir=None,t
     return sid,daemon
 
 def resume_via_continue(session_id,polytoken="polytoken",timeout=3600):
-    p=subprocess.run([polytoken,"continue",session_id,"--no-attach"],capture_output=True,text=True,timeout=timeout,check=False)
+    """Continue a retained session headlessly. Timeout/lost-output is UNCERTAIN, not certain failure."""
+    try:
+        p=subprocess.run([polytoken,"continue",session_id,"--no-attach"],capture_output=True,text=True,timeout=timeout,check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise ContinueUncertain("continue timed out; outcome unknown") from exc
     if p.returncode: raise LaunchError(p.stderr or "polytoken continue failed")
-    return _parse_spawn(p.stdout)
+    try:
+        return _parse_spawn(p.stdout)
+    except LaunchError as exc:
+        raise ContinueUncertain("continue spawned but printed no session id/port; outcome unknown") from exc
 
 def pending_interrogative(daemon):
     """Cursor-aware reducer: a resolution event clears an earlier pending question."""

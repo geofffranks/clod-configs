@@ -17,10 +17,11 @@ SAFE_INSPECT_TOOLS = {
 
 OFFLOAD_PROJECTIONS = {
     # On heavyweight upstream results the gateway stores the value and returns an
-    # offload summary; a follow-up script re-projects only the fields we need.
-    "getJiraIssue": 'result({status=d.fields.status.name, comment=d.fields.comment})',
+    # offload summary; a follow-up script re-projects only the fields we need while
+    # PRESERVING the canonical response shape callers expect.
+    "getJiraIssue": 'result({key=d.key, fields={status={name=d.fields.status.name}, comment=d.fields.comment, issuetype=d.fields.issuetype, summary=d.fields.summary, description=d.fields.description, customfield_10043=d.fields.customfield_10043}})',
     "searchJiraIssuesUsingJql": 'result({issues=d.issues, nextPageToken=d.nextPageToken})',
-    "getJiraProjectIssueTypesMetadata": 'result(d.issueTypes)',
+    "getJiraProjectIssueTypesMetadata": 'result({issueTypes=d.issueTypes})',
 }
 
 class UncertainOutcome(RuntimeError): pass
@@ -109,9 +110,16 @@ class Jira:
             "if type(v) == \"string\" then v=_gateway.json_decode(v) end\n"
             "result(v)"
         )%(self.upstream,name,_lua(args))
+        projection=OFFLOAD_PROJECTIONS.get(name)
+        if name=="getJiraIssue":
+            # Preserve the canonical issue shape, keeping the configured Project field id dynamic.
+            field=self.custom_project_field
+            projection=('result({key=d.key, fields={status={name=d.fields.status.name}, '
+                        'comment=d.fields.comment, issuetype=d.fields.issuetype, summary=d.fields.summary, '
+                        'description=d.fields.description, ["%s"]=d.fields["%s"]}})')%(field,field)
         if self.surface is None: self._detect_surface()
         result=self.client.tools_call("execute",{"script":script})
-        return self._payload(result,projection=OFFLOAD_PROJECTIONS.get(name))
+        return self._payload(result,projection=projection)
 
     def _tool(self,name,args):
         if self.surface is None: self._detect_surface()

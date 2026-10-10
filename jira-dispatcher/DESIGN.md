@@ -53,7 +53,9 @@ docs/jira-dispatcher.md
 
 State lives outside Git: `~/.local/share/polytoken/jira-dispatcher/`.
 Runtime persistence is SQLite state (`state.sqlite3`, including effort records,
-controls and the journal) and captured spawn/output data, not per-effort log
+controls and the journal). Spawn output is captured transiently in the
+subprocess result and is not retained; worker session data lives in the
+polytoken sessions tree, not in dispatcher state. There are no per-effort log
 directories or pause/stop flag files. The directory also holds editable
 `config.json`; see `README.md` for current capture and recovery details.
 Installer copies runtime into `~/.local/share/polytoken/jira-dispatcher/lib/`
@@ -70,7 +72,7 @@ type through another type's workflow. Missing paths are pending, never mocked.
 
 Custom Project (observed `customfield_10043`) maps a configured value to a
 canonical repo:
-- `lappie` → `/Users/gfranks/workspace/track-data-collection`
+- `lappie` → `/Users/gfranks/workspace/lappie` (repo renamed from track-data-collection on 2026-10-10)
 - `appium-mcp` → `/Users/gfranks/workspace/appium-mcp`
 Validate values and paths at preflight and read field values per ticket; a
 ticket whose value or path is not configured is not eligible (leave it alone,
@@ -117,7 +119,9 @@ See `README.md` for the current response and recovery behavior.
 Launch sequence transactionality: insert effort row + pending transition →
 transition Ready → In Progress (reconcile) → spawn worker → mark running.
 Persist launch intent (state row staged as `launching`) BEFORE the daemon spawn;
-record the session id and captured spawn/output data when available, not a
+record the session id and launch intent (prompt and reply text) in state; spawn
+output is transient subprocess capture and is not retained — the polytoken
+sessions tree holds the durable session record, not dispatcher state. Not a
 per-effort log file. Reconcile uncertain response
 against actual sessions (registry `polytoken sessions --all`) + credential
 file + /health before any retry launch. Reconcile is idempotent: an existing

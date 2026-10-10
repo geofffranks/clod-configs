@@ -54,7 +54,12 @@ def parse_approved_plan(comments):
 
 
 def parse_completion_report(comments, launch_time=0):
-    """Return only a structured, positive worker report with actual results."""
+    """Return only a structured, positive worker report with actual results.
+
+    Negative completion evidence (failed checks, rejected review, "not ready"
+    outcomes) never authorizes acceptance; it is screened out explicitly.
+    """
+    negative=r"(?:\bfail(?:ed|s|ure)?\b|\brejected?\b|\bnot\s+passing\b|\bnot\s+complete\b|\bcrash(?:ed)?\b)"
     for comment in sorted(comments or [], key=lambda c: str(c.get("created", c.get("updated", ""))), reverse=True):
         body=adf_text(comment.get("body", ""))
         if COMPLETION_HEADER not in body or "Worker completion report" not in body: continue
@@ -72,6 +77,9 @@ def parse_completion_report(comments, launch_time=0):
             m=re.search(r"^%s:\s*(.*)$"%re.escape(label),report,re.M|re.I)
             fields[label]=m.group(1).strip() if m else ""
         if not all(fields[x] and fields[x].lower() not in ("not run","not verified","none") for x in ("Checks","Review","Branch","Worktree","Commits")): continue
+        # A structured report with negative check or review outcomes is evidence of
+        # unfinished delivery, not a completion.
+        if re.search(negative,fields["Checks"],re.I) or re.search(negative,fields["Review"],re.I): continue
         return comment, fields, report
     return None
 

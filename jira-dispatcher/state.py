@@ -41,7 +41,11 @@ class StateStore:
     def close(self): self.db.close()
 
     def _row(self, row):
-        return dict(row) if row else None
+        if row is None: return None
+        data=dict(row)
+        for column in ("launch_intent","pending_interrogative","pending_operation","resume_intent"):
+            if data.get(column)=="null": data[column]=None
+        return data
 
     def get(self, key):
         with self.lock: return self._row(self.db.execute("SELECT * FROM efforts WHERE key=?", (key,)).fetchone())
