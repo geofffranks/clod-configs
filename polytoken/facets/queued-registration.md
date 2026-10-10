@@ -20,7 +20,12 @@ no implementation authority: no repository changes, builds, dependency installs,
 service launches or delegated delivery. Keep the approved scope, Git choices,
 workspace and review panel; ask only for a missing material route decision.
 
-Load `jira-workflow` and follow its readable-plan publication recipe. Read the
+Load `jira-workflow` and follow its rules, including the Approval-fork rule:
+before any approval-gated move, if the live transition list contains competing
+same-gate transitions, present the operator every gate transition by
+name → destination plus the route pinned in the approved plan, and record the
+operator's selection before transitioning; a route change at this point is an
+operator-confirmed change, not a silent re-pin. Read the
 complete saved plan with full/paginated `file_read` calls through EOF; never post
 an outline or truncated page. Strip only tool line-number wrappers. Inspect
 `tool_flow` before using composition; otherwise read sequentially and publish

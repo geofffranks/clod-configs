@@ -52,6 +52,18 @@ move. Ask for Ideas → Plannable or exceptional/terminal moves; do not ask agai
 for a routine Plannable → Ready backed by approval or Ready → In Progress backed
 by actual start. Do not force a standard implementation path onto friction.
 
+Approval-fork rule: before executing any approval-gated transition, fetch the
+live transition list. If it contains MORE THAN ONE approval-gate transition
+(same current gate, competing destinations — e.g. `Approve Plan` → Ready
+alongside `Approve + Start Interactive Implementation` → In Progress), present
+the operator the real fork: every gate transition by name → destination, the
+route named in the approved plan, and a dedicated selection ask; record the
+operator's selection before transitioning. Selection must match the approved
+plan's named route; a route change at this point is a scope/authority change
+needing the operator's explicit confirmation (which the selection ask is).
+This fires exactly when competing same-gate transitions exist; when only one
+approval-gate transition exists, proceed with it and no second ceremony.
+
 After plan approval, add a readable plan and approval record to Jira and move
 Plannable → Ready when the current type supports it. At actual PM start, move
 Ready → In Progress. Immediately before transitioning, fetch current status
