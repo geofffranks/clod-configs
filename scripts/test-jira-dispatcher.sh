@@ -43,6 +43,28 @@ class FakeSSE(http.server.BaseHTTPRequestHandler):
         data=json.dumps({'jsonrpc':'2.0','id':req.get('id'),'result':{'tools':[{'name':'sse'}]}})
         self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers(); self.wfile.write(('event: message\ndata: '+data+'\n\n').encode())
 
+class FakeTitleDaemon(http.server.BaseHTTPRequestHandler):
+    calls=[]
+    mode='success'
+    secret='private-title-token'
+    def log_message(self,*a): pass
+    def reply(self,status,body):
+        self.send_response(status); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(body)
+    def do_GET(self): self.reply(200,b'{}')
+    def do_POST(self):
+        payload=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0'))))
+        type(self).calls.append((self.path,payload,self.headers.get('Authorization')))
+        if self.mode=='http': self.reply(503,('Bearer '+self.secret+' '+('x'*1000)).encode()); return
+        responses={
+            'success':{'title':payload['title'],'overridden':True},
+            'nonobject':['unexpected',self.secret],
+            'mismatch':{'title':self.secret,'overridden':True},
+            'nooverride':{'title':payload['title'],'overridden':False},
+            'missingoverride':{'title':payload['title']},
+        }
+        body=b'not JSON '+self.secret.encode() if self.mode=='invalid_json' else json.dumps(responses[self.mode]).encode()
+        self.reply(200,body)
+
 def serve(handler):
     server=socketserver.TCPServer(('127.0.0.1',0),handler); threading.Thread(target=server.serve_forever,daemon=True).start(); return server
 
@@ -255,6 +277,102 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(self.store.associations()[0]['aggregate_attempts'],2)
         self.store.update('LAP-9',session_id='fresh'); j.get_issue=lambda key:{'fields':{}}
         j.sync_attribution(self.store); self.assertEqual(len(j.writes),2)
+
+    def test_fresh_launch_title_success_and_failures_are_cosmetic(self):
+        import launch
+        from unittest.mock import patch
+        server=serve(FakeTitleDaemon)
+        port=server.server_address[1]
+        real_request=launch.DaemonClient.request
+        cases=[('success',None),('http','daemon_rejected'),('invalid_json','invalid_response'),
+               ('nonobject','invalid_response'),('mismatch','invalid_response'),
+               ('nooverride','invalid_response'),('missingoverride','invalid_response'),
+               ('transport','transport_error'),('timeout','timeout'),('unexpected','unexpected_error')]
+        try:
+            for index,(mode,category) in enumerate(cases):
+                with self.subTest(mode=mode):
+                    key='LAP-%d'%(200+index)
+                    FakeTitleDaemon.mode=mode; FakeTitleDaemon.calls=[]
+                    self.store.claim(key,self.tmp.name,self.tmp.name)
+                    process=type('P',(),{'returncode':0,'stdout':'session_id=actual-%d port=%d'%(index,port),'stderr':''})()
+                    title_attempts=[]
+                    def request(client,method,path,payload=None):
+                        if path=='/title':
+                            title_attempts.append((method,path,payload))
+                            # Read through a separate connection to prove registration is committed.
+                            durable=StateStore(self.tmp.name)
+                            try:
+                                row=durable.get(key)
+                                self.assertEqual(row['stage'],'running')
+                                self.assertEqual(row['session_id'],'actual-%d'%index)
+                                self.assertEqual(durable.events(key)[-1]['event'],'worker_started')
+                            finally: durable.close()
+                            errors={'transport':ConnectionResetError,'timeout':TimeoutError,'unexpected':RuntimeError}
+                            if mode in errors: raise errors[mode](FakeTitleDaemon.secret+' '+('x'*1000))
+                        return real_request(client,method,path,payload)
+                    with patch.object(launch.subprocess,'run',return_value=process) as spawn, \
+                         patch.object(launch,'_credential',return_value=FakeTitleDaemon.secret), \
+                         patch.object(launch.DaemonClient,'request',request):
+                        sid,daemon=launch.launch(self.tmp.name,'quick-delivery',key,self.store,key)
+                        spawn.assert_called_once()
+                    self.assertEqual(title_attempts,[('POST','/title',{'title':key})])
+                    if mode not in ('transport','timeout','unexpected'):
+                        self.assertEqual(FakeTitleDaemon.calls,[('/title',{'title':key},'Bearer '+FakeTitleDaemon.secret)])
+                    row=self.store.get(key)
+                    self.assertEqual((sid,row['session_id'],row['stage']),('actual-%d'%index,'actual-%d'%index,'running'))
+                    self.assertIsNone(row['pending_operation']); self.assertEqual(row['launch_attempts'],0)
+                    self.assertEqual(self.store.associations(key)[0]['session_id'],sid)
+                    event=self.store.events(key)[-1]
+                    self.assertEqual(event['event'],'worker_title_set' if category is None else 'worker_title_failed')
+                    self.assertEqual(event['detail'],category)
+                    self.assertLess(len(event['detail'] or ''),80)
+                    self.assertNotIn(FakeTitleDaemon.secret,json.dumps(self.store.events(key)))
+                    self.store.update(key,stage='done')
+        finally: server.shutdown(); server.server_close()
+
+    def test_title_diagnostic_write_failure_never_fails_launch(self):
+        import launch
+        from unittest.mock import patch
+        for error in (None,RuntimeError('private-title-token')):
+            with self.subTest(title_error=error):
+                key='LAP-220' if error is None else 'LAP-221'
+                self.store.claim(key,self.tmp.name,self.tmp.name)
+                process=type('P',(),{'returncode':0,'stdout':'session_id=actual port=1234','stderr':''})()
+                with patch.object(launch.subprocess,'run',return_value=process) as spawn, \
+                     patch.object(launch,'_credential',return_value='private-title-token'), \
+                     patch.object(launch.DaemonClient,'health',return_value={}), \
+                     patch.object(launch.DaemonClient,'set_title',side_effect=error) as title, \
+                     patch.object(self.store,'journal',side_effect=OSError('diagnostic disk failure')) as journal:
+                    sid,daemon=launch.launch(self.tmp.name,'quick-delivery',key,self.store,key)
+                    spawn.assert_called_once(); title.assert_called_once_with(key); journal.assert_called_once()
+                self.assertEqual((sid,self.store.get(key)['stage']),('actual','running'))
+                self.assertEqual(self.store.get(key)['session_id'],'actual')
+                self.assertEqual(self.store.events(key)[-1]['event'],'worker_started')
+                self.store.update(key,stage='done')
+
+    def test_fresh_recovery_launch_sets_exact_title(self):
+        import launch
+        from unittest.mock import patch
+        server=serve(FakeTitleDaemon)
+        process=type('P',(),{'returncode':0,'stdout':'session_id=fresh port=%d'%server.server_address[1],'stderr':''})()
+        try:
+            for mode,key in (('success','LAP-222'),('http','LAP-223')):
+                with self.subTest(mode=mode):
+                    self.store.claim(key,self.tmp.name,self.tmp.name)
+                    self.store.update(key,stage='recovery_pending',session_id='predecessor',
+                                      resume_intent={'prompt':'Resume '+key,'reply_id':'reply'})
+                    FakeTitleDaemon.mode=mode; FakeTitleDaemon.calls=[]
+                    with patch.object(launch.subprocess,'run',return_value=process) as spawn, \
+                         patch.object(launch,'_credential',return_value=FakeTitleDaemon.secret), \
+                         patch.object(dispatcher,'_recover_or_reconcile') as recover:
+                        result=dispatcher._resume_fresh(object(),self.store,self.store.get(key),self.config(),self.tmp.name,'polytoken','quick-delivery','continue failed')
+                        self.assertEqual(result,'resumed'); spawn.assert_called_once(); recover.assert_not_called()
+                    self.assertEqual(FakeTitleDaemon.calls,[('/title',{'title':key},'Bearer '+FakeTitleDaemon.secret)])
+                    row=self.store.get(key); self.assertEqual((row['session_id'],row['stage']),('fresh','running'))
+                    self.assertEqual(row['consumed_reply_id'],'reply')
+                    self.assertEqual(self.store.associations(key)[-1]['predecessor'],'predecessor')
+                    self.store.update(key,stage='done')
+        finally: server.shutdown(); server.server_close()
 
     def test_spawn_identity_survives_health_failure(self):
         import launch
@@ -1261,16 +1379,19 @@ class DispatcherTests(unittest.TestCase):
         def fresh_fail(*a,**k): raise AssertionError("should continue retained session")
         dispatcher.launch=fresh_fail
         old_client=dispatcher.DaemonClient; old_cred=__import__('launch')._credential; old_pending=dispatcher.pending_interrogative
+        title_calls=[]
         class D:
             def __init__(self,*a,**k): pass
             def health(self): return {}
             def state(self): return {}
             def prompt(self,text): return {}
+            def set_title(self,title): title_calls.append(title)
         dispatcher.DaemonClient=D; __import__('launch')._credential=lambda *a,**k:"t"; dispatcher.pending_interrogative=lambda d:None
         try:
             out=resume_candidates(j,self.store,self.config())
             self.assertNotIn(("LAP-88","held"),out)
             self.assertEqual(out,[("LAP-88","resumed")],out)
+            self.assertEqual(title_calls,[])  # Retained sessions keep their current human title.
         finally:
             dispatcher.live_sessions=old_live; dispatcher.resume_via_continue=old_spawn; dispatcher.launch=old_launch
             dispatcher.DaemonClient=old_client; __import__('launch')._credential=old_cred; dispatcher.pending_interrogative=old_pending

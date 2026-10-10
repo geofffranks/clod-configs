@@ -26,6 +26,11 @@ class DaemonClient:
     def health(self): return self.request("GET","/health")
     def state(self): return self.request("GET","/state")
     def prompt(self,text): return self.request("POST","/prompt",{"prompt":text})
+    def set_title(self,title):
+        result=self.request("POST","/title",{"title":title})
+        if not isinstance(result,dict) or result.get("title")!=title or result.get("overridden") is not True:
+            raise ValueError("daemon did not confirm the exact title override")
+        return result
     def events(self,after=None):
         path="/events"+("?after="+urllib.parse.quote(str(after)) if after is not None else "")
         return self.request("GET",path)
@@ -44,6 +49,25 @@ def _credential(session_id,sessions_dir=None):
     with open(path,encoding="utf-8") as f: data=json.load(f)
     return data.get("token") or data.get("bearer_token") or data.get("credential")
 
+def _set_worker_title(daemon,store,key):
+    """Cosmetic only: neither title nor diagnostic failures may trigger recovery."""
+    try:
+        try:
+            daemon.set_title(key)
+        except Exception as exc:
+            # Fixed categories exclude HTTP bodies, tokens and arbitrary exception text.
+            if isinstance(exc,LaunchError): detail="daemon_rejected"
+            elif isinstance(exc,TimeoutError): detail="timeout"
+            elif isinstance(exc,(OSError,http.client.HTTPException)): detail="transport_error"
+            elif isinstance(exc,(ValueError,UnicodeError)): detail="invalid_response"
+            else: detail="unexpected_error"
+            store.journal(key,"worker_title_failed",detail)
+        else:
+            store.journal(key,"worker_title_set")
+    except Exception:
+        # The worker is already durably registered; diagnostics are best-effort too.
+        pass
+
 def launch(repo,facet,prompt,store,key,polytoken="polytoken",sessions_dir=None,timeout=3600):
     store.update(key,stage="launching",pending_operation={"stage":"launching","operation":"spawn","payload":{"repo":repo,"facet":facet,"prompt":prompt}},launch_intent={"repo":repo,"facet":facet,"prompt":prompt,"dispatch_started":False},event="launch_intent_persisted")
     if store.get_control("pause","false")=="true" or store.get_control("stop","false")=="true": raise LaunchError("dispatcher paused/stopped before worker spawn")
@@ -58,6 +82,7 @@ def launch(repo,facet,prompt,store,key,polytoken="polytoken",sessions_dir=None,t
     daemon=DaemonClient(port,token)
     daemon.health()
     store.update(key,stage="running",session_id=sid,daemon_port=port,launch_time=__import__("time").time(),pending_operation=None,event="worker_started",detail="port=%d"%port)
+    _set_worker_title(daemon,store,key)
     return sid,daemon
 
 def resume_via_continue(session_id,polytoken="polytoken",timeout=3600):
