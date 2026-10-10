@@ -92,11 +92,31 @@ def is_live_session(session):
     return state not in ("terminated","dead","stopped","exited","historical","finished","crashed")
 
 def live_sessions(polytoken="polytoken",timeout=15):
+    """Parse the polytoken sessions table (`sessions --all`) into normalized rows.
+
+    Two renderings exist: the `--all` table (SESSION_ID STATUS TITLE
+    LAST_ACTIVITY PROJECT_PATH) and a live table (SESSION_ID PORT PID
+    STARTED_AT PROJECT_PATH). Both tail with an ISO timestamp followed by the
+    project path; status is `historical` where the table says so, otherwise
+    live/running.
+    """
     p=subprocess.run([polytoken,"sessions","--all"],capture_output=True,text=True,timeout=timeout,check=False)
     if p.returncode: raise LaunchError(p.stderr or "polytoken sessions failed")
-    try: data=json.loads(p.stdout)
-    except ValueError: raise LaunchError("sessions output is not JSON")
-    return data.get("sessions",data) if isinstance(data,dict) else data
+    stamp=re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+    rows=[]
+    for line in (p.stdout or "").splitlines():
+        line=line.strip()
+        if not line or line.startswith("SESSION_ID"): continue
+        stamp_m=stamp.search(line)
+        if not stamp_m: continue
+        first=line.split(None,2)[0] if not line.startswith("[legacy]") else line.split(None,3)[1]
+        sid=first
+        if not sid or not re.match(r"^[0-9a-z]{6}-[0-9a-z]{3,6}$",sid): continue
+        state_text=line[:stamp_m.start()]
+        kind=str(re.search(r"\bhistorical\b",state_text) and "historical" or "running")
+        project_path=line[stamp_m.end():].strip() or None
+        rows.append({"session_id":sid,"termination_state":kind,"project_path":project_path})
+    return rows
 
 def reconcile_session(key,repo,sessions,credential_root=None,launch_intent=None,launch_time=None):
     """Return one exact correlated live session; never adopts a substring match."""

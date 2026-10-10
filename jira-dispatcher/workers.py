@@ -47,7 +47,9 @@ def parse_approved_plan(comments):
         for label in ("Git", "Delivery mode", "Review panel", "Source branch", "Effort branch/workspace", "Depends on"):
             match=re.search(r"^%s:\s*(.*)$"%re.escape(label),section,re.M|re.I)
             if match: values[label]=match.group(1).strip()
-        if values.get("Delivery mode","").lower()!="queued": return None
+        mode=(values.get("Delivery mode","") or "").strip().lower()
+        if not re.match(r"^(?:queued|interactive)\b",mode): return None  # newest-plan-wins: a non-queued newest plan supersedes older queued text
+        if not mode.startswith("queued"): return None  # interactive (or a rewritten route) never enqueues
         if not values.get("Git") or not values.get("Review panel"): return None
         return {"comment":comment,"excerpt":section.strip(),"values":values}
     return None
