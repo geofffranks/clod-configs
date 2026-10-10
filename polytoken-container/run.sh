@@ -93,7 +93,7 @@ CODEX_MOUNT=0
 # named volumes persist across --rm launches. Replace the repo list with:
 #   POLY_NODE_MODULES_MASK="repoA repoB/sub"
 # (repo paths relative to ~/workspace, up to two components deep).
-POLY_NODE_MODULES_MASK_DEFAULT="track-data-collection track-data-collection/mobile appium-mcp"
+POLY_NODE_MODULES_MASK_DEFAULT="lappie lappie/mobile appium-mcp"
 for rel in ${POLY_NODE_MODULES_MASK:-$POLY_NODE_MODULES_MASK_DEFAULT}; do
   vol="polytoken-nm-$(printf '%s' "$rel" | tr '/' '-')"
   MOUNTS+=(-v "$vol:$CONTAINER_WS/$rel/node_modules")
