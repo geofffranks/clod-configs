@@ -19,7 +19,9 @@ if [[ ${POLY_SPAWN_HEADLESS:-0} == 1 ]]; then
   clean_env=(env -i "HOME=$home" "PATH=/usr/bin:/bin:/usr/sbin:/sbin" "XDG_CONFIG_HOME=$config_root" "XDG_DATA_HOME=$data_root" "BRIDGE_POLYTOKEN_BIN=$binary" "BRIDGE_SESSIONS_DIR=$sessions" "BRIDGE_WORKSPACE_ROOT=$roots" "BRIDGE_POLYTOKEN_CONFIG_DIR=$config_dir" "POLYTOKEN_CONFIG_DIRS=$config_allowlist" "POLYTOKEN_BRIDGE_ENABLE=1")
   [[ -n ${BRIDGE_CONNECTOR_CONFIG:-} ]] && clean_env+=("BRIDGE_CONNECTOR_CONFIG=$BRIDGE_CONNECTOR_CONFIG")
   cd -- "$caller_cwd" || exit
-  exec "${clean_env[@]}" "$binary" new --sessions-dir "$sessions" --no-attach "${caller_args[@]}"
+  # The bridge uses a data root; the CLI takes its unversioned registry child.
+  # Polytoken writes ready metadata beside that child in sessions-v1.
+  exec "${clean_env[@]}" "$binary" new --sessions-dir "${sessions%/}/sessions" --no-attach "${caller_args[@]}"
 fi
 if ! shopt -q login_shell; then
   exec bash --login --noprofile "$0" "${caller_args[@]}"

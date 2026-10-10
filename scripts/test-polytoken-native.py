@@ -3,7 +3,7 @@
 import json, os, pathlib, subprocess, tempfile
 launcher=pathlib.Path(__file__).resolve().with_name('polytoken-native.sh')
 with tempfile.TemporaryDirectory(prefix='native launcher ') as td:
- root=pathlib.Path(td); home=root/'home'; home.mkdir(); project=root/'project with spaces'; project.mkdir()
+ root=pathlib.Path(td).resolve(); home=root/'home'; home.mkdir(); project=root/'project with spaces'; project.mkdir()
  bin_dir=root/'bin'; bin_dir.mkdir(); binary=bin_dir/'polytoken'; capture=root/'capture.json'
  binary.write_text('#!'+os.sys.executable+'\nimport json,os,sys\nprint(json.dumps({"argv":sys.argv[1:],"cwd":os.getcwd(),"secret":os.environ.get("DISCORD_BOT_TOKEN"),"ambient":os.environ.get("POLYTOKEN_SESSION_ID"),"bin":os.environ.get("BRIDGE_POLYTOKEN_BIN"),"sessions":os.environ.get("BRIDGE_SESSIONS_DIR"),"config":os.environ.get("BRIDGE_CONNECTOR_CONFIG"),"xdg":os.environ.get("XDG_CONFIG_HOME"),"data":os.environ.get("XDG_DATA_HOME")}))\n')
  binary.chmod(0o755)
@@ -13,9 +13,30 @@ with tempfile.TemporaryDirectory(prefix='native launcher ') as td:
  result=subprocess.run([str(launcher),'--prompt','spaces $literal;',''],cwd=project,env=env,text=True,capture_output=True)
  assert result.returncode==0,result.stderr
  data=json.loads(result.stdout)
- assert data=={'argv':['new','--sessions-dir',str(root/'sessions'),'--no-attach','--prompt','spaces $literal;',''],'cwd':str(project),'secret':None,'ambient':None,'bin':str(binary),'sessions':str(root/'sessions'),'config':None,'xdg':str(home/'.config'),'data':str(home/'.local/share')},data
+ assert data=={'argv':['new','--sessions-dir',str(root/'sessions'/'sessions'),'--no-attach','--prompt','spaces $literal;',''],'cwd':str(project),'secret':None,'ambient':None,'bin':str(binary),'sessions':str(root/'sessions'),'config':None,'xdg':str(home/'.config'),'data':str(home/'.local/share')},data
  assert result.stderr==''
  assert not (home/'profile-loaded').exists() and not (home/'rc-loaded').exists()
+ # Default-shaped and custom bridge bases map to sibling sessions-v1 metadata.
+ # The environment keeps the bridge base, not the CLI registry child.
+ for base in (home/'.local/share/polytoken', root/'custom data root'):
+  for selection in ('bridge', 'fallback', 'empty-bridge', 'precedence'):
+   selected=dict(env)
+   selected.pop('BRIDGE_SESSIONS_DIR',None)
+   selected.pop('POLYTOKEN_SESSIONS_DIR',None)
+   if selection in ('bridge','precedence'):
+    selected['BRIDGE_SESSIONS_DIR']=str(base)+'/'
+   if selection in ('fallback','empty-bridge'):
+    selected['POLYTOKEN_SESSIONS_DIR']=str(base)
+   if selection=='empty-bridge': selected['BRIDGE_SESSIONS_DIR']=''
+   if selection=='precedence': selected['POLYTOKEN_SESSIONS_DIR']=str(root/'unused')
+   result=subprocess.run([str(launcher)],cwd=project,env=selected,text=True,capture_output=True)
+   assert result.returncode==0,result.stderr
+   data=json.loads(result.stdout)
+   registry=pathlib.Path(data['argv'][2])
+   assert data['argv']==['new','--sessions-dir',str(base/'sessions'),'--no-attach'],data
+   assert registry.with_name(registry.name+'-v1')==base/'sessions-v1'
+   assert pathlib.Path(data['sessions'])==base,data
+   assert data['cwd']==str(project) and data['secret'] is None and data['ambient'] is None
  # Missing trusted roots fails closed before launching anything.
  bad=dict(env); bad.pop('BRIDGE_SESSIONS_DIR'); bad.pop('POLYTOKEN_SESSIONS_DIR',None)
  result=subprocess.run([str(launcher)],cwd=project,env=bad,text=True,capture_output=True)
