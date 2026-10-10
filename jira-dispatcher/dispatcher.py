@@ -749,10 +749,17 @@ def main(argv=None):
             print("Preflight: "+("FAIL" if errors else "local checks passed; gateway/Jira and per-type sampling pending/verified as listed above"))
             return bool(errors)
         if args.command=="run":
-            while True:
+            try:
                 run_once(args,config,store)
+            except ConfigError as exc:
+                # An inactive config is an expected, operator-controlled state —
+                # report it cleanly instead of crashing with a traceback.
+                print("Dispatcher inactive: %s"%exc)
+                return 0
+            while True:
                 if args.once or store.get_control("stop","false")=="true": break
                 time.sleep(config["launch_poll_interval_seconds"])
+                run_once(args,config,store)
             return 0
     finally: store.close()
     return 0
